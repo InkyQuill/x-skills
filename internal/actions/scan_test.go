@@ -65,3 +65,65 @@ func TestScanActiveStatusesAndBrokenReasons(t *testing.T) {
 		t.Fatal("missing broken reason")
 	}
 }
+
+func TestScanActiveReportsBrokenSymlinkTargetNotDirectory(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	target := filepath.Join(home, "not-a-dir")
+	if err := os.WriteFile(target, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := cfg.ActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "file-target")); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := ScanActive(cfg, ScanFilter{Scope: "project", Target: "agents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("len(skills) = %d, want 1", len(skills))
+	}
+	if skills[0].Status != StatusBroken {
+		t.Fatalf("Status = %q, want broken", skills[0].Status)
+	}
+	if skills[0].Reason != "target is not a directory" {
+		t.Fatalf("Reason = %q", skills[0].Reason)
+	}
+}
+
+func TestScanActiveReportsBrokenSymlinkTargetMissingSkillMD(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	target := filepath.Join(home, "missing-skill-md")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := cfg.ActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "missing-skill-md")); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := ScanActive(cfg, ScanFilter{Scope: "project", Target: "agents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("len(skills) = %d, want 1", len(skills))
+	}
+	if skills[0].Status != StatusBroken {
+		t.Fatalf("Status = %q, want broken", skills[0].Status)
+	}
+	if skills[0].Reason != "target is not a skill directory" {
+		t.Fatalf("Reason = %q", skills[0].Reason)
+	}
+}

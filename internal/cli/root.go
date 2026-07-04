@@ -6,6 +6,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type options struct {
@@ -16,10 +17,7 @@ type options struct {
 	globalClaudeRoot string
 	globalCodexRoot  string
 
-	defaultArchiveRoot      string
-	defaultGlobalAgentsRoot string
-	defaultGlobalClaudeRoot string
-	defaultGlobalCodexRoot  string
+	flags *pflag.FlagSet
 }
 
 func Execute(argv []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -43,16 +41,12 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 	cfg := config.Default(projectRoot, homeDir)
 	opts := options{
-		projectRoot:             cfg.ProjectRoot,
-		homeDir:                 cfg.HomeDir,
-		archiveRoot:             cfg.ArchiveRoot,
-		globalAgentsRoot:        cfg.GlobalAgentsRoot,
-		globalClaudeRoot:        cfg.GlobalClaudeRoot,
-		globalCodexRoot:         cfg.GlobalCodexRoot,
-		defaultArchiveRoot:      cfg.ArchiveRoot,
-		defaultGlobalAgentsRoot: cfg.GlobalAgentsRoot,
-		defaultGlobalClaudeRoot: cfg.GlobalClaudeRoot,
-		defaultGlobalCodexRoot:  cfg.GlobalCodexRoot,
+		projectRoot:      cfg.ProjectRoot,
+		homeDir:          cfg.HomeDir,
+		archiveRoot:      cfg.ArchiveRoot,
+		globalAgentsRoot: cfg.GlobalAgentsRoot,
+		globalClaudeRoot: cfg.GlobalClaudeRoot,
+		globalCodexRoot:  cfg.GlobalCodexRoot,
 	}
 
 	root := &cobra.Command{
@@ -65,6 +59,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 	root.SetErr(stderr)
 
 	flags := root.PersistentFlags()
+	opts.flags = flags
 	flags.StringVar(&opts.projectRoot, "project-root", opts.projectRoot, "project root")
 	flags.StringVar(&opts.archiveRoot, "archive-root", opts.archiveRoot, "archive root")
 	flags.StringVar(&opts.globalAgentsRoot, "global-root", opts.globalAgentsRoot, "global agents skills root")
@@ -82,16 +77,16 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 func (o options) config() config.Config {
 	cfg := config.Default(o.projectRoot, o.homeDir)
-	if o.archiveRoot != o.defaultArchiveRoot {
+	if o.flags.Changed("archive-root") {
 		cfg.ArchiveRoot = o.archiveRoot
 	}
-	if o.globalAgentsRoot != o.defaultGlobalAgentsRoot {
+	if o.flags.Changed("global-root") {
 		cfg.GlobalAgentsRoot = o.globalAgentsRoot
 	}
-	if o.globalClaudeRoot != o.defaultGlobalClaudeRoot {
+	if o.flags.Changed("claude-global-root") {
 		cfg.GlobalClaudeRoot = o.globalClaudeRoot
 	}
-	if o.globalCodexRoot != o.defaultGlobalCodexRoot {
+	if o.flags.Changed("codex-global-root") {
 		cfg.GlobalCodexRoot = o.globalCodexRoot
 	}
 	return config.Config{

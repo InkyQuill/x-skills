@@ -22,7 +22,11 @@ func newListCommand(rootOptions *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List active skills",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opts.validate(); err != nil {
+				return err
+			}
 			filter := opts.scanFilter()
 			skills, err := actions.ScanActive(rootOptions.config(), filter)
 			if err != nil {
@@ -38,6 +42,18 @@ func newListCommand(rootOptions *options) *cobra.Command {
 	cmd.Flags().StringVar(&opts.target, "target", "", "filter by target: agents, claude, or codex")
 
 	return cmd
+}
+
+func (o listOptions) validate() error {
+	if o.target == "" {
+		return nil
+	}
+	for _, target := range config.Targets {
+		if o.target == target {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown target %q", o.target)
 }
 
 func (o listOptions) scanFilter() actions.ScanFilter {

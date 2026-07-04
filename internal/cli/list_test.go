@@ -37,3 +37,30 @@ func TestListShowsStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestListRejectsUnexpectedArgs(t *testing.T) {
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	err := Execute([]string{"list", "unexpected"}, strings.NewReader(""), &out, &stderr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+}
+
+func TestListRejectsUnknownTarget(t *testing.T) {
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	err := Execute([]string{"list", "--target", "bogus"}, strings.NewReader(""), &out, &stderr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unknown target") {
+		t.Fatalf("error = %q, want unknown target", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+}

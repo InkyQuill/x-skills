@@ -1,13 +1,21 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
 
 	"github.com/InkyQuill/x-skills/internal/cli"
 )
 
 func main() {
-	if err := cli.Execute(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		os.Exit(2)
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if err := cli.Execute(args, stdin, stdout, stderr); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
+	return 0
 }

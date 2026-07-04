@@ -72,7 +72,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.applyWizard()
 			return m, nil
+		case "ctrl+c":
+			return m, tea.Quit
+		case "p":
+			m.setWizardScope(config.ScopeProject)
+			return m, nil
+		case "g":
+			m.setWizardScope(config.ScopeGlobal)
+			return m, nil
+		case "1":
+			m.setWizardTarget(config.TargetAgents)
+			return m, nil
+		case "2":
+			m.setWizardTarget(config.TargetClaude)
+			return m, nil
+		case "3":
+			m.setWizardTarget(config.TargetCodex)
+			return m, nil
 		}
+		return m, nil
 	}
 
 	switch msg.String() {
@@ -244,6 +262,8 @@ func (m *Model) applyWizard() {
 	results, err := applyWizard(m.cfg, m.wizard)
 	if err != nil {
 		m.status = fmt.Sprintf("failed: %v", err)
+		m.wizard = Wizard{}
+		m.reload()
 		return
 	}
 	m.status = fmt.Sprintf("applied %d change(s)", len(results))

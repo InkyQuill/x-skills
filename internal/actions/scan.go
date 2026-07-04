@@ -39,11 +39,11 @@ func ScanActive(cfg config.Config, filter ScanFilter) ([]ActiveSkill, error) {
 
 	var found []ActiveSkill
 	for _, root := range activeRoots {
-		skills, err := scanRoot(cfg, root)
+		activeSkills, err := scanRoot(cfg, root)
 		if err != nil {
 			return nil, err
 		}
-		found = append(found, skills...)
+		found = append(found, activeSkills...)
 	}
 
 	return found, nil
@@ -134,7 +134,11 @@ func classifySymlink(cfg config.Config, activePath, name string) symlinkClassifi
 	}
 
 	status := StatusUnmanaged
-	if samePath(resolvedPath, repo.SkillPath(cfg, name)) {
+	repoPath := repo.SkillPath(cfg, name)
+	if resolvedRepoPath, err := filepath.EvalSymlinks(repoPath); err == nil {
+		repoPath = resolvedRepoPath
+	}
+	if samePath(resolvedPath, repoPath) {
 		status = StatusManaged
 	}
 

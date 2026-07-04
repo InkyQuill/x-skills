@@ -87,6 +87,9 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 func (o options) config() config.Config {
 	cfg := config.Default(o.projectRoot, o.homeDir)
+	if o.flags == nil {
+		return cfg
+	}
 	if o.flags.Changed("archive-root") {
 		cfg.ArchiveRoot = o.archiveRoot
 	}
@@ -99,12 +102,5 @@ func (o options) config() config.Config {
 	if o.flags.Changed("codex-global-root") {
 		cfg.GlobalCodexRoot = o.globalCodexRoot
 	}
-	return config.Config{
-		ProjectRoot:      cfg.ProjectRoot,
-		HomeDir:          cfg.HomeDir,
-		ArchiveRoot:      cfg.ArchiveRoot,
-		GlobalAgentsRoot: cfg.GlobalAgentsRoot,
-		GlobalClaudeRoot: cfg.GlobalClaudeRoot,
-		GlobalCodexRoot:  cfg.GlobalCodexRoot,
-	}
+	return cfg
 }

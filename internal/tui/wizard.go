@@ -53,6 +53,22 @@ func (m *Model) openWizard(action WizardAction) {
 	m.wizard = wizard
 }
 
+func (m *Model) setWizardScope(scope string) {
+	if !m.wizard.Open || m.wizard.Action != ActionInstall {
+		return
+	}
+	m.wizard.DestinationScope = scope
+	m.wizard.Preview = buildPreview(m.cfg, m.wizard)
+}
+
+func (m *Model) setWizardTarget(target string) {
+	if !m.wizard.Open || m.wizard.Action != ActionInstall {
+		return
+	}
+	m.wizard.DestinationTarget = target
+	m.wizard.Preview = buildPreview(m.cfg, m.wizard)
+}
+
 func (m Model) selectedRepoNames() []string {
 	selected := map[string]bool{}
 	for _, id := range m.selectedIDsForView() {
@@ -105,7 +121,7 @@ func buildPreview(cfg config.Config, wizard Wizard) string {
 		if len(wizard.RepoNames) == 0 {
 			return "No repo skills selected."
 		}
-		return fmt.Sprintf("Install %s to %s\n%s", strings.Join(wizard.RepoNames, ", "), destination, cfg.ActiveRoot(wizard.DestinationScope, wizard.DestinationTarget))
+		return fmt.Sprintf("Install %s to %s\n%s\np/g scope  1/2/3 target", strings.Join(wizard.RepoNames, ", "), destination, cfg.ActiveRoot(wizard.DestinationScope, wizard.DestinationTarget))
 	case ActionMigrate:
 		if len(wizard.Active) == 0 {
 			return "No active skills selected."

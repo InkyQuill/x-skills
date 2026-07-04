@@ -45,6 +45,9 @@ func newListCommand(rootOptions *options) *cobra.Command {
 }
 
 func (o listOptions) validate() error {
+	if o.project && o.global {
+		return fmt.Errorf("choose at most one of --project or --global")
+	}
 	if o.target == "" {
 		return nil
 	}

@@ -69,19 +69,19 @@ func LocationLabel(scope, target string) string {
 }
 
 func validScope(scope string) bool {
-	switch scope {
-	case ScopeProject, ScopeGlobal:
-		return true
-	default:
-		return false
+	for _, candidate := range Scopes {
+		if candidate == scope {
+			return true
+		}
 	}
+	return false
 }
 
 func validTarget(target string) bool {
-	switch target {
-	case TargetAgents, TargetClaude, TargetCodex:
-		return true
-	default:
-		return false
+	for _, candidate := range Targets {
+		if candidate == target {
+			return true
+		}
 	}
+	return false
 }

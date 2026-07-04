@@ -62,6 +62,36 @@ func TestWizardPreviewIncludesDestination(t *testing.T) {
 	if !strings.Contains(m.wizard.Preview, "./.agents") {
 		t.Fatalf("preview missing default destination: %q", m.wizard.Preview)
 	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	m = updated.(Model)
+	if !strings.Contains(m.wizard.Preview, "~/.codex") {
+		t.Fatalf("preview missing updated destination: %q", m.wizard.Preview)
+	}
+}
+
+func TestWizardConsumesBackgroundKeys(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
+
+	m := New(cfg)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = updated.(Model)
+	if !m.wizard.Open {
+		t.Fatal("wizard is not open")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = updated.(Model)
+	if m.view != ViewRepo {
+		t.Fatalf("view = %q, want repo while wizard is open", m.view)
+	}
 }
 
 func TestActiveGroupsMergeByFingerprint(t *testing.T) {

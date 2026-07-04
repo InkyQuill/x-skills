@@ -170,7 +170,7 @@ func fixBrokenSymlink(issue Issue) (FixResult, error) {
 			return FixResult{}, fmt.Errorf("repo target is no longer a skill directory: %s", issue.RepoTarget)
 		}
 		if err := replaceSymlink(issue.Path, issue.RepoTarget); err != nil {
-			return FixResult{}, fmt.Errorf("relink %q to %q: %w", issue.Name, issue.Path, err)
+			return FixResult{}, fmt.Errorf("relink %q to %q: %w", issue.Name, issue.RepoTarget, err)
 		}
 		return FixResult{Name: issue.Name, Action: "relinked", Path: issue.Path}, nil
 	}

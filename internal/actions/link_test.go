@@ -44,6 +44,20 @@ func TestLinkFailsWhenDestinationExists(t *testing.T) {
 	}
 }
 
+func TestLinkFailsWhenRepoSkillMissing(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+
+	_, err := Link(cfg, LinkRequest{Name: "missing", Scope: "project", Target: "codex"})
+	if err == nil {
+		t.Fatal("expected repo skill not found error")
+	}
+	if !strings.Contains(err.Error(), "repo skill") {
+		t.Fatalf("error = %q, want repo skill", err)
+	}
+}
+
 func TestLinkRejectsPathLikeSkillNames(t *testing.T) {
 	for _, name := range []string{"", "../outside", "/absolute", ".", "..", "nested/name", `nested\name`} {
 		t.Run(name, func(t *testing.T) {

@@ -79,5 +79,5 @@ func hashEntry(hash hashWriter, root string, entry entry) error {
 }
 
 func writeHash(hash hashWriter, kind, path, value string) {
-	fmt.Fprintf(hash, "%s\x00%s\x00%d\x00%s\x00", kind, path, len(value), value)
+	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00%s\x00", kind, path, len(value), value)
 }

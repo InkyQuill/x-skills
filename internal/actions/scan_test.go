@@ -127,3 +127,42 @@ func TestScanActiveReportsBrokenSymlinkTargetMissingSkillMD(t *testing.T) {
 		t.Fatalf("Reason = %q", skills[0].Reason)
 	}
 }
+
+func TestScanActiveManagedThroughSymlinkedArchiveRoot(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+
+	realArchive := filepath.Join(home, "archive-real")
+	cfg.ArchiveRoot = filepath.Join(home, "archive-link")
+	if err := os.MkdirAll(realArchive, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realArchive, cfg.ArchiveRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	source := makeSkill(t, cfg.ArchiveSkillsRoot(), "managed-agents", "Managed.")
+	resolvedSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := cfg.ActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(resolvedSource, filepath.Join(root, "managed-agents")); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := ScanActive(cfg, ScanFilter{Scope: "project", Target: "agents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("len(skills) = %d, want 1", len(skills))
+	}
+	if skills[0].Status != StatusManaged {
+		t.Fatalf("Status = %q, want managed", skills[0].Status)
+	}
+}

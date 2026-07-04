@@ -64,3 +64,15 @@ func TestListRejectsUnknownTarget(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", out.String())
 	}
 }
+
+func TestListRejectsProjectAndGlobalTogether(t *testing.T) {
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	err := Execute([]string{"list", "--project", "--global"}, strings.NewReader(""), &out, &stderr)
+	if err == nil {
+		t.Fatal("expected scope conflict error")
+	}
+	if !strings.Contains(err.Error(), "choose at most one") {
+		t.Fatalf("error = %q, want scope conflict", err)
+	}
+}

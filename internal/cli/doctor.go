@@ -87,13 +87,13 @@ func (o doctorOptions) filter() doctor.Filter {
 
 func writeDoctorIssues(out io.Writer, issues []doctor.Issue) {
 	if len(issues) == 0 {
-		fmt.Fprintln(out, "No issues found.")
+		_, _ = fmt.Fprintln(out, "No issues found.")
 		return
 	}
 
-	fmt.Fprintln(out, "Issues:")
+	_, _ = fmt.Fprintln(out, "Issues:")
 	for _, issue := range issues {
-		fmt.Fprintf(
+		_, _ = fmt.Fprintf(
 			out,
 			"%s  %s  %s  %s\n  path: %s\n  reason: %s\n",
 			issue.Location,
@@ -108,12 +108,12 @@ func writeDoctorIssues(out io.Writer, issues []doctor.Issue) {
 
 func writeDoctorFixResults(out io.Writer, results []doctor.FixResult) {
 	if len(results) == 0 {
-		fmt.Fprintln(out, "No fixes applied.")
+		_, _ = fmt.Fprintln(out, "No fixes applied.")
 		return
 	}
 
-	fmt.Fprintln(out, "Fixes:")
+	_, _ = fmt.Fprintln(out, "Fixes:")
 	for _, result := range results {
-		fmt.Fprintf(out, "%s  %s  %s\n", result.Action, result.Name, result.Path)
+		_, _ = fmt.Fprintf(out, "%s  %s  %s\n", result.Action, result.Name, result.Path)
 	}
 }

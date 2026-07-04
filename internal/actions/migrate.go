@@ -1,10 +1,12 @@
 package actions
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"syscall"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/repo"
@@ -77,6 +79,9 @@ func migrateActiveDirectory(active, archived string, linkBack bool) error {
 		return fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
 	}
 	if err := os.Rename(active, archived); err != nil {
+		if errors.Is(err, syscall.EXDEV) {
+			return fmt.Errorf("move %q to %q: active and archive roots are on different filesystems", active, archived)
+		}
 		return fmt.Errorf("move %q to %q: %w", active, archived, err)
 	}
 	if !linkBack {

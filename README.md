@@ -18,6 +18,26 @@ curl -fsSL https://raw.githubusercontent.com/InkyQuill/x-skills/main/install.sh 
 The installer checks for `git` and `uv`, then installs the CLI from
 `https://github.com/InkyQuill/x-skills.git` with `uv tool install`.
 
+## Go Rewrite Prototype
+
+This branch also contains an experimental Go rewrite. It is not wired into the
+`uv` one-liner yet; build or run it directly while evaluating the new CLI/TUI:
+
+```bash
+go run ./cmd/x-skills list
+go run ./cmd/x-skills repo
+go run ./cmd/x-skills doctor
+go run ./cmd/x-skills doctor --fix -y
+go run ./cmd/x-skills tui
+```
+
+The Go prototype currently covers cwd-based active scanning, local repo listing,
+`link`, `migrate`, `unlink`, `doctor`, and a Bubble Tea guided manager at
+`x-skills tui`. The TUI has active, repo, and doctor views; active rows are
+merged by directory SHA fingerprint so identical linked copies appear as one
+item while changed copies remain separate. The fingerprint is internal and is
+not shown in the UI.
+
 ## Usage
 
 ```bash

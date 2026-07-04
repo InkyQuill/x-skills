@@ -17,8 +17,9 @@ type LinkRequest struct {
 }
 
 type MutationResult struct {
-	Name string
-	Path string
+	Name   string
+	Path   string
+	Status string
 }
 
 func Link(cfg config.Config, req LinkRequest) (MutationResult, error) {

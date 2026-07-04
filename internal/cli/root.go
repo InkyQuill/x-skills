@@ -16,6 +16,7 @@ type options struct {
 	globalAgentsRoot string
 	globalClaudeRoot string
 	globalCodexRoot  string
+	yes              bool
 
 	flags *pflag.FlagSet
 }
@@ -65,12 +66,19 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 	flags.StringVar(&opts.globalAgentsRoot, "global-root", opts.globalAgentsRoot, "global agents skills root")
 	flags.StringVar(&opts.globalClaudeRoot, "claude-global-root", opts.globalClaudeRoot, "global Claude skills root")
 	flags.StringVar(&opts.globalCodexRoot, "codex-global-root", opts.globalCodexRoot, "global Codex skills root")
+	flags.BoolVarP(&opts.yes, "yes", "y", false, "confirm mutating commands")
 	flags.StringVar(&opts.homeDir, "home", opts.homeDir, "home directory")
 	if err := flags.MarkHidden("home"); err != nil {
 		return nil, err
 	}
 
-	root.AddCommand(newListCommand(&opts), newRepoCommand(&opts), newLinkCommand(&opts))
+	root.AddCommand(
+		newListCommand(&opts),
+		newRepoCommand(&opts),
+		newLinkCommand(&opts),
+		newMigrateCommand(&opts),
+		newUnlinkCommand(&opts),
+	)
 
 	return root, nil
 }

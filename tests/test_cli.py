@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,21 +19,33 @@ def run_cli(
     claude_global_root: Path | None = None,
     codex_global_root: Path | None = None,
     project_root: Path | None = None,
-) -> None:
+    input_text: str = "",
+) -> tuple[int | None, str, str]:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
     argv = [
         "--archive-root",
         str(archive_root or tmp_path / "archive"),
         "--global-root",
-        str(global_root or tmp_path / "global" / "skills"),
+        str(global_root or tmp_path / "global" / ".agents" / "skills"),
         "--claude-global-root",
-        str(claude_global_root or tmp_path / "claude-global" / "skills"),
+        str(claude_global_root or tmp_path / "global" / ".claude" / "skills"),
         "--codex-global-root",
-        str(codex_global_root or tmp_path / "codex-global" / "skills"),
+        str(codex_global_root or tmp_path / "global" / ".codex" / "skills"),
         "--project-root",
         str(project_root or tmp_path / "project"),
         *args,
     ]
-    main(argv)
+    try:
+        main(
+            argv,
+            input_stream=io.StringIO(input_text),
+            output_stream=stdout,
+            error_stream=stderr,
+        )
+    except SystemExit as error:
+        return error.code, stdout.getvalue(), stderr.getvalue()
+    return None, stdout.getvalue(), stderr.getvalue()
 
 
 def make_skill(root: Path, name: str, description: str = "Use when testing.") -> Path:
@@ -43,178 +58,323 @@ def make_skill(root: Path, name: str, description: str = "Use when testing.") ->
     return skill
 
 
-def test_links_archive_skill_into_project(tmp_path: Path) -> None:
+def test_list_shows_active_project_and_global_skills_with_management_status(
+    tmp_path: Path,
+) -> None:
     archive = tmp_path / "archive"
     project = tmp_path / "project"
-    skill = make_skill(archive / "skills", "opentui-react")
+    agents_global = tmp_path / "global" / ".agents" / "skills"
+    managed = make_skill(archive / "skills", "managed-codex", "Managed codex skill.")
+    codex_root = project / ".codex" / "skills"
+    codex_root.mkdir(parents=True)
+    os.symlink(managed, codex_root / "managed-codex")
+    make_skill(project / ".claude" / "skills", "local-claude", "Local claude skill.")
+    agents_global.mkdir(parents=True)
+    os.symlink(tmp_path / "missing-skill", agents_global / "broken-agents")
 
-    run_cli(tmp_path, "link", "opentui-react", archive_root=archive, project_root=project)
-
-    target = project / ".agents" / "skills" / "opentui-react"
-    assert target.is_symlink()
-    assert target.resolve() == skill
-
-
-def test_links_archive_skill_into_global_set_with_g_flag(tmp_path: Path) -> None:
-    archive = tmp_path / "archive"
-    global_root = tmp_path / "global" / "skills"
-    skill = make_skill(archive / "skills", "temporal-js")
-
-    run_cli(tmp_path, "link", "-g", "temporal-js", archive_root=archive, global_root=global_root)
-
-    target = global_root / "temporal-js"
-    assert target.is_symlink()
-    assert target.resolve() == skill
-
-
-def test_links_archive_skill_into_project_codex_target(tmp_path: Path) -> None:
-    archive = tmp_path / "archive"
-    project = tmp_path / "project"
-    skill = make_skill(archive / "skills", "typescript-expert")
-
-    run_cli(
+    code, stdout, stderr = run_cli(
         tmp_path,
-        "link",
+        "list",
+        archive_root=archive,
+        global_root=agents_global,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "PROJECT codex" in stdout
+    assert "managed-codex" in stdout
+    assert "managed" in stdout
+    assert "Managed codex skill." in stdout
+    assert "PROJECT claude" in stdout
+    assert "local-claude" in stdout
+    assert "unmanaged" in stdout
+    assert "GLOBAL agents" in stdout
+    assert "broken-agents" in stdout
+    assert "broken" in stdout
+
+
+def test_repo_lists_archived_skills_with_descriptions_and_usage_filters(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    used = make_skill(archive / "skills", "used-skill", "Already linked.")
+    make_skill(archive / "skills", "unused-skill", "Not linked.")
+    active_root = project / ".agents" / "skills"
+    active_root.mkdir(parents=True)
+    os.symlink(used, active_root / "used-skill")
+
+    code, stdout, _ = run_cli(tmp_path, "repo", archive_root=archive, project_root=project)
+    assert code is None
+    assert "used-skill" in stdout
+    assert "Already linked." in stdout
+    assert "unused-skill" in stdout
+    assert "Not linked." in stdout
+
+    code, stdout, _ = run_cli(
+        tmp_path, "repo", "--used", archive_root=archive, project_root=project
+    )
+    assert code is None
+    assert "used-skill" in stdout
+    assert "unused-skill" not in stdout
+
+    code, stdout, _ = run_cli(
+        tmp_path, "repo", "--unused", archive_root=archive, project_root=project
+    )
+    assert code is None
+    lines = stdout.splitlines()
+    assert not any(line.startswith("used-skill") for line in lines)
+    assert any(line.startswith("unused-skill") for line in lines)
+
+
+def test_yes_and_no_flags_are_mutually_exclusive(tmp_path: Path) -> None:
+    code, _, stderr = run_cli(tmp_path, "-y", "-n", "list")
+
+    assert code == 2
+    assert "not allowed with argument" in stderr
+
+
+def test_migrate_fails_non_interactively_when_active_skill_name_is_ambiguous(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    agents_global = tmp_path / "global" / ".agents" / "skills"
+    make_skill(project / ".codex" / "skills", "svelte-coder")
+    make_skill(agents_global, "svelte-coder")
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "--no-input",
+        "migrate",
+        "svelte-coder",
+        project_root=project,
+        global_root=agents_global,
+    )
+
+    assert code == 2
+    assert 'multiple active skills named "svelte-coder"' in stderr
+    assert "x-skills migrate svelte-coder --target codex --project" in stderr
+    assert "x-skills migrate svelte-coder --target agents --global" in stderr
+
+
+def test_migrate_prompts_for_ambiguous_active_skill_and_confirmation(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    agents_global = tmp_path / "global" / ".agents" / "skills"
+    project_skill = make_skill(project / ".codex" / "skills", "svelte-coder")
+    make_skill(agents_global, "svelte-coder")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "migrate",
+        "svelte-coder",
+        archive_root=archive,
+        project_root=project,
+        global_root=agents_global,
+        input_text="1\ny\n",
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "Select skill to migrate [1-2]:" in stdout
+    assert 'Migrate project codex skill "svelte-coder" into repo? [y/N]:' in stdout
+    archived = archive / "skills" / "svelte-coder"
+    assert archived.is_dir()
+    assert project_skill.is_symlink()
+    assert project_skill.resolve() == archived
+
+
+def test_migrate_explicit_project_skill_with_yes_flag(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    active = make_skill(project / ".codex" / "skills", "next-best-practices")
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "migrate",
+        "next-best-practices",
         "--target",
         "codex",
-        "typescript-expert",
+        "--project",
         archive_root=archive,
         project_root=project,
     )
 
+    assert code is None
+    assert stderr == ""
+    archived = archive / "skills" / "next-best-practices"
+    assert archived.is_dir()
+    assert active.is_symlink()
+    assert active.resolve() == archived
+
+
+def test_link_explicit_project_target(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    skill = make_skill(archive / "skills", "typescript-expert")
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "link",
+        "typescript-expert",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
     target = project / ".codex" / "skills" / "typescript-expert"
     assert target.is_symlink()
     assert target.resolve() == skill
 
 
-def test_links_archive_skill_into_global_claude_target(tmp_path: Path) -> None:
+def test_link_fails_non_interactively_when_destination_is_ambiguous(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
-    claude_global_root = tmp_path / "home" / ".claude" / "skills"
-    skill = make_skill(archive / "skills", "ui-ux-designer")
+    make_skill(archive / "skills", "typescript-expert")
 
-    run_cli(
+    code, _, stderr = run_cli(
         tmp_path,
+        "--no-input",
         "link",
-        "-g",
-        "--target",
-        "claude",
-        "ui-ux-designer",
+        "typescript-expert",
         archive_root=archive,
-        claude_global_root=claude_global_root,
     )
 
-    target = claude_global_root / "ui-ux-designer"
-    assert target.is_symlink()
-    assert target.resolve() == skill
+    assert code == 2
+    assert "choose a destination" in stderr
+    assert "x-skills link typescript-expert --target codex --project" in stderr
 
 
-def test_status_reports_whether_active_skills_are_archived(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_unlink_managed_symlink_with_yes_flag(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
     project = tmp_path / "project"
-    archived = make_skill(archive / "skills", "opentui")
-    active_root = project / ".agents" / "skills"
+    skill = make_skill(archive / "skills", "opentui-react")
+    active_root = project / ".codex" / "skills"
     active_root.mkdir(parents=True)
-    os.symlink(archived, active_root / "opentui")
-    make_skill(active_root, "local-only")
+    target = active_root / "opentui-react"
+    os.symlink(skill, target)
 
-    run_cli(tmp_path, "status", archive_root=archive, project_root=project)
-
-    assert capsys.readouterr().out.splitlines() == [
-        "local-only missing",
-        "opentui archived linked",
-    ]
-
-
-def test_migrate_moves_project_skill_to_archive_and_replaces_it_with_link(
-    tmp_path: Path,
-) -> None:
-    archive = tmp_path / "archive"
-    project = tmp_path / "project"
-    active = make_skill(project / ".codex" / "skills", "next-best-practices")
-
-    run_cli(
+    code, _, stderr = run_cli(
         tmp_path,
-        "migrate",
+        "-y",
+        "unlink",
+        "opentui-react",
         "--target",
         "codex",
-        "next-best-practices",
+        "--project",
         archive_root=archive,
         project_root=project,
     )
 
-    archived = archive / "skills" / "next-best-practices"
-    assert archived.is_dir()
-    assert (archived / "SKILL.md").exists()
-    assert active.is_symlink()
-    assert active.resolve() == archived
-
-
-def test_unlink_global_archives_plain_directory_before_removing(tmp_path: Path) -> None:
-    archive = tmp_path / "archive"
-    global_root = tmp_path / "global" / "skills"
-    plain_skill = make_skill(global_root, "ui-ux-pro-max")
-
-    run_cli(
-        tmp_path, "unlink", "-g", "ui-ux-pro-max", archive_root=archive, global_root=global_root
-    )
-
-    assert not plain_skill.exists()
-    archived = archive / "skills" / "ui-ux-pro-max"
-    assert archived.is_dir()
-    assert (archived / "SKILL.md").exists()
-
-
-def test_unlink_plain_directory_refuses_to_overwrite_archive(tmp_path: Path) -> None:
-    archive = tmp_path / "archive"
-    global_root = tmp_path / "global" / "skills"
-    make_skill(archive / "skills", "ui-ux-pro-max", "Use archived.")
-    active = make_skill(global_root, "ui-ux-pro-max", "Use active.")
-
-    with pytest.raises(SystemExit) as error:
-        run_cli(
-            tmp_path,
-            "unlink",
-            "-g",
-            "ui-ux-pro-max",
-            archive_root=archive,
-            global_root=global_root,
-        )
-
-    assert error.value.code == 2
-    assert active.is_dir()
-    assert (archive / "skills" / "ui-ux-pro-max").is_dir()
-
-
-def test_unlink_symlink_removes_only_link(tmp_path: Path) -> None:
-    archive = tmp_path / "archive"
-    global_root = tmp_path / "global" / "skills"
-    skill = make_skill(archive / "skills", "pixijs")
-    global_root.mkdir(parents=True)
-    os.symlink(skill, global_root / "pixijs")
-
-    run_cli(tmp_path, "unlink", "-g", "pixijs", archive_root=archive, global_root=global_root)
-
-    assert not (global_root / "pixijs").exists()
+    assert code is None
+    assert stderr == ""
+    assert not target.exists()
     assert skill.is_dir()
 
 
-def test_archive_existing_skill_directory(tmp_path: Path) -> None:
-    source = make_skill(tmp_path / "source", "control-cli")
+def test_unlink_unmanaged_directory_with_no_flag_cancels(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    active = make_skill(project / ".codex" / "skills", "local-only")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-n",
+        "unlink",
+        "local-only",
+        "--target",
+        "codex",
+        "--project",
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "cancelled" in stdout
+    assert active.is_dir()
+
+
+def test_repo_remove_requires_yes_in_non_interactive_mode(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    make_skill(archive / "skills", "old-skill")
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "--no-input",
+        "repo",
+        "remove",
+        "old-skill",
+        archive_root=archive,
+    )
+
+    assert code == 2
+    assert "refusing to remove repo skill without confirmation" in stderr
+    assert (archive / "skills" / "old-skill").is_dir()
+
+
+def test_repo_remove_with_yes_flag_removes_archived_skill(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    make_skill(archive / "skills", "old-skill")
+
+    code, _, stderr = run_cli(tmp_path, "-y", "repo", "remove", "old-skill", archive_root=archive)
+
+    assert code is None
+    assert stderr == ""
+    assert not (archive / "skills" / "old-skill").exists()
+
+
+def test_repo_add_url_installs_direct_skill_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "remote-SKILL.md"
+    source.write_text(
+        "---\nname: remote-skill\ndescription: From URL.\n---\n\n# Remote\n",
+        encoding="utf-8",
+    )
     archive = tmp_path / "archive"
 
-    run_cli(tmp_path, "archive", str(source), archive_root=archive)
+    def fake_urlretrieve(url: str, filename: Path) -> tuple[Path, None]:
+        shutil.copy2(source, filename)
+        return filename, None
 
-    assert not source.exists()
-    assert (archive / "skills" / "control-cli" / "SKILL.md").exists()
+    monkeypatch.setattr("x_skills.cli.urllib.request.urlretrieve", fake_urlretrieve)
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "repo",
+        "add-url",
+        "https://example.com/SKILL.md",
+        archive_root=archive,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert (archive / "skills" / "remote-skill" / "SKILL.md").is_file()
 
 
-def test_archive_requires_skill_md(tmp_path: Path) -> None:
-    source = tmp_path / "not-a-skill"
-    source.mkdir()
+def test_repo_add_github_installs_skill_from_repo_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "archive"
 
-    with pytest.raises(SystemExit) as error:
-        run_cli(tmp_path, "archive", str(source))
+    def fake_run(command: list[str], check: bool, stdout: object) -> subprocess.CompletedProcess:
+        checkout = Path(command[-1])
+        make_skill(checkout / "skills", "github-skill", "From GitHub.")
+        return subprocess.CompletedProcess(command, 0)
 
-    assert error.value.code == 2
+    monkeypatch.setattr("x_skills.cli.subprocess.run", fake_run)
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "repo",
+        "add-github",
+        "owner/repo",
+        "skills/github-skill",
+        archive_root=archive,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert (archive / "skills" / "github-skill" / "SKILL.md").is_file()

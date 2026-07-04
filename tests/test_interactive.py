@@ -11,6 +11,7 @@ import pytest
 from x_skills import cli
 from x_skills.interactive import (
     XSkillsInteractive,
+    active_skill_groups,
     clean_broken_skills,
     install_search_result,
     run_bulk_action,
@@ -46,6 +47,85 @@ def make_skill(root: Path, name: str, description: str = "Use when testing.") ->
         encoding="utf-8",
     )
     return skill
+
+
+def test_active_skill_groups_merge_identical_directories_by_fingerprint(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    project_root = args.project_root / ".codex" / "skills"
+    global_root = args.global_root
+    project_skill = make_skill(project_root, "local-name", "Shared content.")
+    global_skill = global_root / "global-name"
+    global_skill.parent.mkdir(parents=True)
+    os.symlink(project_skill, global_skill)
+    changed = make_skill(args.claude_global_root, "local-name", "Changed content.")
+
+    groups = active_skill_groups(args)
+
+    shared = next(group for group in groups if len(group.skills) == 2)
+    assert len(shared.skills) == 2
+    assert {skill.name for skill in shared.skills} == {"local-name", "global-name"}
+    assert shared.display_name == "local-name + global-name"
+    assert shared.locations == "project codex, global agents"
+    assert shared.status == "unmanaged"
+    assert shared.fingerprint
+    changed_group = next(group for group in groups if group.skills[0].path == changed)
+    assert len(changed_group.skills) == 1
+
+
+def test_active_skill_groups_reuses_fingerprint_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args = make_args(tmp_path)
+    make_skill(args.project_root / ".codex" / "skills", "supergoal")
+    calls: list[Path] = []
+
+    def fake_directory_fingerprint(root: Path) -> str:
+        calls.append(root)
+        return "abc123"
+
+    monkeypatch.setattr("x_skills.interactive._directory_fingerprint", fake_directory_fingerprint)
+    cache: dict[Path, str] = {}
+
+    first = active_skill_groups(args, cache)
+    second = active_skill_groups(args, cache)
+
+    assert first[0].fingerprint == "abc123"
+    assert second[0].fingerprint == "abc123"
+    assert len(calls) == 1
+
+
+def test_toggle_selected_preserves_cursor_row_after_refresh(tmp_path: Path) -> None:
+    app = XSkillsInteractive(make_args(tmp_path))
+    group_key = "sha:abc123"
+    moves: list[int] = []
+
+    class FakeRowKey:
+        value = group_key
+
+    class FakeCellKey:
+        row_key = FakeRowKey()
+
+    class FakeTable:
+        cursor_coordinate = (3, 0)
+
+        def coordinate_to_cell_key(self, coordinate: tuple[int, int]) -> FakeCellKey:
+            assert coordinate == (3, 0)
+            return FakeCellKey()
+
+        def move_cursor(self, *, row: int | None = None, column: int | None = None) -> None:
+            assert column is None
+            moves.append(row if row is not None else -1)
+
+    app.mode = "active"
+    app.table = FakeTable()
+    app.active_rows[group_key] = []
+    app.row_positions[group_key] = 3
+    app._refresh_table = lambda *, preserve_row_key=None: app._restore_cursor(preserve_row_key)
+
+    app.action_toggle_selected()
+
+    assert app.selected_active == {group_key}
+    assert moves == [3]
 
 
 def test_run_bulk_action_unlinks_selected_exact_locations(tmp_path: Path) -> None:
@@ -93,6 +173,25 @@ def test_clean_broken_skills_removes_only_selected_broken_symlinks(tmp_path: Pat
     assert results == ["removed broken broken-one"]
     assert not broken_path.exists()
     assert unmanaged.is_dir()
+
+
+def test_clean_broken_action_cleans_all_broken_when_nothing_is_selected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    app = XSkillsInteractive(make_args(tmp_path))
+    active_root = app.args.project_root / ".claude" / "skills"
+    active_root.mkdir(parents=True)
+    broken_path = active_root / "broken-one"
+    os.symlink(tmp_path / "missing", broken_path)
+    make_skill(active_root, "local-one")
+    details: list[str] = []
+    monkeypatch.setattr(app, "_set_detail", details.append)
+    monkeypatch.setattr(app, "_refresh_table", lambda: None)
+
+    app.action_clean_broken()
+
+    assert not broken_path.exists()
+    assert details == ["removed broken broken-one"]
 
 
 def test_install_search_result_archives_selected_skill(tmp_path: Path, monkeypatch) -> None:
@@ -191,7 +290,7 @@ def test_toggle_selected_uses_coordinate_cell_key(tmp_path: Path, monkeypatch) -
     app.mode = "active"
     app.table = FakeTable()
     app.active_rows[row_key] = skill
-    monkeypatch.setattr(app, "_refresh_table", lambda: None)
+    monkeypatch.setattr(app, "_refresh_table", lambda **_: None)
 
     app.action_toggle_selected()
 

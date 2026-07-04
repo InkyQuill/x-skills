@@ -1,13 +1,44 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
+from dataclasses import dataclass
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Input, Static
 from textual.worker import Worker, WorkerState
 
 from x_skills import cli
+
+SCOPE_STYLES = {
+    "project": "bold green",
+    "global": "bold cyan",
+}
+TARGET_STYLES = {
+    "agents": "magenta",
+    "codex": "blue",
+    "claude": "yellow",
+}
+STATUS_STYLES = {
+    "managed": "green",
+    "unmanaged": "yellow",
+    "broken": "red",
+    "mixed": "bold yellow",
+}
+
+
+@dataclass(frozen=True)
+class ActiveSkillGroup:
+    key: str
+    display_name: str
+    skills: list[cli.ActiveSkill]
+    status: str
+    locations: str
+    details: str
+    fingerprint: str
 
 
 def run_bulk_action(
@@ -53,6 +84,17 @@ def install_search_result(args: argparse.Namespace, result: cli.SearchResult) ->
     return cli.install_search_result_to_repo(install_args, result)
 
 
+def active_skill_groups(
+    args: argparse.Namespace, fingerprint_cache: dict[Path, str] | None = None
+) -> list[ActiveSkillGroup]:
+    groups: dict[str, list[cli.ActiveSkill]] = {}
+    for skill in cli.active_skills(args, cli.active_roots(args, include_all=True)):
+        fingerprint = _cached_active_skill_fingerprint(skill, fingerprint_cache)
+        key = f"sha:{fingerprint}" if fingerprint else _ungrouped_skill_key(skill)
+        groups.setdefault(key, []).append(skill)
+    return [_active_skill_group(key, skills) for key, skills in groups.items()]
+
+
 def _args_for_skill(args: argparse.Namespace, skill: cli.ActiveSkill) -> argparse.Namespace:
     action_args = argparse.Namespace(**vars(args))
     action_args.name = skill.name
@@ -89,9 +131,11 @@ class XSkillsInteractive(App[None]):
         self.search_input: Input | None = None
         self.detail: Static | None = None
         self.mode = "active"
-        self.active_rows: dict[str, cli.ActiveSkill] = {}
+        self.active_rows: dict[str, ActiveSkillGroup] = {}
+        self.row_positions: dict[str, int] = {}
         self.search_rows: dict[str, cli.SearchResult] = {}
         self.selected_active: set[str] = set()
+        self.fingerprint_cache: dict[Path, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -115,6 +159,7 @@ class XSkillsInteractive(App[None]):
         if self.mode == "search" and self.search_input is not None:
             self._set_detail("Press Enter to search again, or Esc to return to active skills.")
             return
+        self.fingerprint_cache.clear()
         self._refresh_table()
 
     def action_back(self) -> None:
@@ -134,7 +179,7 @@ class XSkillsInteractive(App[None]):
             self.selected_active.remove(row_key)
         else:
             self.selected_active.add(row_key)
-        self._refresh_table()
+        self._refresh_table(preserve_row_key=row_key)
 
     def action_migrate_selected(self) -> None:
         self._run_selected_active_action("migrate")
@@ -145,7 +190,14 @@ class XSkillsInteractive(App[None]):
     def action_clean_broken(self) -> None:
         selected = self._selected_active_skills()
         if not selected:
-            self._set_detail("Select broken skills first.")
+            selected = [
+                skill
+                for group in active_skill_groups(self.args, self.fingerprint_cache)
+                for skill in group.skills
+                if skill.status == "broken"
+            ]
+        if not selected:
+            self._set_detail("No broken skills.")
             return
         try:
             results = clean_broken_skills(self.args, selected)
@@ -153,6 +205,7 @@ class XSkillsInteractive(App[None]):
             self._set_detail(str(error))
             return
         self.selected_active.clear()
+        self.fingerprint_cache.clear()
         self._refresh_table()
         self._set_detail("\n".join(results) if results else "No selected broken skills.")
 
@@ -212,16 +265,16 @@ class XSkillsInteractive(App[None]):
         if len(row) == 4:
             name, package, installs, url = row
             self.detail.update(f"{name}\npackage: {package}\ninstalls: {installs}\n{url}")
-        elif len(row) == 7:
-            selected, name, scope, target, status, path, details = row
+        elif len(row) == 6:
+            selected, name, locations, status, fingerprint, details = row
             self.detail.update(
-                f"{selected} {name}\nscope: {scope}\ntarget: {target}\n"
-                f"status: {status}\npath: {path}\n\n{details}"
+                f"{selected} {name}\nlocations: {locations}\nstatus: {status}\n"
+                f"sha: {fingerprint}\n\n{details}"
             )
         else:
             self.detail.update("Unexpected row format.")
 
-    def _refresh_table(self) -> None:
+    def _refresh_table(self, *, preserve_row_key: str | None = None) -> None:
         if self.table is None:
             return
         self.mode = "active"
@@ -229,21 +282,22 @@ class XSkillsInteractive(App[None]):
             self.search_input.display = False
         self.table.clear(columns=True)
         self.active_rows.clear()
-        self.table.add_columns("Sel", "Name", "Scope", "Target", "Status", "Path", "Details")
-        for skill in cli.active_skills(self.args, cli.active_roots(self.args, include_all=True)):
-            key = _active_row_key(skill)
-            self.active_rows[key] = skill
+        self.row_positions.clear()
+        self.table.add_columns("Sel", "Skill", "Locations", "Status", "SHA", "Details")
+        for row_index, group in enumerate(active_skill_groups(self.args, self.fingerprint_cache)):
+            self.active_rows[group.key] = group
+            self.row_positions[group.key] = row_index
             self.table.add_row(
-                "*" if key in self.selected_active else "",
-                skill.name,
-                skill.root.scope,
-                skill.root.target,
-                skill.status,
-                cli.display_path(self.args, skill.path),
-                skill.reason or skill.description,
-                key=key,
+                "*" if group.key in self.selected_active else "",
+                Text(group.display_name, style=_group_name_style(group)),
+                _locations_text(group.skills),
+                Text(group.status, style=STATUS_STYLES.get(group.status, "")),
+                group.fingerprint[:8] if group.fingerprint else "",
+                group.details,
+                key=group.key,
             )
         self.selected_active.intersection_update(self.active_rows)
+        self._restore_cursor(preserve_row_key)
         self._set_detail("Space select | m migrate | u unlink | x clean broken | s search")
 
     def _run_selected_active_action(self, action: str) -> None:
@@ -257,13 +311,17 @@ class XSkillsInteractive(App[None]):
             self._set_detail(str(error))
             return
         self.selected_active.clear()
+        self.fingerprint_cache.clear()
         self._refresh_table()
         self._set_detail("\n".join(results))
 
     def _selected_active_skills(self) -> list[cli.ActiveSkill]:
-        return [
-            self.active_rows[key] for key in sorted(self.selected_active) if key in self.active_rows
-        ]
+        selected: list[cli.ActiveSkill] = []
+        for key in sorted(self.selected_active):
+            group = self.active_rows.get(key)
+            if group is not None:
+                selected.extend(group.skills)
+        return selected
 
     def _run_search(self, query: str) -> None:
         if len(query.strip()) < 2:
@@ -317,9 +375,136 @@ class XSkillsInteractive(App[None]):
             return ""
         return str(cell_key.row_key.value)
 
+    def _restore_cursor(self, row_key: str | None) -> None:
+        if self.table is None or not row_key:
+            return
+        row = self.row_positions.get(row_key)
+        if row is None:
+            return
+        self.table.move_cursor(row=row)
 
-def _active_row_key(skill: cli.ActiveSkill) -> str:
+
+def _active_skill_fingerprint(skill: cli.ActiveSkill) -> str:
+    if skill.status == "broken":
+        return ""
+    root = _resolved_skill_root(skill)
+    if root is None or not root.is_dir():
+        return ""
+    return _directory_fingerprint(root)
+
+
+def _cached_active_skill_fingerprint(
+    skill: cli.ActiveSkill, fingerprint_cache: dict[Path, str] | None
+) -> str:
+    if fingerprint_cache is None or skill.status == "broken":
+        return _active_skill_fingerprint(skill)
+    root = _resolved_skill_root(skill)
+    if root is None:
+        return ""
+    if root in fingerprint_cache:
+        return fingerprint_cache[root]
+    fingerprint = _directory_fingerprint(root) if root.is_dir() else ""
+    fingerprint_cache[root] = fingerprint
+    return fingerprint
+
+
+def _resolved_skill_root(skill: cli.ActiveSkill) -> Path | None:
+    try:
+        return skill.path.resolve(strict=True) if skill.path.is_symlink() else skill.path
+    except OSError:
+        return None
+
+
+def _directory_fingerprint(root: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        for current, dirs, files in os.walk(root):
+            dirs.sort()
+            files.sort()
+            current_path = Path(current)
+            rel_dir = current_path.relative_to(root).as_posix()
+            for directory in dirs:
+                path = current_path / directory
+                digest.update(b"D\0")
+                digest.update(f"{rel_dir}/{directory}".encode())
+                digest.update(b"\0")
+                if path.is_symlink():
+                    digest.update(b"L\0")
+                    digest.update(os.readlink(path).encode("utf-8"))
+                    digest.update(b"\0")
+            for filename in files:
+                path = current_path / filename
+                rel_path = path.relative_to(root).as_posix()
+                digest.update(b"F\0")
+                digest.update(rel_path.encode("utf-8"))
+                digest.update(b"\0")
+                if path.is_symlink():
+                    digest.update(b"L\0")
+                    digest.update(os.readlink(path).encode("utf-8"))
+                else:
+                    with path.open("rb") as file:
+                        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                digest.update(b"\0")
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def _ungrouped_skill_key(skill: cli.ActiveSkill) -> str:
     return f"{skill.root.scope}:{skill.root.target}:{skill.path}"
+
+
+def _active_skill_group(key: str, skills: list[cli.ActiveSkill]) -> ActiveSkillGroup:
+    ordered = sorted(skills, key=_active_skill_sort_key)
+    names = list(dict.fromkeys(skill.name for skill in ordered))
+    statuses = sorted({skill.status for skill in ordered})
+    details = sorted(
+        {
+            skill.reason or skill.description
+            for skill in ordered
+            if skill.reason or skill.description
+        }
+    )
+    fingerprint = key.removeprefix("sha:") if key.startswith("sha:") else ""
+    return ActiveSkillGroup(
+        key=key,
+        display_name=" + ".join(names),
+        skills=ordered,
+        status=statuses[0] if len(statuses) == 1 else "mixed",
+        locations=", ".join(_location_label(skill) for skill in ordered),
+        details="; ".join(details),
+        fingerprint=fingerprint,
+    )
+
+
+def _location_label(skill: cli.ActiveSkill) -> str:
+    return f"{skill.root.scope} {skill.root.target}"
+
+
+def _active_skill_sort_key(skill: cli.ActiveSkill) -> tuple[int, int, str]:
+    scope_order = {"project": 0, "global": 1}
+    target_order = {"agents": 0, "claude": 1, "codex": 2}
+    return (
+        scope_order.get(skill.root.scope, 99),
+        target_order.get(skill.root.target, 99),
+        skill.name,
+    )
+
+
+def _locations_text(skills: list[cli.ActiveSkill]) -> Text:
+    text = Text()
+    for index, skill in enumerate(skills):
+        if index:
+            text.append(", ")
+        text.append(skill.root.scope, style=SCOPE_STYLES.get(skill.root.scope, ""))
+        text.append(" ")
+        text.append(skill.root.target, style=TARGET_STYLES.get(skill.root.target, ""))
+    return text
+
+
+def _group_name_style(group: ActiveSkillGroup) -> str:
+    return STATUS_STYLES.get(group.status, "")
 
 
 def run_interactive(args: argparse.Namespace) -> None:

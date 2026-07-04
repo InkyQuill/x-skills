@@ -28,6 +28,9 @@ func TestDoctorReportsAndFixesBrokenSymlink(t *testing.T) {
 	if !strings.Contains(out.String(), "broken") || !strings.Contains(out.String(), "chapter-drafter") {
 		t.Fatalf("doctor output:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), link) || !strings.Contains(out.String(), "resolve symlink") {
+		t.Fatalf("doctor output missing path or reason:\n%s", out.String())
+	}
 
 	out.Reset()
 	err = Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix"}, strings.NewReader(""), &out, &bytes.Buffer{})
@@ -74,5 +77,33 @@ func TestDoctorFixRespectsScopeFilter(t *testing.T) {
 	}
 	if _, err := os.Lstat(globalLink); err != nil {
 		t.Fatalf("global link was changed: %v", err)
+	}
+}
+
+func TestDoctorFixWithoutYesReturnsErrorAndDoesNotMutate(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	root := filepath.Join(project, ".claude", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "chapter-drafter")
+	if err := os.Symlink(filepath.Join(home, "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute([]string{"--home", home, "--project-root", project, "doctor", "--fix"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected confirmation error")
+	}
+	if !strings.Contains(err.Error(), "requires confirmation") {
+		t.Fatalf("error = %q, want confirmation", err)
+	}
+	info, statErr := os.Lstat(link)
+	if statErr != nil {
+		t.Fatalf("link was removed: %v", statErr)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("mode = %v, want symlink", info.Mode())
 	}
 }

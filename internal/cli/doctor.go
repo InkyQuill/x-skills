@@ -89,7 +89,16 @@ func writeDoctorIssues(out io.Writer, issues []doctor.Issue) {
 
 	fmt.Fprintln(out, "Issues:")
 	for _, issue := range issues {
-		fmt.Fprintf(out, "%s  %s  %s  %s\n", issue.Location, issue.Name, issue.Kind, issue.SafeFix)
+		fmt.Fprintf(
+			out,
+			"%s  %s  %s  %s\n  path: %s\n  reason: %s\n",
+			issue.Location,
+			issue.Name,
+			issue.Kind,
+			issue.SafeFix,
+			issue.Path,
+			issue.Reason,
+		)
 	}
 }
 

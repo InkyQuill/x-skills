@@ -8,6 +8,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
+	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
 const KindBrokenSymlink = "broken-symlink"
@@ -102,12 +103,32 @@ func diagnoseRoot(cfg config.Config, root roots.ActiveRoot) ([]Issue, error) {
 			continue
 		}
 
-		if _, err := filepath.EvalSymlinks(activePath); err != nil {
-			issues = append(issues, brokenSymlinkIssue(cfg, root, entry.Name(), activePath, err))
+		if reason, broken := classifyBrokenSymlink(activePath); broken {
+			issues = append(issues, brokenSymlinkIssue(cfg, root, entry.Name(), activePath, reason))
 		}
 	}
 
 	return issues, nil
+}
+
+func classifyBrokenSymlink(path string) (string, bool) {
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Sprintf("resolve symlink: %v", err), true
+	}
+
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return fmt.Sprintf("stat target: %v", err), true
+	}
+	if !info.IsDir() {
+		return "target is not a directory", true
+	}
+	if !skills.IsDir(resolvedPath) {
+		return "target is not a skill directory", true
+	}
+
+	return "", false
 }
 
 func brokenSymlinkIssue(
@@ -115,14 +136,14 @@ func brokenSymlinkIssue(
 	root roots.ActiveRoot,
 	name string,
 	path string,
-	cause error,
+	reason string,
 ) Issue {
 	issue := Issue{
 		Kind:     KindBrokenSymlink,
 		Name:     name,
 		Location: root.Label,
 		Path:     path,
-		Reason:   fmt.Sprintf("resolve symlink: %v", cause),
+		Reason:   reason,
 		SafeFix:  "remove",
 	}
 	if repo.HasSkill(cfg, name) {
@@ -138,10 +159,7 @@ func fixBrokenSymlink(issue Issue) (FixResult, error) {
 	}
 
 	if issue.RepoTarget != "" {
-		if err := os.Remove(issue.Path); err != nil {
-			return FixResult{}, fmt.Errorf("remove broken symlink %q: %w", issue.Path, err)
-		}
-		if err := os.Symlink(issue.RepoTarget, issue.Path); err != nil {
+		if err := replaceSymlink(issue.Path, issue.RepoTarget); err != nil {
 			return FixResult{}, fmt.Errorf("relink %q to %q: %w", issue.Name, issue.Path, err)
 		}
 		return FixResult{Name: issue.Name, Action: "relinked", Path: issue.Path}, nil
@@ -162,4 +180,35 @@ func ensureSymlink(path string) error {
 		return fmt.Errorf("refusing to mutate non-symlink %q", path)
 	}
 	return nil
+}
+
+func replaceSymlink(path, target string) error {
+	tempPath, err := createTempSymlink(path, target)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("replace symlink: %w", err)
+	}
+	return nil
+}
+
+func createTempSymlink(path, target string) (string, error) {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	for i := 0; i < 100; i++ {
+		tempPath := filepath.Join(dir, fmt.Sprintf(".%s.tmp.%d.%d", base, os.Getpid(), i))
+		if err := os.Symlink(target, tempPath); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("create replacement symlink %q: %w", tempPath, err)
+		}
+		return tempPath, nil
+	}
+	return "", fmt.Errorf("create replacement symlink for %q: too many temporary path collisions", path)
 }

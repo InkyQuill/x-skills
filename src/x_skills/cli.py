@@ -12,9 +12,10 @@ import tempfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TextIO
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 TARGETS = ("agents", "claude", "codex")
 SCOPES = ("project", "global")
@@ -47,6 +48,14 @@ class RepoSkill:
     path: Path
     description: str
     used: bool
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    name: str
+    slug: str
+    source: str
+    installs: int
 
 
 def main(
@@ -153,6 +162,22 @@ def _build_parser() -> argparse.ArgumentParser:
     repo_remove.add_argument("names", nargs="+")
     repo_remove.set_defaults(func=cmd_repo_remove)
 
+    search_parser = subparsers.add_parser("search", aliases=["find"], help="search skills.sh")
+    search_parser.add_argument("--owner", help="filter by GitHub owner")
+    search_parser.add_argument(
+        "--limit", type=int, default=10, help="maximum API results to fetch; default: 10"
+    )
+    search_parser.add_argument(
+        "--install",
+        metavar="NAME_OR_INDEX",
+        help="install a search result into the repo archive",
+    )
+    search_parser.add_argument(
+        "--replace-archive", action="store_true", help="replace archived copy when installing"
+    )
+    search_parser.add_argument("query", nargs="+")
+    search_parser.set_defaults(func=cmd_search)
+
     link_parser = subparsers.add_parser("link", help="link a repo skill into active skills")
     _add_active_filters(link_parser)
     link_parser.add_argument("names", nargs="+")
@@ -258,6 +283,45 @@ def cmd_repo(args: argparse.Namespace) -> None:
 
     for skill in skills:
         _print(args, f"{skill.name:<22} {skill.description}")
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    query = " ".join(args.query).strip()
+    results = search_skills(query, owner=args.owner, limit=args.limit)
+    if args.json_:
+        _print_json(args, [_search_result_to_json(result) for result in results])
+        return
+
+    if not results:
+        owner_suffix = f' from owner "{args.owner}"' if args.owner else ""
+        _print(args, f'No skills found for "{query}"{owner_suffix}')
+        return
+
+    if args.install:
+        result = _resolve_search_install_selection(args.install, results)
+        if not _confirm(
+            args,
+            f'Install "{result.name}" from {result.source or result.slug} into repo? [y/N]: ',
+        ):
+            if _is_non_interactive(args):
+                raise XSkillsError(
+                    "refusing to install search result without confirmation; pass -y"
+                )
+            _print(args, "cancelled")
+            return
+        installed = install_search_result_to_repo(args, result)
+        _print(args, f"installed: {installed.name}")
+        return
+
+    _print(args, f"Install with x-skills search {query} --install <name-or-index> -y")
+    _print(args, "")
+    for index, result in enumerate(results[: min(args.limit, len(results))], start=1):
+        package = _search_result_package(result)
+        installs = _format_installs(result.installs)
+        installs_label = f" {installs}" if installs else ""
+        _print(args, f"{index}. {package}{installs_label}")
+        _print(args, f"   https://skills.sh/{result.slug}")
+        _print(args, "")
 
 
 def cmd_link(args: argparse.Namespace) -> None:
@@ -377,11 +441,7 @@ def cmd_repo_add_github(args: argparse.Namespace) -> None:
     clone_url, skill_path = _github_clone_url_and_path(args.repo_or_url, args.skill_path)
     with tempfile.TemporaryDirectory(prefix="x-skills-github-") as tmp:
         checkout = Path(tmp) / "repo"
-        subprocess.run(
-            ["git", "clone", "--depth", "1", clone_url, str(checkout)],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
+        _run_git_clone(clone_url, checkout)
         source = checkout / skill_path if skill_path else _find_single_skill(checkout)
         _install_skill_copy(source, args)
         _print(args, f"installed: {source.name}")
@@ -453,6 +513,76 @@ def _archive_skills_root(args: argparse.Namespace) -> Path:
 
 def _archive_skill(args: argparse.Namespace, name: str) -> Path:
     return _archive_skills_root(args) / name
+
+
+def search_skills(query: str, *, owner: str | None = None, limit: int = 10) -> list[SearchResult]:
+    if limit < 1:
+        raise XSkillsError("--limit must be greater than zero")
+    params = {"q": query, "limit": str(limit)}
+    if owner:
+        params["owner"] = owner
+    url = f"https://skills.sh/api/search?{urlencode(params)}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except OSError as error:
+        raise XSkillsError(f"skills.sh search failed: {error}") from error
+    except (JSONDecodeError, UnicodeDecodeError) as error:
+        raise XSkillsError(f"skills.sh search returned invalid JSON: {error}") from error
+    if not isinstance(payload, dict):
+        return []
+    skills = payload.get("skills", [])
+    if not isinstance(skills, list):
+        return []
+    results: list[SearchResult] = []
+    for item in skills:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        slug = str(item.get("id") or "").strip()
+        source = str(item.get("source") or "").strip()
+        if not name or not slug:
+            continue
+        try:
+            installs = int(item.get("installs") or 0)
+        except (TypeError, ValueError):
+            installs = 0
+        results.append(SearchResult(name=name, slug=slug, source=source, installs=installs))
+    return sorted(results, key=lambda result: result.installs, reverse=True)
+
+
+def install_search_result_to_repo(args: argparse.Namespace, result: SearchResult) -> Path:
+    source = result.source or _source_from_slug(result.slug)
+    if not source:
+        raise XSkillsError(f'search result "{result.name}" has no installable source')
+    clone_url, _ = _github_clone_url_and_path(source, None)
+    with tempfile.TemporaryDirectory(prefix="x-skills-search-") as tmp:
+        checkout = Path(tmp) / "repo"
+        _run_git_clone(clone_url, checkout)
+        skill = _find_named_skill(checkout, result.name)
+        return _install_skill_copy(skill, args)
+
+
+def active_roots(args: argparse.Namespace, *, include_all: bool = False) -> list[ActiveRoot]:
+    return _active_roots(args, include_all=include_all)
+
+
+def active_skills(
+    args: argparse.Namespace, roots: list[ActiveRoot] | None = None
+) -> list[ActiveSkill]:
+    return _active_skills(args, roots)
+
+
+def display_path(args: argparse.Namespace, path: Path) -> str:
+    return _display_path(args, path)
+
+
+def search_result_package(result: SearchResult) -> str:
+    return _search_result_package(result)
+
+
+def format_installs(count: int) -> str:
+    return _format_installs(count)
 
 
 def _active_roots(args: argparse.Namespace, *, include_all: bool = False) -> list[ActiveRoot]:
@@ -567,6 +697,66 @@ def _repo_skills(args: argparse.Namespace) -> list[RepoSkill]:
         for path in sorted(root.iterdir(), key=lambda item: item.name)
         if _is_skill_dir(path)
     ]
+
+
+def _resolve_search_install_selection(selection: str, results: list[SearchResult]) -> SearchResult:
+    try:
+        index = int(selection)
+    except ValueError:
+        index = 0
+    if index:
+        if index < 1 or index > len(results):
+            raise XSkillsError("search result index out of range")
+        return results[index - 1]
+    matches = [
+        result
+        for result in results
+        if result.name == selection or _search_result_package(result) == selection
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise XSkillsError(f"search result not found: {selection}")
+    raise XSkillsError(f"multiple search results match: {selection}; use an index")
+
+
+def _search_result_package(result: SearchResult) -> str:
+    source = result.source or _source_from_slug(result.slug)
+    return f"{source}@{result.name}" if source else result.slug
+
+
+def _source_from_slug(slug: str) -> str:
+    parts = slug.split("/")
+    if len(parts) >= 2:
+        return "/".join(parts[:2])
+    return ""
+
+
+def _format_installs(count: int) -> str:
+    if count <= 0:
+        return ""
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}".removesuffix(".0") + "M installs"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}".removesuffix(".0") + "K installs"
+    suffix = "" if count == 1 else "s"
+    return f"{count} install{suffix}"
+
+
+def _find_named_skill(root: Path, name: str) -> Path:
+    matches: list[Path] = []
+    for skill_md in root.rglob("SKILL.md"):
+        if ".git" in skill_md.parts:
+            continue
+        skill_dir = skill_md.parent
+        frontmatter_name = _skill_frontmatter(skill_md).get("name")
+        if skill_dir.name == name or frontmatter_name == name:
+            matches.append(skill_dir)
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise XSkillsError(f'GitHub repo does not contain skill "{name}"')
+    raise XSkillsError(f'GitHub repo contains multiple skills named "{name}"')
 
 
 def _resolve_destination_root(args: argparse.Namespace, action: str) -> ActiveRoot:
@@ -843,6 +1033,16 @@ def _active_skill_to_json(skill: ActiveSkill) -> dict[str, str]:
     }
 
 
+def _search_result_to_json(result: SearchResult) -> dict[str, str | int]:
+    return {
+        "name": result.name,
+        "slug": result.slug,
+        "source": result.source,
+        "installs": result.installs,
+        "package": _search_result_package(result),
+    }
+
+
 def _display_path(args: argparse.Namespace, path: Path) -> str:
     expanded = path.expanduser()
     try:
@@ -913,6 +1113,22 @@ def _install_skill_copy(source: Path, args: argparse.Namespace) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, destination, symlinks=True)
     return destination
+
+
+def _run_git_clone(clone_url: str, checkout: Path) -> None:
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", clone_url, str(checkout)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            timeout=120,
+        )
+    except FileNotFoundError as error:
+        raise XSkillsError("git not found; install git and try again") from error
+    except subprocess.TimeoutExpired as error:
+        raise XSkillsError(f"git clone timed out: {clone_url}") from error
+    except subprocess.CalledProcessError as error:
+        raise XSkillsError(f"git clone failed: {clone_url}") from error
 
 
 def _github_clone_url_and_path(

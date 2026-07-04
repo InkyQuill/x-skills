@@ -30,6 +30,10 @@ x-skills repo
 x-skills repo --used
 x-skills repo --unused
 
+x-skills search svelte
+x-skills search react --owner vercel-labs
+x-skills search react --install 1 -y
+
 x-skills link svelte-coder --target codex --project
 x-skills link typescript-expert --target codex --global
 x-skills link svelte-coder typescript-expert --target codex --project
@@ -62,6 +66,12 @@ directory without `SKILL.md`.
 
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
+
+`x-skills search` answers "what can I install?" It queries the official
+`skills.sh` search API and prints installable `owner/repo@skill` packages. Use
+`--install <name-or-index> -y` to copy a selected result into the local repo
+archive. Installing from search does not link the skill into an active agent
+root; run `x-skills link ...` after reviewing the repo copy.
 
 `link`, `migrate`, `unlink`, and `repo remove` accept multiple skill names and
 print a summary for batch runs. Batch operations run in order and do not roll
@@ -120,10 +130,11 @@ to the repo.
 ## Interactive Mode
 
 `x-skills interactive` opens a Textual-based manager for longer maintenance
-sessions. The first version shows active skills with status, path, and details,
-and supports refresh and quit. It uses the same discovery logic as the CLI
-commands; mutation actions will continue to require explicit confirmation as the
-TUI grows.
+sessions. It shows active skills with status, path, and details, supports
+multi-select with Space, and can migrate, unlink, and clean selected broken
+symlinks. Press `s` to search `skills.sh`, then select a result and press `i` to
+install it into the repo archive. The TUI uses the same discovery and operation
+logic as the CLI.
 
 ## Install Sources
 

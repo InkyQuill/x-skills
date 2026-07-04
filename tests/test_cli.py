@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -62,6 +63,20 @@ def make_skill(root: Path, name: str, description: str = "Use when testing.") ->
         encoding="utf-8",
     )
     return skill
+
+
+class FakeHTTPResponse:
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+
+    def __enter__(self) -> FakeHTTPResponse:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
 
 
 def test_list_shows_active_project_and_global_skills_with_management_status(
@@ -211,6 +226,145 @@ def test_repo_lists_archived_skills_with_descriptions_and_usage_filters(tmp_path
     lines = stdout.splitlines()
     assert not any(line.startswith("used-skill") for line in lines)
     assert any(line.startswith("unused-skill") for line in lines)
+
+
+def test_search_lists_skills_from_skills_sh_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested_urls: list[str] = []
+
+    def fake_urlopen(url: str, timeout: int) -> FakeHTTPResponse:
+        requested_urls.append(url)
+        return FakeHTTPResponse(
+            {
+                "skills": [
+                    {
+                        "id": "owner/repo/react-helper",
+                        "name": "react-helper",
+                        "source": "owner/repo",
+                        "installs": 1200,
+                    },
+                    {
+                        "id": "owner/repo/react-small",
+                        "name": "react-small",
+                        "source": "owner/repo",
+                        "installs": 12,
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr("x_skills.cli.urllib.request.urlopen", fake_urlopen)
+
+    code, stdout, stderr = run_cli(tmp_path, "search", "react", "--owner", "owner", "--limit", "2")
+
+    assert code is None
+    assert stderr == ""
+    assert "/api/search?" in requested_urls[0]
+    assert "q=react" in requested_urls[0]
+    assert "owner=owner" in requested_urls[0]
+    assert "limit=2" in requested_urls[0]
+    assert "Install with x-skills search react --install <name-or-index> -y" in stdout
+    assert "owner/repo@react-helper" in stdout
+    assert "1.2K installs" in stdout
+    assert "https://skills.sh/owner/repo/react-helper" in stdout
+
+
+def test_search_rejects_invalid_limit(tmp_path: Path) -> None:
+    code, _, stderr = run_cli(tmp_path, "search", "react", "--limit", "0")
+
+    assert code == 2
+    assert "--limit must be greater than zero" in stderr
+
+
+def test_search_install_archives_selected_result_from_github(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "archive"
+    clone_commands: list[list[str]] = []
+
+    def fake_urlopen(url: str, timeout: int) -> FakeHTTPResponse:
+        return FakeHTTPResponse(
+            {
+                "skills": [
+                    {
+                        "id": "owner/repo/github-skill",
+                        "name": "github-skill",
+                        "source": "owner/repo",
+                        "installs": 1,
+                    }
+                ]
+            }
+        )
+
+    def fake_run(
+        command: list[str], check: bool, stdout: object, timeout: int
+    ) -> subprocess.CompletedProcess:
+        clone_commands.append(command)
+        checkout = Path(command[-1])
+        make_skill(checkout / "skills", "github-skill", "From skills.sh.")
+        make_skill(checkout / "skills", "other-skill", "Other.")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("x_skills.cli.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("x_skills.cli.subprocess.run", fake_run)
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "search",
+        "github",
+        "--install",
+        "github-skill",
+        archive_root=archive,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "installed: github-skill" in stdout
+    assert clone_commands == [
+        [
+            "git",
+            "clone",
+            "--depth",
+            "1",
+            "https://github.com/owner/repo.git",
+            clone_commands[0][-1],
+        ]
+    ]
+    assert (archive / "skills" / "github-skill" / "SKILL.md").is_file()
+    assert not (archive / "skills" / "other-skill").exists()
+
+
+def test_search_handles_malformed_api_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_urlopen(url: str, timeout: int) -> FakeHTTPResponse:
+        return FakeHTTPResponse(["not", "an", "object"])
+
+    monkeypatch.setattr("x_skills.cli.urllib.request.urlopen", fake_urlopen)
+
+    code, stdout, stderr = run_cli(tmp_path, "search", "react")
+
+    assert code is None
+    assert stderr == ""
+    assert 'No skills found for "react"' in stdout
+
+
+def test_repo_add_github_reports_clone_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(
+        command: list[str], check: bool, stdout: object, timeout: int
+    ) -> subprocess.CompletedProcess:
+        raise subprocess.CalledProcessError(128, command)
+
+    monkeypatch.setattr("x_skills.cli.subprocess.run", fake_run)
+
+    code, _, stderr = run_cli(tmp_path, "repo", "add-github", "owner/repo")
+
+    assert code == 2
+    assert "git clone failed: https://github.com/owner/repo.git" in stderr
 
 
 def test_yes_and_no_flags_are_mutually_exclusive(tmp_path: Path) -> None:
@@ -689,7 +843,9 @@ def test_repo_add_github_installs_skill_from_repo_path(
 ) -> None:
     archive = tmp_path / "archive"
 
-    def fake_run(command: list[str], check: bool, stdout: object) -> subprocess.CompletedProcess:
+    def fake_run(
+        command: list[str], check: bool, stdout: object, timeout: int
+    ) -> subprocess.CompletedProcess:
         checkout = Path(command[-1])
         make_skill(checkout / "skills", "github-skill", "From GitHub.")
         return subprocess.CompletedProcess(command, 0)

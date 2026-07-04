@@ -49,6 +49,11 @@ skills from the current project and global roots across `agents`, `claude`, and
 - `unmanaged`: a real skill directory or symlink outside the repo;
 - `broken`: a symlink whose target is not a valid skill directory.
 
+Human output is colorized by default when stdout is a terminal. Use
+`--color never` to disable color, or `--color always` to force it through pipes.
+Broken skills show the reason, such as a missing symlink target or a target
+directory without `SKILL.md`.
+
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
 

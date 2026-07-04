@@ -11,6 +11,11 @@ import pytest
 from x_skills.cli import main
 
 
+class TtyStringIO(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
 def run_cli(
     tmp_path: Path,
     *args: str,
@@ -20,8 +25,9 @@ def run_cli(
     codex_global_root: Path | None = None,
     project_root: Path | None = None,
     input_text: str = "",
+    tty: bool = False,
 ) -> tuple[int | None, str, str]:
-    stdout = io.StringIO()
+    stdout = TtyStringIO() if tty else io.StringIO()
     stderr = io.StringIO()
     argv = [
         "--archive-root",
@@ -92,6 +98,87 @@ def test_list_shows_active_project_and_global_skills_with_management_status(
     assert "GLOBAL agents" in stdout
     assert "broken-agents" in stdout
     assert "broken" in stdout
+
+
+def test_list_can_colorize_human_output(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    managed = make_skill(archive / "skills", "managed-codex", "Managed codex skill.")
+    active_root = project / ".codex" / "skills"
+    active_root.mkdir(parents=True)
+    os.symlink(managed, active_root / "managed-codex")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "--color",
+        "always",
+        "list",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "\x1b[1;36mPROJECT codex" in stdout
+    assert "\x1b[32mmanaged   \x1b[0m" in stdout
+
+
+def test_list_colorizes_tty_output_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    managed = make_skill(archive / "skills", "managed-codex", "Managed codex skill.")
+    active_root = project / ".codex" / "skills"
+    active_root.mkdir(parents=True)
+    os.symlink(managed, active_root / "managed-codex")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "list",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+        tty=True,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "\x1b[1;36mPROJECT codex" in stdout
+
+
+def test_list_explains_broken_symlink_reasons(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    active_root = project / ".claude" / "skills"
+    active_root.mkdir(parents=True)
+    os.symlink(tmp_path / "missing-target", active_root / "missing-link")
+    not_skill = tmp_path / "not-a-skill"
+    not_skill.mkdir()
+    os.symlink(not_skill, active_root / "missing-skill-md")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "list",
+        "--target",
+        "claude",
+        "--project",
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "missing-link" in stdout
+    assert "broken" in stdout
+    assert "target missing:" in stdout
+    assert "missing-target" in stdout
+    assert "missing-skill-md" in stdout
+    assert "target missing SKILL.md:" in stdout
 
 
 def test_repo_lists_archived_skills_with_descriptions_and_usage_filters(tmp_path: Path) -> None:

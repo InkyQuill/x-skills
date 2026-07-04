@@ -38,6 +38,7 @@ class ActiveSkill:
     path: Path
     status: str
     description: str
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,12 @@ def _build_parser() -> argparse.ArgumentParser:
     prompt.add_argument("-n", "--no", action="store_true", help="answer no to confirmations")
     parser.add_argument("--no-input", action="store_true", help="fail instead of prompting")
     parser.add_argument("--json", action="store_true", dest="json_", help="write JSON output")
+    parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default=os.environ.get("X_SKILLS_COLOR", "auto"),
+        help="colorize human output; default: auto",
+    )
     parser.add_argument(
         "--archive-root",
         type=Path,
@@ -195,11 +202,21 @@ def cmd_list(args: argparse.Namespace) -> None:
         if not group and not args.all:
             continue
         printed = True
-        _print(args, f"{root.scope.upper()} {root.target}  {_display_path(args, root.path)}")
+        header = f"{root.scope.upper()} {root.target}"
+        path = _display_path(args, root.path)
+        _print(
+            args,
+            f"{_style(args, header, 'header')}  {_style(args, path, 'path')}",
+        )
         for skill in group:
+            details = skill.reason or skill.description
             _print(
                 args,
-                f"  {skill.name:<22} {skill.status:<10} {skill.description}",
+                (
+                    f"  {_style_padded(args, skill.name, 22, 'name')} "
+                    f"{_style_padded(args, skill.status, 10, skill.status)} "
+                    f"{_style(args, details, 'detail')}"
+                ),
             )
         _print(args, "")
 
@@ -439,9 +456,14 @@ def _active_skill(args: argparse.Namespace, root: ActiveRoot, path: Path) -> Act
         try:
             resolved = path.resolve(strict=True)
         except OSError:
-            return ActiveSkill(path.name, root, path, "broken", "")
-        if not _is_skill_dir(resolved):
-            return ActiveSkill(path.name, root, path, "broken", "")
+            reason = f"target missing: {os.readlink(path)}"
+            return ActiveSkill(path.name, root, path, "broken", "", reason)
+        if not resolved.is_dir():
+            reason = f"target is not a directory: {resolved}"
+            return ActiveSkill(path.name, root, path, "broken", "", reason)
+        if not (resolved / "SKILL.md").is_file():
+            reason = f"target missing SKILL.md: {resolved}"
+            return ActiveSkill(path.name, root, path, "broken", "", reason)
         status = (
             "managed" if _same_resolved_path(path, _archive_skill(args, path.name)) else "unmanaged"
         )
@@ -557,6 +579,38 @@ def _print(args: argparse.Namespace, message: str = "") -> None:
     print(message, file=args.output_stream)
 
 
+def _style(args: argparse.Namespace, value: str, role: str) -> str:
+    if not value or not _use_color(args):
+        return value
+    codes = {
+        "header": "1;36",
+        "path": "2",
+        "name": "1",
+        "managed": "32",
+        "unmanaged": "33",
+        "broken": "31",
+        "detail": "2",
+    }
+    code = codes.get(role)
+    if code is None:
+        return value
+    return f"\x1b[{code}m{value}\x1b[0m"
+
+
+def _style_padded(args: argparse.Namespace, value: str, width: int, role: str) -> str:
+    return _style(args, f"{value:<{width}}", role)
+
+
+def _use_color(args: argparse.Namespace) -> bool:
+    if args.json_ or args.color == "never":
+        return False
+    if args.color == "always":
+        return True
+    if "NO_COLOR" in os.environ:
+        return False
+    return args.output_stream.isatty()
+
+
 def _print_json(args: argparse.Namespace, value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True), file=args.output_stream)
 
@@ -569,6 +623,7 @@ def _active_skill_to_json(skill: ActiveSkill) -> dict[str, str]:
         "path": str(skill.path),
         "status": skill.status,
         "description": skill.description,
+        "reason": skill.reason,
     }
 
 

@@ -39,6 +39,9 @@ func (c Config) ArchiveSkillsRoot() string {
 }
 
 func (c Config) ActiveRoot(scope, target string) string {
+	if !validScope(scope) || !validTarget(target) {
+		return ""
+	}
 	if scope == ScopeProject {
 		return filepath.Join(c.ProjectRoot, "."+target, "skills")
 	}
@@ -55,9 +58,30 @@ func (c Config) ActiveRoot(scope, target string) string {
 }
 
 func LocationLabel(scope, target string) string {
+	if !validScope(scope) || !validTarget(target) {
+		return ""
+	}
 	prefix := "./"
 	if scope == ScopeGlobal {
 		prefix = "~/"
 	}
 	return prefix + "." + target
+}
+
+func validScope(scope string) bool {
+	switch scope {
+	case ScopeProject, ScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+func validTarget(target string) bool {
+	switch target {
+	case TargetAgents, TargetClaude, TargetCodex:
+		return true
+	default:
+		return false
+	}
 }

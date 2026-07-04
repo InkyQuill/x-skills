@@ -35,6 +35,10 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 					Yes:    rootOptions.yes,
 					Filter: opts.filter(),
 				})
+				if err != nil && len(results) > 0 {
+					writeDoctorFixResults(cmd.OutOrStdout(), results)
+					return err
+				}
 				if err != nil {
 					return err
 				}

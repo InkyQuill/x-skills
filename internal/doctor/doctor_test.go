@@ -251,3 +251,103 @@ func TestDoctorIgnoresUnmanagedDirectories(t *testing.T) {
 		t.Fatalf("unmanaged directory was changed: %v", err)
 	}
 }
+
+func TestFixReturnsAppliedResultsWhenLaterIssueFails(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	root := cfg.ActiveRoot("project", "claude")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	first := filepath.Join(root, "a-broken")
+	if err := os.Symlink(filepath.Join(home, "missing-a"), first); err != nil {
+		t.Fatal(err)
+	}
+	second := filepath.Join(root, "b-stale")
+	validTarget := makeSkill(t, home, "valid-target")
+	if err := os.Symlink(validTarget, second); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := fixIssues([]Issue{
+		{
+			Kind:    KindBrokenSymlink,
+			Name:    "a-broken",
+			Path:    first,
+			SafeFix: "remove",
+		},
+		{
+			Kind:    KindBrokenSymlink,
+			Name:    "b-stale",
+			Path:    second,
+			SafeFix: "remove",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected stale issue error")
+	}
+	if len(results) != 1 || results[0].Name != "a-broken" {
+		t.Fatalf("results = %#v, want first applied result", results)
+	}
+	if _, err := os.Lstat(first); !os.IsNotExist(err) {
+		t.Fatalf("first link still exists or unexpected err: %v", err)
+	}
+}
+
+func TestFixBrokenSymlinkRevalidatesBeforeMutation(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	validTarget := makeSkill(t, home, "valid-target")
+	link := filepath.Join(root, "stale")
+	if err := os.Symlink(validTarget, link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := fixBrokenSymlink(Issue{
+		Kind:    KindBrokenSymlink,
+		Name:    "stale",
+		Path:    link,
+		SafeFix: "remove",
+	})
+	if err == nil {
+		t.Fatal("expected stale issue error")
+	}
+	if !strings.Contains(err.Error(), "no longer broken") {
+		t.Fatalf("error = %v, want no longer broken", err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("link was mutated: %v", err)
+	}
+}
+
+func TestFixBrokenSymlinkVerifiesRepoTargetBeforeRelink(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	link := filepath.Join(root, "stale-repo")
+	if err := os.Symlink(filepath.Join(home, "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := fixBrokenSymlink(Issue{
+		Kind:       KindBrokenSymlink,
+		Name:       "stale-repo",
+		Path:       link,
+		SafeFix:    "relink",
+		RepoTarget: filepath.Join(home, "repo-missing"),
+	})
+	if err == nil {
+		t.Fatal("expected stale repo target error")
+	}
+	if !strings.Contains(err.Error(), "repo target") {
+		t.Fatalf("error = %v, want repo target", err)
+	}
+	resolved, err := os.Readlink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != filepath.Join(home, "missing") {
+		t.Fatalf("link target = %q, want original missing target", resolved)
+	}
+}

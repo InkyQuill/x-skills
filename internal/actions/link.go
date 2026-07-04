@@ -22,8 +22,8 @@ type MutationResult struct {
 }
 
 func Link(cfg config.Config, req LinkRequest) (MutationResult, error) {
-	if req.Name == "" {
-		return MutationResult{}, fmt.Errorf("skill name is required")
+	if err := repo.ValidateName(req.Name); err != nil {
+		return MutationResult{}, err
 	}
 	if !slices.Contains(config.Scopes, req.Scope) {
 		return MutationResult{}, fmt.Errorf("unknown scope %q", req.Scope)

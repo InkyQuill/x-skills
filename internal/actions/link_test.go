@@ -1,7 +1,9 @@
 package actions
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -39,5 +41,26 @@ func TestLinkFailsWhenDestinationExists(t *testing.T) {
 	_, err := Link(cfg, LinkRequest{Name: "typescript-expert", Scope: "project", Target: "codex"})
 	if err == nil {
 		t.Fatal("expected destination exists error")
+	}
+}
+
+func TestLinkRejectsPathLikeSkillNames(t *testing.T) {
+	for _, name := range []string{"", "../outside", "/absolute", ".", "..", "nested/name", `nested\name`} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			project := t.TempDir()
+			cfg := config.Default(project, home)
+
+			_, err := Link(cfg, LinkRequest{Name: name, Scope: "project", Target: "codex"})
+			if err == nil {
+				t.Fatal("expected invalid skill name error")
+			}
+			if !strings.Contains(err.Error(), "invalid skill name") {
+				t.Fatalf("error = %q, want invalid skill name", err)
+			}
+			if _, statErr := os.Stat(cfg.ActiveRoot("project", "codex")); !os.IsNotExist(statErr) {
+				t.Fatalf("active root stat error = %v, want not exist", statErr)
+			}
+		})
 	}
 }

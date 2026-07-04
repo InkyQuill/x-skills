@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,6 +46,38 @@ func TestLinkAcceptsMultipleNames(t *testing.T) {
 		}
 		if resolved != source {
 			t.Fatalf("%s resolved to %q, want %q", name, resolved, source)
+		}
+	}
+}
+
+func TestLinkBatchReportsPartialFailureAndContinues(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	archive := filepath.Join(home, ".x-skills", "skills")
+	second := makeSkill(t, archive, "second-skill", "Second.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "link", "missing-skill", "second-skill", "--project", "--target", "codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected partial failure error")
+	}
+
+	target := filepath.Join(project, ".codex", "skills", "second-skill")
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != second {
+		t.Fatalf("second-skill resolved to %q, want %q", resolved, second)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".codex", "skills", "missing-skill")); !os.IsNotExist(err) {
+		t.Fatalf("missing-skill stat error = %v, want not exist", err)
+	}
+
+	text := out.String()
+	for _, want := range []string{"Summary:", "linked: second-skill", "failed: missing-skill ("} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("link output missing %q:\n%s", want, text)
 		}
 	}
 }

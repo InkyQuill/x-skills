@@ -28,6 +28,32 @@ func TestListRepoSkills(t *testing.T) {
 	}
 }
 
+func TestListRepoSkillsUsesArchiveDirectoryName(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	skill := filepath.Join(cfg.ArchiveSkillsRoot(), "linkable-name")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: display-only\ndescription: Test Go.\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := List(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("len(skills) = %d, want 1", len(skills))
+	}
+	if skills[0].Name != "linkable-name" {
+		t.Fatalf("Name = %q, want archive directory name", skills[0].Name)
+	}
+	if skills[0].Description != "Test Go." {
+		t.Fatalf("Description = %q", skills[0].Description)
+	}
+}
+
 func TestListRepoSkillsIgnoresNonSkillsAndSortsByName(t *testing.T) {
 	home := t.TempDir()
 	cfg := config.Default(t.TempDir(), home)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/skills"
@@ -38,7 +39,7 @@ func List(cfg config.Config) ([]Skill, error) {
 			return nil, fmt.Errorf("read repo skill %q: %w", entry.Name(), err)
 		}
 		found = append(found, Skill{
-			Name:        info.Name,
+			Name:        entry.Name(),
 			Path:        info.Path,
 			Description: info.Description,
 		})
@@ -55,6 +56,22 @@ func SkillPath(cfg config.Config, name string) string {
 	return filepath.Join(cfg.ArchiveSkillsRoot(), name)
 }
 
+func ValidateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("invalid skill name: %q", name)
+	}
+	if filepath.IsAbs(name) || name == "." || name == ".." || filepath.Clean(name) != name {
+		return fmt.Errorf("invalid skill name: %q", name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid skill name: %q", name)
+	}
+	return nil
+}
+
 func HasSkill(cfg config.Config, name string) bool {
+	if ValidateName(name) != nil {
+		return false
+	}
 	return skills.IsDir(SkillPath(cfg, name))
 }

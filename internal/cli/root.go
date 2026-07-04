@@ -70,7 +70,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		return nil, err
 	}
 
-	root.AddCommand(newListCommand(&opts))
+	root.AddCommand(newListCommand(&opts), newRepoCommand(&opts), newLinkCommand(&opts))
 
 	return root, nil
 }

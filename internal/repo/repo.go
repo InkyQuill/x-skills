@@ -54,3 +54,7 @@ func List(cfg config.Config) ([]Skill, error) {
 func SkillPath(cfg config.Config, name string) string {
 	return filepath.Join(cfg.ArchiveSkillsRoot(), name)
 }
+
+func HasSkill(cfg config.Config, name string) bool {
+	return skills.IsDir(SkillPath(cfg, name))
+}

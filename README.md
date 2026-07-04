@@ -8,6 +8,9 @@ plus global skill roots. To inspect another project, `cd` there first.
 
 ## Install
 
+Requires `uv` and `git`. Install `uv` from
+<https://docs.astral.sh/uv/> before running the one-liner.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/InkyQuill/x-skills/main/install.sh | sh
 ```

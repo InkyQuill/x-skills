@@ -22,6 +22,13 @@ def test_readme_documents_current_command_surface() -> None:
     assert "x-skills install-github" not in readme
 
 
+def test_readme_documents_uv_prerequisite() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Requires `uv`" in readme
+    assert "https://docs.astral.sh/uv/" in readme
+
+
 def test_install_script_checks_required_commands() -> None:
     script = (ROOT / "install.sh").read_text(encoding="utf-8")
 

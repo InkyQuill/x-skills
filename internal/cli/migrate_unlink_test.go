@@ -28,6 +28,21 @@ func TestMigrateWithYesFlag(t *testing.T) {
 	}
 }
 
+func TestMigrateWithoutYesReturnsConfirmationError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+
+	var stderr bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &bytes.Buffer{}, &stderr)
+	if err == nil {
+		t.Fatal("expected confirmation error")
+	}
+	if !strings.Contains(err.Error(), "requires confirmation") {
+		t.Fatalf("error = %q, want confirmation", err)
+	}
+}
+
 func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -43,5 +58,20 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "removed unmanaged") {
 		t.Fatalf("unlink output:\n%s", out.String())
+	}
+}
+
+func TestUnlinkDeleteUnmanagedWithoutYesReturnsConfirmationError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+
+	var stderr bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex", "--delete-unmanaged"}, strings.NewReader(""), &bytes.Buffer{}, &stderr)
+	if err == nil {
+		t.Fatal("expected confirmation error")
+	}
+	if !strings.Contains(err.Error(), "requires confirmation") {
+		t.Fatalf("error = %q, want confirmation", err)
 	}
 }

@@ -90,6 +90,7 @@ func writeUnlinkSummary(
 	fmt.Fprintln(out, "Summary:")
 	for _, status := range []string{
 		actions.ResultRemovedActiveLink,
+		actions.ResultRemovedUnmanagedLink,
 		actions.ResultRemovedUnmanaged,
 		actions.ResultMigratedUnlinked,
 	} {

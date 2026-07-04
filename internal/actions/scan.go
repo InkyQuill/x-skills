@@ -91,25 +91,46 @@ func scanRoot(cfg config.Config, root roots.ActiveRoot) ([]ActiveSkill, error) {
 }
 
 func scanSymlink(cfg config.Config, root roots.ActiveRoot, activePath, name string) ActiveSkill {
+	classification := classifySymlink(cfg, activePath, name)
+	if classification.status == StatusBroken {
+		return brokenSkill(root, activePath, name, classification.reason)
+	}
+
+	skill, err := skills.Read(classification.resolvedPath)
+	if err != nil {
+		return brokenSkill(root, activePath, name, fmt.Sprintf("read target metadata: %v", err))
+	}
+
+	return ActiveSkill{
+		Name:        skill.Name,
+		Root:        root,
+		Path:        activePath,
+		Status:      classification.status,
+		Description: skill.Description,
+	}
+}
+
+type symlinkClassification struct {
+	status       string
+	reason       string
+	resolvedPath string
+}
+
+func classifySymlink(cfg config.Config, activePath, name string) symlinkClassification {
 	resolvedPath, err := filepath.EvalSymlinks(activePath)
 	if err != nil {
-		return brokenSkill(root, activePath, name, fmt.Sprintf("resolve symlink: %v", err))
+		return symlinkClassification{status: StatusBroken, reason: fmt.Sprintf("resolve symlink: %v", err)}
 	}
 
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return brokenSkill(root, activePath, name, fmt.Sprintf("stat target: %v", err))
+		return symlinkClassification{status: StatusBroken, reason: fmt.Sprintf("stat target: %v", err)}
 	}
 	if !info.IsDir() {
-		return brokenSkill(root, activePath, name, "target is not a directory")
+		return symlinkClassification{status: StatusBroken, reason: "target is not a directory"}
 	}
 	if !skills.IsDir(resolvedPath) {
-		return brokenSkill(root, activePath, name, "target is not a skill directory")
-	}
-
-	skill, err := skills.Read(resolvedPath)
-	if err != nil {
-		return brokenSkill(root, activePath, name, fmt.Sprintf("read target metadata: %v", err))
+		return symlinkClassification{status: StatusBroken, reason: "target is not a skill directory"}
 	}
 
 	status := StatusUnmanaged
@@ -117,12 +138,9 @@ func scanSymlink(cfg config.Config, root roots.ActiveRoot, activePath, name stri
 		status = StatusManaged
 	}
 
-	return ActiveSkill{
-		Name:        skill.Name,
-		Root:        root,
-		Path:        activePath,
-		Status:      status,
-		Description: skill.Description,
+	return symlinkClassification{
+		status:       status,
+		resolvedPath: resolvedPath,
 	}
 }
 

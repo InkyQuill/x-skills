@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	ResultMigrated          = "migrated"
-	ResultMigratedUnlinked  = "migrated unmanaged"
-	ResultRemovedUnmanaged  = "removed unmanaged"
-	ResultRemovedActiveLink = "removed link"
+	ResultMigrated             = "migrated"
+	ResultMigratedUnlinked     = "migrated unmanaged"
+	ResultRemovedUnmanaged     = "removed unmanaged"
+	ResultRemovedUnmanagedLink = "removed unmanaged symlink"
+	ResultRemovedActiveLink    = "removed link"
 )
 
 type MigrateRequest struct {

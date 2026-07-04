@@ -33,8 +33,15 @@ func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
+		classification := classifySymlink(cfg, paths.active, req.Name)
+		if classification.status == StatusUnmanaged && !req.DeleteUnmanaged {
+			return MutationResult{}, fmt.Errorf("unmanaged symlink cannot be unlinked without --delete-unmanaged: %s", paths.active)
+		}
 		if err := os.Remove(paths.active); err != nil {
 			return MutationResult{}, fmt.Errorf("remove active link %q: %w", paths.active, err)
+		}
+		if classification.status == StatusUnmanaged {
+			return MutationResult{Name: req.Name, Path: paths.active, Status: ResultRemovedUnmanagedLink}, nil
 		}
 		return MutationResult{Name: req.Name, Path: paths.active, Status: ResultRemovedActiveLink}, nil
 	}

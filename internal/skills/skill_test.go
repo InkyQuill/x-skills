@@ -50,6 +50,25 @@ func TestReadUsesDirectoryNameWhenNameMissing(t *testing.T) {
 	}
 }
 
+func TestReadReturnsEmptyDescriptionWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "no-description")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: no-description\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := Read(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "" {
+		t.Fatalf("Description = %q, want empty", info.Description)
+	}
+}
+
 func TestValidateRejectsMissingSkillMD(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Read(dir)

@@ -59,3 +59,13 @@ func TestListRepoSkillsIgnoresNonSkillsAndSortsByName(t *testing.T) {
 		t.Fatalf("skills = %#v", skills)
 	}
 }
+
+func TestSkillPath(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+
+	got := SkillPath(cfg, "golang-testing")
+	want := filepath.Join(cfg.ArchiveSkillsRoot(), "golang-testing")
+	if got != want {
+		t.Fatalf("SkillPath() = %q, want %q", got, want)
+	}
+}

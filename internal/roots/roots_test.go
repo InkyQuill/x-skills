@@ -23,6 +23,34 @@ func TestActiveRootsCanBeFiltered(t *testing.T) {
 	}
 }
 
+func TestActiveRootsCanBeFilteredByScopeOnly(t *testing.T) {
+	cfg := config.Default("/project", "/home/inky")
+
+	filtered := ActiveRoots(cfg, Filter{Scope: "project"})
+	if len(filtered) != 3 {
+		t.Fatalf("len(filtered) = %d, want 3", len(filtered))
+	}
+	for _, root := range filtered {
+		if root.Scope != "project" {
+			t.Fatalf("Scope = %q, want project", root.Scope)
+		}
+	}
+}
+
+func TestActiveRootsCanBeFilteredByTargetOnly(t *testing.T) {
+	cfg := config.Default("/project", "/home/inky")
+
+	filtered := ActiveRoots(cfg, Filter{Target: "codex"})
+	if len(filtered) != 2 {
+		t.Fatalf("len(filtered) = %d, want 2", len(filtered))
+	}
+	for _, root := range filtered {
+		if root.Target != "codex" {
+			t.Fatalf("Target = %q, want codex", root.Target)
+		}
+	}
+}
+
 func TestActiveRootsRejectInvalidFilter(t *testing.T) {
 	cfg := config.Default("/project", "/home/inky")
 

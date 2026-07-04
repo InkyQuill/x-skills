@@ -51,6 +51,29 @@ func TestDirectoryFingerprintIncludesFileContents(t *testing.T) {
 	}
 }
 
+func TestDirectoryFingerprintIncludesRelativePaths(t *testing.T) {
+	firstDir := t.TempDir()
+	secondDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(firstDir, "a.txt"), []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondDir, "b.txt"), []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := Directory(firstDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Directory(secondDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("fingerprint ignored relative paths: %q", first)
+	}
+}
+
 func TestDirectoryFingerprintHashesSymlinkTarget(t *testing.T) {
 	dir := t.TempDir()
 	link := filepath.Join(dir, "link")

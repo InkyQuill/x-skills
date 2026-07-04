@@ -270,6 +270,67 @@ def test_search_lists_skills_from_skills_sh_api(
     assert "https://skills.sh/owner/repo/react-helper" in stdout
 
 
+def test_search_lists_local_repo_matches_before_skills_sh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "archive"
+    make_skill(archive / "skills", "react-helper", "Local helper.")
+
+    def fake_urlopen(url: str, timeout: int) -> FakeHTTPResponse:
+        return FakeHTTPResponse(
+            {
+                "skills": [
+                    {
+                        "id": "owner/repo/react-remote",
+                        "name": "react-remote",
+                        "source": "owner/repo",
+                        "installs": 5,
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("x_skills.cli.urllib.request.urlopen", fake_urlopen)
+
+    code, stdout, stderr = run_cli(tmp_path, "search", "react", archive_root=archive)
+
+    assert code is None
+    assert stderr == ""
+    assert stdout.index("repo:react-helper") < stdout.index("owner/repo@react-remote")
+    assert "Local helper." in stdout
+
+
+def test_search_install_local_repo_skill_links_to_project_agents_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    repo_skill = make_skill(archive / "skills", "react-helper", "Local helper.")
+
+    def fake_urlopen(url: str, timeout: int) -> FakeHTTPResponse:
+        return FakeHTTPResponse({"skills": []})
+
+    monkeypatch.setattr("x_skills.cli.urllib.request.urlopen", fake_urlopen)
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "search",
+        "react",
+        "--install",
+        "react-helper",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "linked project agents: react-helper" in stdout
+    link = project / ".agents" / "skills" / "react-helper"
+    assert link.is_symlink()
+    assert link.resolve() == repo_skill
+
+
 def test_search_rejects_invalid_limit(tmp_path: Path) -> None:
     code, _, stderr = run_cli(tmp_path, "search", "react", "--limit", "0")
 
@@ -306,8 +367,13 @@ def test_search_install_archives_selected_result_from_github(
         make_skill(checkout / "skills", "other-skill", "Other.")
         return subprocess.CompletedProcess(command, 0)
 
+    def fake_check_output(command: list[str], text: bool) -> str:
+        assert command[0:2] == ["git", "-C"]
+        return "abc123\n"
+
     monkeypatch.setattr("x_skills.cli.urllib.request.urlopen", fake_urlopen)
     monkeypatch.setattr("x_skills.cli.subprocess.run", fake_run)
+    monkeypatch.setattr("x_skills.cli.subprocess.check_output", fake_check_output)
 
     code, stdout, stderr = run_cli(
         tmp_path,
@@ -334,6 +400,46 @@ def test_search_install_archives_selected_result_from_github(
     ]
     assert (archive / "skills" / "github-skill" / "SKILL.md").is_file()
     assert not (archive / "skills" / "other-skill").exists()
+    metadata = json.loads(
+        (archive / "skills" / "github-skill" / ".x-skills.json").read_text(encoding="utf-8")
+    )
+    assert metadata["source_type"] == "github"
+    assert metadata["source"] == "owner/repo"
+    assert metadata["clone_url"] == "https://github.com/owner/repo.git"
+    assert metadata["commit"] == "abc123"
+    assert metadata["skill_path"] == "skills/github-skill"
+
+
+def test_repo_reports_github_update_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    archive = tmp_path / "archive"
+    skill = make_skill(archive / "skills", "github-skill", "From GitHub.")
+    (skill / ".x-skills.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source_type": "github",
+                "source": "owner/repo",
+                "clone_url": "https://github.com/owner/repo.git",
+                "commit": "old",
+                "skill_path": "skills/github-skill",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_check_output(command: list[str], text: bool, timeout: int) -> str:
+        assert command == ["git", "ls-remote", "https://github.com/owner/repo.git", "HEAD"]
+        return "new\tHEAD\n"
+
+    monkeypatch.setattr("x_skills.cli.subprocess.check_output", fake_check_output)
+
+    code, stdout, stderr = run_cli(tmp_path, "repo", "--check-updates", archive_root=archive)
+
+    assert code is None
+    assert stderr == ""
+    assert "github-skill" in stdout
+    assert "update available" in stdout
+    assert "x-skills repo add-github owner/repo skills/github-skill --replace-archive" in stdout
 
 
 def test_search_handles_malformed_api_payload(
@@ -850,7 +956,11 @@ def test_repo_add_github_installs_skill_from_repo_path(
         make_skill(checkout / "skills", "github-skill", "From GitHub.")
         return subprocess.CompletedProcess(command, 0)
 
+    def fake_check_output(command: list[str], text: bool) -> str:
+        return "abc123\n"
+
     monkeypatch.setattr("x_skills.cli.subprocess.run", fake_run)
+    monkeypatch.setattr("x_skills.cli.subprocess.check_output", fake_check_output)
 
     code, _, stderr = run_cli(
         tmp_path,

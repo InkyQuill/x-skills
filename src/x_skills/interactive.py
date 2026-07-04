@@ -41,6 +41,16 @@ class ActiveSkillGroup:
     fingerprint: str
 
 
+@dataclass(frozen=True)
+class RepoSkillRow:
+    key: str
+    name: str
+    description: str
+    used: bool
+    update_status: str
+    details: str
+
+
 def run_bulk_action(
     args: argparse.Namespace, skills: list[cli.ActiveSkill], action: str
 ) -> list[str]:
@@ -84,6 +94,48 @@ def install_search_result(args: argparse.Namespace, result: cli.SearchResult) ->
     return cli.install_search_result_to_repo(install_args, result)
 
 
+def install_repo_skill(args: argparse.Namespace, name: str, *, scope: str, target: str) -> Path:
+    return cli.link_repo_skill(args, name, scope=scope, target=target)
+
+
+def repo_skill_rows(
+    args: argparse.Namespace, update_statuses: dict[str, str] | None = None
+) -> list[RepoSkillRow]:
+    rows: list[RepoSkillRow] = []
+    update_statuses = update_statuses or {}
+    for skill in cli.repo_skills(args):
+        update_status = update_statuses.get(skill.name, skill.update_status)
+        suggestion = ""
+        if update_status == "update available" and skill.metadata is not None:
+            suggestion = cli._repo_update_suggestion(skill.metadata)
+        details = skill.description
+        if suggestion:
+            details = f"{details}\nupdate: {suggestion}" if details else f"update: {suggestion}"
+        rows.append(
+            RepoSkillRow(
+                key=f"repo:{skill.name}",
+                name=skill.name,
+                description=skill.description,
+                used=skill.used,
+                update_status=update_status,
+                details=details,
+            )
+        )
+    return rows
+
+
+def repo_update_statuses(args: argparse.Namespace) -> dict[str, str]:
+    return {
+        skill.name: skill.update_status
+        for skill in cli.repo_skills(args, check_updates=True)
+        if skill.update_status
+    }
+
+
+def search_results(args: argparse.Namespace, query: str) -> list[cli.SearchResult]:
+    return cli.search_all_skills(args, query)
+
+
 def active_skill_groups(
     args: argparse.Namespace, fingerprint_cache: dict[Path, str] | None = None
 ) -> list[ActiveSkillGroup]:
@@ -117,6 +169,14 @@ class XSkillsInteractive(App[None]):
         ("m", "migrate_selected", "Migrate"),
         ("u", "unlink_selected", "Unlink"),
         ("x", "clean_broken", "Clean broken"),
+        ("a", "active_view", "Active"),
+        ("l", "repo_view", "Repo"),
+        ("tab", "toggle_view", "View"),
+        ("p", "scope_project", "Project"),
+        ("g", "scope_global", "Global"),
+        ("1", "target_agents", "Agents"),
+        ("2", "target_claude", "Claude"),
+        ("3", "target_codex", "Codex"),
         ("s", "search_mode", "Search"),
         ("i", "install_selected", "Install"),
         ("escape", "back", "Back"),
@@ -132,10 +192,15 @@ class XSkillsInteractive(App[None]):
         self.detail: Static | None = None
         self.mode = "active"
         self.active_rows: dict[str, ActiveSkillGroup] = {}
+        self.repo_rows: dict[str, RepoSkillRow] = {}
         self.row_positions: dict[str, int] = {}
         self.search_rows: dict[str, cli.SearchResult] = {}
         self.selected_active: set[str] = set()
+        self.selected_repo: set[str] = set()
         self.fingerprint_cache: dict[Path, str] = {}
+        self.install_scope = "project"
+        self.install_target = "agents"
+        self.repo_update_statuses: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -169,17 +234,54 @@ class XSkillsInteractive(App[None]):
             return
         self._set_detail("Already showing active skills.")
 
+    def action_active_view(self) -> None:
+        self._refresh_table()
+
+    def action_repo_view(self) -> None:
+        self._refresh_repo_table(check_updates=True)
+
+    def action_toggle_view(self) -> None:
+        if self.mode == "repo":
+            self._refresh_table()
+        else:
+            self._refresh_repo_table(check_updates=True)
+
+    def action_scope_project(self) -> None:
+        self.install_scope = "project"
+        self._show_destination()
+
+    def action_scope_global(self) -> None:
+        self.install_scope = "global"
+        self._show_destination()
+
+    def action_target_agents(self) -> None:
+        self.install_target = "agents"
+        self._show_destination()
+
+    def action_target_claude(self) -> None:
+        self.install_target = "claude"
+        self._show_destination()
+
+    def action_target_codex(self) -> None:
+        self.install_target = "codex"
+        self._show_destination()
+
     def action_toggle_selected(self) -> None:
-        if self.mode != "active" or self.table is None:
+        if self.mode not in {"active", "repo"} or self.table is None:
             return
         row_key = self._current_row_key()
-        if not row_key or row_key not in self.active_rows:
+        rows = self.active_rows if self.mode == "active" else self.repo_rows
+        selected = self.selected_active if self.mode == "active" else self.selected_repo
+        if not row_key or row_key not in rows:
             return
-        if row_key in self.selected_active:
-            self.selected_active.remove(row_key)
+        if row_key in selected:
+            selected.remove(row_key)
         else:
-            self.selected_active.add(row_key)
-        self._refresh_table(preserve_row_key=row_key)
+            selected.add(row_key)
+        if self.mode == "active":
+            self._refresh_table(preserve_row_key=row_key)
+        else:
+            self._refresh_repo_table(preserve_row_key=row_key)
 
     def action_migrate_selected(self) -> None:
         self._run_selected_active_action("migrate")
@@ -218,6 +320,9 @@ class XSkillsInteractive(App[None]):
         self._set_detail("Type a query and press Enter.")
 
     def action_install_selected(self) -> None:
+        if self.mode == "repo":
+            self._install_selected_repo_skills()
+            return
         if self.mode != "search" or self.table is None:
             self._set_detail("Use search mode first.")
             return
@@ -225,6 +330,9 @@ class XSkillsInteractive(App[None]):
         result = self.search_rows.get(row_key)
         if result is None:
             self._set_detail("Select a search result first.")
+            return
+        if result.kind == "local":
+            self._install_repo_names([result.name])
             return
         try:
             self.run_worker(
@@ -253,6 +361,11 @@ class XSkillsInteractive(App[None]):
                 installed = event.worker.result
                 self._set_detail(f"installed: {installed.name}")
                 return
+            if event.worker.name == "repo-updates":
+                self.repo_update_statuses = event.worker.result
+                if self.mode == "repo":
+                    self._refresh_repo_table()
+                return
         if event.state == WorkerState.ERROR:
             self._set_detail(str(event.worker.error))
 
@@ -262,14 +375,22 @@ class XSkillsInteractive(App[None]):
         row = self.table.get_row(event.row_key) if self.table is not None else []
         if not row:
             return
-        if len(row) == 4:
-            name, package, installs, url = row
-            self.detail.update(f"{name}\npackage: {package}\ninstalls: {installs}\n{url}")
+        if len(row) == 5:
+            origin, name, package, installs, details = row
+            self.detail.update(
+                f"{name}\norigin: {origin}\npackage: {package}\ninstalls: {installs}\n{details}"
+            )
         elif len(row) == 6:
             selected, name, locations, status, fingerprint, details = row
             self.detail.update(
                 f"{selected} {name}\nlocations: {locations}\nstatus: {status}\n"
                 f"sha: {fingerprint}\n\n{details}"
+            )
+        elif len(row) == 7:
+            selected, name, used, update_status, destination, source, details = row
+            self.detail.update(
+                f"{selected} {name}\nused: {used}\nupdate: {update_status}\n"
+                f"destination: {destination}\nsource: {source}\n\n{details}"
             )
         else:
             self.detail.update("Unexpected row format.")
@@ -300,6 +421,44 @@ class XSkillsInteractive(App[None]):
         self._restore_cursor(preserve_row_key)
         self._set_detail("Space select | m migrate | u unlink | x clean broken | s search")
 
+    def _refresh_repo_table(
+        self, *, preserve_row_key: str | None = None, check_updates: bool = False
+    ) -> None:
+        if self.table is None:
+            return
+        self.mode = "repo"
+        if self.search_input is not None:
+            self.search_input.display = False
+        self.table.clear(columns=True)
+        self.repo_rows.clear()
+        self.row_positions.clear()
+        self.table.add_columns("Sel", "Skill", "Used", "Update", "Destination", "Source", "Details")
+        for row_index, row in enumerate(repo_skill_rows(self.args, self.repo_update_statuses)):
+            self.repo_rows[row.key] = row
+            self.row_positions[row.key] = row_index
+            self.table.add_row(
+                "*" if row.key in self.selected_repo else "",
+                row.name,
+                "yes" if row.used else "",
+                Text(row.update_status, style=_repo_update_style(row.update_status)),
+                self._destination_label(),
+                "github" if "update:" in row.details else "local",
+                row.description,
+                key=row.key,
+            )
+        self.selected_repo.intersection_update(self.repo_rows)
+        self._restore_cursor(preserve_row_key)
+        self._show_destination()
+        if check_updates:
+            self.run_worker(
+                lambda: repo_update_statuses(self.args),
+                name="repo-updates",
+                group="io",
+                exit_on_error=False,
+                exclusive=True,
+                thread=True,
+            )
+
     def _run_selected_active_action(self, action: str) -> None:
         selected = self._selected_active_skills()
         if not selected:
@@ -323,6 +482,17 @@ class XSkillsInteractive(App[None]):
                 selected.extend(group.skills)
         return selected
 
+    def _selected_repo_names(self) -> list[str]:
+        if self.selected_repo:
+            return [
+                self.repo_rows[key].name
+                for key in sorted(self.selected_repo)
+                if key in self.repo_rows
+            ]
+        row_key = self._current_row_key()
+        row = self.repo_rows.get(row_key)
+        return [row.name] if row is not None else []
+
     def _run_search(self, query: str) -> None:
         if len(query.strip()) < 2:
             self._render_search_results([])
@@ -330,7 +500,7 @@ class XSkillsInteractive(App[None]):
             return
         try:
             self.run_worker(
-                lambda: cli.search_skills(query.strip()),
+                lambda: search_results(self.args, query.strip()),
                 name="search",
                 group="io",
                 exit_on_error=False,
@@ -347,15 +517,18 @@ class XSkillsInteractive(App[None]):
             return
         self.table.clear(columns=True)
         self.search_rows.clear()
-        self.table.add_columns("Name", "Package", "Installs", "URL")
+        self.table.add_columns("Origin", "Name", "Package", "Installs", "Details")
         for index, result in enumerate(results, start=1):
             key = f"search-{index}"
             self.search_rows[key] = result
             self.table.add_row(
+                result.kind,
                 result.name,
                 cli.search_result_package(result),
                 cli.format_installs(result.installs),
-                f"https://skills.sh/{result.slug}",
+                result.description
+                if result.kind == "local"
+                else f"https://skills.sh/{result.slug}",
                 key=key,
             )
         self._set_detail(
@@ -382,6 +555,48 @@ class XSkillsInteractive(App[None]):
         if row is None:
             return
         self.table.move_cursor(row=row)
+
+    def _install_selected_repo_skills(self) -> None:
+        names = self._selected_repo_names()
+        if not names:
+            self._set_detail("Select repo skills first.")
+            return
+        self._install_repo_names(names)
+
+    def _install_repo_names(self, names: list[str]) -> None:
+        installed: list[str] = []
+        failed: list[str] = []
+        for name in names:
+            try:
+                install_repo_skill(
+                    self.args,
+                    name,
+                    scope=self.install_scope,
+                    target=self.install_target,
+                )
+            except (cli.XSkillsError, OSError) as error:
+                failed.append(f"{name} ({error})")
+            else:
+                installed.append(name)
+        self.selected_repo.clear()
+        self.fingerprint_cache.clear()
+        if self.mode == "repo":
+            self._refresh_repo_table()
+        message: list[str] = []
+        if installed:
+            message.append(f"installed to {self._destination_label()}: {', '.join(installed)}")
+        if failed:
+            message.append(f"failed: {', '.join(failed)}")
+        self._set_detail("\n".join(message))
+
+    def _destination_label(self) -> str:
+        return f"{self.install_scope} {self.install_target}"
+
+    def _show_destination(self) -> None:
+        self._set_detail(
+            f"Destination: {self._destination_label()} | "
+            "p/g scope | 1 agents 2 claude 3 codex | i install"
+        )
 
 
 def _active_skill_fingerprint(skill: cli.ActiveSkill) -> str:
@@ -505,6 +720,16 @@ def _locations_text(skills: list[cli.ActiveSkill]) -> Text:
 
 def _group_name_style(group: ActiveSkillGroup) -> str:
     return STATUS_STYLES.get(group.status, "")
+
+
+def _repo_update_style(update_status: str) -> str:
+    if update_status == "update available":
+        return "bold yellow"
+    if update_status == "up to date":
+        return "green"
+    if update_status == "unknown":
+        return "red"
+    return ""
 
 
 def run_interactive(args: argparse.Namespace) -> None:

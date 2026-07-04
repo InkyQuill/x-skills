@@ -29,6 +29,7 @@ x-skills list --global
 x-skills repo
 x-skills repo --used
 x-skills repo --unused
+x-skills repo --check-updates
 
 x-skills search svelte
 x-skills search react --owner vercel-labs
@@ -66,12 +67,15 @@ directory without `SKILL.md`.
 
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
+`--check-updates` checks archived skills installed from GitHub and shows whether
+the upstream default branch has moved since the stored commit.
 
-`x-skills search` answers "what can I install?" It queries the official
-`skills.sh` search API and prints installable `owner/repo@skill` packages. Use
-`--install <name-or-index> -y` to copy a selected result into the local repo
-archive. Installing from search does not link the skill into an active agent
-root; run `x-skills link ...` after reviewing the repo copy.
+`x-skills search` answers "what can I install?" It lists local repo matches
+first, then queries the official `skills.sh` search API and prints installable
+`owner/repo@skill` packages. Use `--install <name-or-index> -y` to install a
+selected result. Local repo results are linked into an active root, defaulting
+to project `agents`; remote `skills.sh` results are copied into the local repo
+archive first.
 
 `link`, `migrate`, `unlink`, and `repo remove` accept multiple skill names and
 print a summary for batch runs. Batch operations run in order and do not roll
@@ -130,17 +134,24 @@ to the repo.
 ## Interactive Mode
 
 `x-skills interactive` opens a Textual-based manager for longer maintenance
-sessions. It shows active skills with status, path, and details, supports
-multi-select with Space, and can migrate, unlink, and clean selected broken
-symlinks. Press `s` to search `skills.sh`, then select a result and press `i` to
-install it into the repo archive. The TUI uses the same discovery and operation
-logic as the CLI.
+sessions. It has active and repo views: press `a` for active skills and `l` for
+local repo skills. Active skills are grouped by directory SHA fingerprint, not
+name, so identical linked copies collapse into one row while changed copies stay
+separate. Use Space for multi-select. In active view, `m` migrates, `u` unlinks,
+and `x` cleans broken links; when nothing is selected, `x` cleans all broken
+links.
+
+In repo view, select saved skills and press `i` to link them into the chosen
+destination. The default destination is project `agents`; press `p`/`g` for
+project/global and `1`/`2`/`3` for agents/claude/codex. Press `s` to search;
+local repo matches appear before `skills.sh` results.
 
 ## Install Sources
 
 `x-skills repo add-github` clones a GitHub repository and copies one skill into
 the repo. Pass `path/to/skill` when the repository contains more than one
-`SKILL.md`.
+`SKILL.md`. GitHub installs store source metadata in `.x-skills.json` inside the
+archived skill, including source repo, skill path, and installed commit.
 
 `x-skills repo add-url` accepts:
 

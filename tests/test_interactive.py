@@ -13,8 +13,11 @@ from x_skills.interactive import (
     XSkillsInteractive,
     active_skill_groups,
     clean_broken_skills,
+    install_repo_skill,
     install_search_result,
+    repo_skill_rows,
     run_bulk_action,
+    search_results,
 )
 
 
@@ -211,13 +214,76 @@ def test_install_search_result_archives_selected_skill(tmp_path: Path, monkeypat
         make_skill(checkout / "skills", "other-skill", "Other.")
         return subprocess.CompletedProcess(command, 0)
 
+    def fake_check_output(command: list[str], text: bool) -> str:
+        return "abc123\n"
+
     monkeypatch.setattr("x_skills.cli.subprocess.run", fake_run)
+    monkeypatch.setattr("x_skills.cli.subprocess.check_output", fake_check_output)
 
     installed = install_search_result(args, result)
 
     assert installed.name == "github-skill"
     assert (args.archive_root / "skills" / "github-skill" / "SKILL.md").is_file()
     assert not (args.archive_root / "skills" / "other-skill").exists()
+
+
+def test_install_repo_skill_links_to_selected_destination(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    repo_skill = make_skill(args.archive_root / "skills", "repo-skill", "From repo.")
+
+    installed = install_repo_skill(args, "repo-skill", scope="global", target="codex")
+
+    assert installed == args.codex_global_root / "repo-skill"
+    assert installed.is_symlink()
+    assert installed.resolve() == repo_skill
+
+
+def test_repo_skill_rows_include_update_hint(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    skill = make_skill(args.archive_root / "skills", "repo-skill", "From repo.")
+    (skill / ".x-skills.json").write_text(
+        '{"version":1,"source_type":"github","source":"owner/repo",'
+        '"clone_url":"https://github.com/owner/repo.git","commit":"old",'
+        '"skill_path":"skills/repo-skill"}',
+        encoding="utf-8",
+    )
+
+    rows = repo_skill_rows(args, update_statuses={"repo-skill": "update available"})
+
+    assert rows[0].name == "repo-skill"
+    assert rows[0].update_status == "update available"
+    assert (
+        "x-skills repo add-github owner/repo skills/repo-skill --replace-archive" in rows[0].details
+    )
+
+
+def test_search_results_return_local_repo_matches_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args = make_args(tmp_path)
+    make_skill(args.archive_root / "skills", "react-local", "Local.")
+
+    def fake_search_skills(
+        query: str, *, owner: str | None = None, limit: int = 10
+    ) -> list[cli.SearchResult]:
+        assert query == "react"
+        assert owner is None
+        assert limit == 10
+        return [
+            cli.SearchResult(
+                name="react-remote",
+                slug="owner/repo/react-remote",
+                source="owner/repo",
+                installs=10,
+            )
+        ]
+
+    monkeypatch.setattr("x_skills.interactive.cli.search_skills", fake_search_skills)
+
+    results = search_results(args, "react")
+
+    assert [result.kind for result in results] == ["local", "remote"]
+    assert [result.name for result in results] == ["react-local", "react-remote"]
 
 
 def test_install_search_result_fails_when_selected_skill_is_missing(

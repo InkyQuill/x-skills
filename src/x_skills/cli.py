@@ -48,6 +48,9 @@ class RepoSkill:
     path: Path
     description: str
     used: bool
+    metadata: RepoMetadata | None = None
+    update_status: str = ""
+    update_suggestion: str = ""
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,20 @@ class SearchResult:
     slug: str
     source: str
     installs: int
+    kind: str = "remote"
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class RepoMetadata:
+    source_type: str
+    source: str
+    clone_url: str
+    commit: str
+    skill_path: str
+
+
+METADATA_FILENAME = ".x-skills.json"
 
 
 def main(
@@ -136,6 +153,11 @@ def _build_parser() -> argparse.ArgumentParser:
     repo_parser = subparsers.add_parser("repo", help="list or manage archived skills")
     repo_parser.add_argument("--used", action="store_true", help="show only active repo skills")
     repo_parser.add_argument("--unused", action="store_true", help="show only inactive repo skills")
+    repo_parser.add_argument(
+        "--check-updates",
+        action="store_true",
+        help="check tracked GitHub skills for upstream updates",
+    )
     repo_subparsers = repo_parser.add_subparsers(dest="repo_command")
     repo_parser.set_defaults(func=cmd_repo)
 
@@ -163,6 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
     repo_remove.set_defaults(func=cmd_repo_remove)
 
     search_parser = subparsers.add_parser("search", aliases=["find"], help="search skills.sh")
+    _add_active_filters(search_parser)
     search_parser.add_argument("--owner", help="filter by GitHub owner")
     search_parser.add_argument(
         "--limit", type=int, default=10, help="maximum API results to fetch; default: 10"
@@ -260,7 +283,7 @@ def cmd_list(args: argparse.Namespace) -> None:
 def cmd_repo(args: argparse.Namespace) -> None:
     if args.used and args.unused:
         raise XSkillsError("--used and --unused are mutually exclusive")
-    skills = _repo_skills(args)
+    skills = _repo_skills(args, check_updates=args.check_updates)
     if args.used:
         skills = [skill for skill in skills if skill.used]
     if args.unused:
@@ -275,6 +298,9 @@ def cmd_repo(args: argparse.Namespace) -> None:
                     "path": str(skill.path),
                     "description": skill.description,
                     "used": skill.used,
+                    "metadata": _repo_metadata_to_json(skill.metadata),
+                    "update_status": skill.update_status,
+                    "update_suggestion": skill.update_suggestion,
                 }
                 for skill in skills
             ],
@@ -282,12 +308,15 @@ def cmd_repo(args: argparse.Namespace) -> None:
         return
 
     for skill in skills:
-        _print(args, f"{skill.name:<22} {skill.description}")
+        update = f"  {skill.update_status}" if skill.update_status else ""
+        _print(args, f"{skill.name:<22} {skill.description}{update}")
+        if skill.update_suggestion:
+            _print(args, f"  update: {skill.update_suggestion}")
 
 
 def cmd_search(args: argparse.Namespace) -> None:
     query = " ".join(args.query).strip()
-    results = search_skills(query, owner=args.owner, limit=args.limit)
+    results = search_all_skills(args, query, owner=args.owner, limit=args.limit)
     if args.json_:
         _print_json(args, [_search_result_to_json(result) for result in results])
         return
@@ -299,6 +328,9 @@ def cmd_search(args: argparse.Namespace) -> None:
 
     if args.install:
         result = _resolve_search_install_selection(args.install, results)
+        if result.kind == "local":
+            link_repo_skill(args, result.name)
+            return
         if not _confirm(
             args,
             f'Install "{result.name}" from {result.source or result.slug} into repo? [y/N]: ',
@@ -320,7 +352,10 @@ def cmd_search(args: argparse.Namespace) -> None:
         installs = _format_installs(result.installs)
         installs_label = f" {installs}" if installs else ""
         _print(args, f"{index}. {package}{installs_label}")
-        _print(args, f"   https://skills.sh/{result.slug}")
+        if result.kind == "local":
+            _print(args, f"   {result.description}")
+        else:
+            _print(args, f"   https://skills.sh/{result.slug}")
         _print(args, "")
 
 
@@ -339,6 +374,24 @@ def _cmd_link_one(args: argparse.Namespace) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     os.symlink(source, target, target_is_directory=True)
     _print(args, f"linked {root.scope} {root.target}: {args.name}")
+
+
+def link_repo_skill(
+    args: argparse.Namespace,
+    name: str,
+    *,
+    scope: str | None = None,
+    target: str | None = None,
+) -> Path:
+    action_args = argparse.Namespace(**vars(args))
+    action_args.name = name
+    action_args.names = [name]
+    resolved_scope = scope or _selected_scope_or_default(args)
+    action_args.project_ = resolved_scope == "project"
+    action_args.global_ = resolved_scope == "global"
+    action_args.target = target or getattr(args, "target", None) or "agents"
+    _cmd_link_one(action_args)
+    return _active_root_path(action_args, resolved_scope, action_args.target) / name
 
 
 def cmd_migrate(args: argparse.Namespace) -> None:
@@ -443,7 +496,8 @@ def cmd_repo_add_github(args: argparse.Namespace) -> None:
         checkout = Path(tmp) / "repo"
         _run_git_clone(clone_url, checkout)
         source = checkout / skill_path if skill_path else _find_single_skill(checkout)
-        _install_skill_copy(source, args)
+        metadata = _github_repo_metadata(args.repo_or_url, clone_url, checkout, source)
+        _install_skill_copy(source, args, metadata=metadata)
         _print(args, f"installed: {source.name}")
 
 
@@ -551,6 +605,32 @@ def search_skills(query: str, *, owner: str | None = None, limit: int = 10) -> l
     return sorted(results, key=lambda result: result.installs, reverse=True)
 
 
+def search_all_skills(
+    args: argparse.Namespace, query: str, *, owner: str | None = None, limit: int = 10
+) -> list[SearchResult]:
+    return [*search_repo_skills(args, query), *search_skills(query, owner=owner, limit=limit)]
+
+
+def search_repo_skills(args: argparse.Namespace, query: str) -> list[SearchResult]:
+    normalized = query.casefold()
+    results: list[SearchResult] = []
+    for skill in _repo_skills(args):
+        haystack = f"{skill.name}\n{skill.description}".casefold()
+        if normalized not in haystack:
+            continue
+        results.append(
+            SearchResult(
+                name=skill.name,
+                slug=skill.name,
+                source="local repo",
+                installs=0,
+                kind="local",
+                description=skill.description,
+            )
+        )
+    return results
+
+
 def install_search_result_to_repo(args: argparse.Namespace, result: SearchResult) -> Path:
     source = result.source or _source_from_slug(result.slug)
     if not source:
@@ -560,7 +640,8 @@ def install_search_result_to_repo(args: argparse.Namespace, result: SearchResult
         checkout = Path(tmp) / "repo"
         _run_git_clone(clone_url, checkout)
         skill = _find_named_skill(checkout, result.name)
-        return _install_skill_copy(skill, args)
+        metadata = _github_repo_metadata(source, clone_url, checkout, skill)
+        return _install_skill_copy(skill, args, metadata=metadata)
 
 
 def active_roots(args: argparse.Namespace, *, include_all: bool = False) -> list[ActiveRoot]:
@@ -583,6 +664,10 @@ def search_result_package(result: SearchResult) -> str:
 
 def format_installs(count: int) -> str:
     return _format_installs(count)
+
+
+def repo_skills(args: argparse.Namespace, *, check_updates: bool = False) -> list[RepoSkill]:
+    return _repo_skills(args, check_updates=check_updates)
 
 
 def _active_roots(args: argparse.Namespace, *, include_all: bool = False) -> list[ActiveRoot]:
@@ -683,7 +768,7 @@ def _matching_active_skills(args: argparse.Namespace, name: str) -> list[ActiveS
     return [skill for skill in _active_skills(args) if skill.name == name]
 
 
-def _repo_skills(args: argparse.Namespace) -> list[RepoSkill]:
+def _repo_skills(args: argparse.Namespace, *, check_updates: bool = False) -> list[RepoSkill]:
     active_names = {
         skill.name
         for skill in _active_skills(args, _active_roots(args, include_all=True))
@@ -692,11 +777,29 @@ def _repo_skills(args: argparse.Namespace) -> list[RepoSkill]:
     root = _archive_skills_root(args)
     if not root.exists():
         return []
-    return [
-        RepoSkill(path.name, path, _skill_description(path), path.name in active_names)
-        for path in sorted(root.iterdir(), key=lambda item: item.name)
-        if _is_skill_dir(path)
-    ]
+    skills: list[RepoSkill] = []
+    for path in sorted(root.iterdir(), key=lambda item: item.name):
+        if not _is_skill_dir(path):
+            continue
+        metadata = _repo_metadata(path)
+        update_status = ""
+        update_suggestion = ""
+        if check_updates and metadata is not None:
+            update_status = _repo_update_status(metadata)
+            if update_status == "update available":
+                update_suggestion = _repo_update_suggestion(metadata)
+        skills.append(
+            RepoSkill(
+                path.name,
+                path,
+                _skill_description(path),
+                path.name in active_names,
+                metadata,
+                update_status,
+                update_suggestion,
+            )
+        )
+    return skills
 
 
 def _resolve_search_install_selection(selection: str, results: list[SearchResult]) -> SearchResult:
@@ -721,6 +824,8 @@ def _resolve_search_install_selection(selection: str, results: list[SearchResult
 
 
 def _search_result_package(result: SearchResult) -> str:
+    if result.kind == "local":
+        return f"repo:{result.name}"
     source = result.source or _source_from_slug(result.slug)
     return f"{source}@{result.name}" if source else result.slug
 
@@ -741,6 +846,105 @@ def _format_installs(count: int) -> str:
         return f"{count / 1_000:.1f}".removesuffix(".0") + "K installs"
     suffix = "" if count == 1 else "s"
     return f"{count} install{suffix}"
+
+
+def _selected_scope_or_default(args: argparse.Namespace) -> str:
+    if getattr(args, "global_", False):
+        return "global"
+    return "project"
+
+
+def _github_repo_metadata(
+    repo_or_url: str, clone_url: str, checkout: Path, skill: Path
+) -> RepoMetadata:
+    return RepoMetadata(
+        source_type="github",
+        source=_github_source_label(repo_or_url, clone_url),
+        clone_url=clone_url,
+        commit=_git_head_commit(checkout),
+        skill_path=skill.relative_to(checkout).as_posix(),
+    )
+
+
+def _github_source_label(repo_or_url: str, clone_url: str) -> str:
+    if not repo_or_url.startswith(("http://", "https://", "git@")):
+        return repo_or_url.removesuffix(".git")
+    parsed = urlparse(clone_url)
+    if parsed.netloc == "github.com":
+        return parsed.path.strip("/").removesuffix(".git")
+    return clone_url
+
+
+def _git_head_commit(checkout: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError) as error:
+        raise XSkillsError(f"cannot read cloned git commit: {checkout}") from error
+
+
+def _repo_metadata(skill: Path) -> RepoMetadata | None:
+    metadata_file = skill / METADATA_FILENAME
+    if not metadata_file.is_file():
+        return None
+    try:
+        payload = json.loads(metadata_file.read_text(encoding="utf-8"))
+    except (OSError, JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("source_type") != "github":
+        return None
+    required = ("source", "clone_url", "commit", "skill_path")
+    if not all(isinstance(payload.get(key), str) and payload.get(key) for key in required):
+        return None
+    return RepoMetadata(
+        source_type="github",
+        source=payload["source"],
+        clone_url=payload["clone_url"],
+        commit=payload["commit"],
+        skill_path=payload["skill_path"],
+    )
+
+
+def _write_repo_metadata(skill: Path, metadata: RepoMetadata) -> None:
+    payload = _repo_metadata_to_json(metadata)
+    payload["version"] = 1
+    (skill / METADATA_FILENAME).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _repo_metadata_to_json(metadata: RepoMetadata | None) -> dict[str, str] | None:
+    if metadata is None:
+        return None
+    return {
+        "source_type": metadata.source_type,
+        "source": metadata.source,
+        "clone_url": metadata.clone_url,
+        "commit": metadata.commit,
+        "skill_path": metadata.skill_path,
+    }
+
+
+def _repo_update_status(metadata: RepoMetadata) -> str:
+    try:
+        output = subprocess.check_output(
+            ["git", "ls-remote", metadata.clone_url, "HEAD"],
+            text=True,
+            timeout=10,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return "unknown"
+    latest = output.split(None, 1)[0] if output else ""
+    if not latest:
+        return "unknown"
+    return "up to date" if latest == metadata.commit else "update available"
+
+
+def _repo_update_suggestion(metadata: RepoMetadata) -> str:
+    return f"x-skills repo add-github {metadata.source} {metadata.skill_path} --replace-archive"
 
 
 def _find_named_skill(root: Path, name: str) -> Path:
@@ -1040,6 +1244,8 @@ def _search_result_to_json(result: SearchResult) -> dict[str, str | int]:
         "source": result.source,
         "installs": result.installs,
         "package": _search_result_package(result),
+        "kind": result.kind,
+        "description": result.description,
     }
 
 
@@ -1105,13 +1311,17 @@ def _prepare_archive_destination(destination: Path, *, replace: bool) -> None:
         shutil.rmtree(destination)
 
 
-def _install_skill_copy(source: Path, args: argparse.Namespace) -> Path:
+def _install_skill_copy(
+    source: Path, args: argparse.Namespace, *, metadata: RepoMetadata | None = None
+) -> Path:
     if not _is_skill_dir(source):
         raise XSkillsError(f"not a skill directory: {source}")
     destination = _archive_skill(args, source.name)
     _prepare_archive_destination(destination, replace=args.replace_archive)
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, destination, symlinks=True)
+    if metadata is not None:
+        _write_repo_metadata(destination, metadata)
     return destination
 
 

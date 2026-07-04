@@ -79,6 +79,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		newMigrateCommand(&opts),
 		newUnlinkCommand(&opts),
 		newDoctorCommand(&opts),
+		newTUICommand(&opts),
 	)
 
 	return root, nil

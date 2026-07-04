@@ -1,0 +1,260 @@
+package tui
+
+import (
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/repo"
+)
+
+type ViewName string
+
+const (
+	ViewActive ViewName = "active"
+	ViewRepo   ViewName = "repo"
+	ViewDoctor ViewName = "doctor"
+)
+
+type Model struct {
+	cfg      config.Config
+	view     ViewName
+	width    int
+	height   int
+	cursor   int
+	selected map[string]bool
+
+	active []ActiveGroup
+	repo   []repo.Skill
+	issues []doctor.Issue
+
+	wizard Wizard
+	status string
+	err    error
+}
+
+func New(cfg config.Config) Model {
+	m := Model{
+		cfg:      cfg,
+		view:     ViewActive,
+		selected: map[string]bool{},
+	}
+	m.reload()
+	return m
+}
+
+func (m Model) Init() tea.Cmd {
+	return nil
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	default:
+		return m, nil
+	}
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.wizard.Open {
+		switch msg.String() {
+		case "esc":
+			m.wizard = Wizard{}
+			return m, nil
+		case "enter":
+			m.applyWizard()
+			return m, nil
+		}
+	}
+
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "a":
+		m.setView(ViewActive)
+	case "r":
+		m.setView(ViewRepo)
+	case "d":
+		m.setView(ViewDoctor)
+	case "up", "k":
+		m.moveCursor(-1)
+	case "down", "j":
+		m.moveCursor(1)
+	case " ":
+		m.toggleSelection()
+	case "i":
+		m.openWizard(ActionInstall)
+	case "m":
+		m.openWizard(ActionMigrate)
+	case "u":
+		m.openWizard(ActionUnlink)
+	case "f":
+		m.openWizard(ActionFixDoctor)
+	}
+
+	return m, nil
+}
+
+func (m *Model) reload() {
+	m.err = nil
+	activeSkills, err := actions.ScanActive(m.cfg, actions.ScanFilter{})
+	if err != nil {
+		m.err = err
+	}
+	m.active = groupActiveSkills(activeSkills)
+
+	repoSkills, err := repo.List(m.cfg)
+	if err != nil && m.err == nil {
+		m.err = err
+	}
+	m.repo = repoSkills
+
+	issues, err := doctor.Diagnose(m.cfg, doctor.Filter{})
+	if err != nil && m.err == nil {
+		m.err = err
+	}
+	m.issues = issues
+	m.clampCursor()
+}
+
+func (m *Model) setView(view ViewName) {
+	if m.view == view {
+		return
+	}
+	m.view = view
+	m.cursor = 0
+	m.wizard = Wizard{}
+}
+
+func (m *Model) moveCursor(delta int) {
+	count := m.itemCount()
+	if count == 0 {
+		m.cursor = 0
+		return
+	}
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = count - 1
+	}
+	if m.cursor >= count {
+		m.cursor = 0
+	}
+}
+
+func (m *Model) toggleSelection() {
+	id, ok := m.currentID()
+	if !ok {
+		return
+	}
+	m.selected[id] = !m.selected[id]
+}
+
+func (m *Model) selectedIDsForView() []string {
+	var ids []string
+	switch m.view {
+	case ViewActive:
+		for _, group := range m.active {
+			if m.selected[group.ID] {
+				ids = append(ids, group.ID)
+			}
+		}
+	case ViewRepo:
+		for _, skill := range m.repo {
+			id := repoID(skill.Name)
+			if m.selected[id] {
+				ids = append(ids, id)
+			}
+		}
+	case ViewDoctor:
+		for _, issue := range m.issues {
+			id := issueID(issue)
+			if m.selected[id] {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) > 0 {
+		return ids
+	}
+	id, ok := m.currentID()
+	if !ok {
+		return nil
+	}
+	return []string{id}
+}
+
+func (m *Model) currentID() (string, bool) {
+	switch m.view {
+	case ViewActive:
+		if m.cursor < 0 || m.cursor >= len(m.active) {
+			return "", false
+		}
+		return m.active[m.cursor].ID, true
+	case ViewRepo:
+		if m.cursor < 0 || m.cursor >= len(m.repo) {
+			return "", false
+		}
+		return repoID(m.repo[m.cursor].Name), true
+	case ViewDoctor:
+		if m.cursor < 0 || m.cursor >= len(m.issues) {
+			return "", false
+		}
+		return issueID(m.issues[m.cursor]), true
+	default:
+		return "", false
+	}
+}
+
+func (m *Model) itemCount() int {
+	switch m.view {
+	case ViewActive:
+		return len(m.active)
+	case ViewRepo:
+		return len(m.repo)
+	case ViewDoctor:
+		return len(m.issues)
+	default:
+		return 0
+	}
+}
+
+func (m *Model) clampCursor() {
+	count := m.itemCount()
+	if count == 0 {
+		m.cursor = 0
+		return
+	}
+	if m.cursor >= count {
+		m.cursor = count - 1
+	}
+}
+
+func (m *Model) applyWizard() {
+	if !m.wizard.Open {
+		return
+	}
+	results, err := applyWizard(m.cfg, m.wizard)
+	if err != nil {
+		m.status = fmt.Sprintf("failed: %v", err)
+		return
+	}
+	m.status = fmt.Sprintf("applied %d change(s)", len(results))
+	m.wizard = Wizard{}
+	m.reload()
+}
+
+func repoID(name string) string {
+	return "repo:" + name
+}
+
+func issueID(issue doctor.Issue) string {
+	return "doctor:" + issue.Path
+}

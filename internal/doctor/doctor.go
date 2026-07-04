@@ -67,10 +67,10 @@ func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
 		return nil, err
 	}
 
-	return fixIssues(issues)
+	return FixIssues(issues)
 }
 
-func fixIssues(issues []Issue) ([]FixResult, error) {
+func FixIssues(issues []Issue) ([]FixResult, error) {
 	var results []FixResult
 	for _, issue := range issues {
 		if issue.Kind != KindBrokenSymlink {

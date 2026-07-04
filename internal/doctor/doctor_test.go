@@ -271,7 +271,7 @@ func TestFixReturnsAppliedResultsWhenLaterIssueFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := fixIssues([]Issue{
+	results, err := FixIssues([]Issue{
 		{
 			Kind:    KindBrokenSymlink,
 			Name:    "a-broken",

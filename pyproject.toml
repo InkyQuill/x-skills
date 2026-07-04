@@ -5,7 +5,9 @@ description = "Personal archive and linker for agent skills"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Pavel Obruchnikov", email = "me@inkyquill.net" }]
-dependencies = []
+dependencies = [
+    "textual>=8.2.8",
+]
 
 [project.urls]
 Homepage = "https://github.com/InkyQuill/x-skills"

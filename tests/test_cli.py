@@ -295,6 +295,86 @@ def test_migrate_explicit_project_skill_with_yes_flag(tmp_path: Path) -> None:
     assert active.resolve() == archived
 
 
+def test_migrate_accepts_multiple_skill_names_and_prints_summary(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    first = make_skill(project / ".codex" / "skills", "first-skill")
+    second = make_skill(project / ".codex" / "skills", "second-skill")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "migrate",
+        "first-skill",
+        "second-skill",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "Summary:" in stdout
+    assert "migrated: first-skill, second-skill" in stdout
+    assert first.is_symlink()
+    assert second.is_symlink()
+    assert (archive / "skills" / "first-skill").is_dir()
+    assert (archive / "skills" / "second-skill").is_dir()
+
+
+def test_migrate_linked_active_group_relinks_all_entries_to_repo(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    agents_global = tmp_path / "global" / ".agents" / "skills"
+    claude_global = tmp_path / "global" / ".claude" / "skills"
+    agents_skill = make_skill(agents_global, "shared-skill")
+    claude_global.mkdir(parents=True)
+    claude_skill = claude_global / "shared-skill"
+    os.symlink(agents_skill, claude_skill)
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "migrate",
+        "shared-skill",
+        "--global",
+        archive_root=archive,
+        global_root=agents_global,
+        claude_global_root=claude_global,
+        input_text="1\ny\n",
+    )
+
+    archived = archive / "skills" / "shared-skill"
+    assert code is None
+    assert stderr == ""
+    assert "Found linked setup" in stdout
+    assert archived.is_dir()
+    assert agents_skill.is_symlink()
+    assert claude_skill.is_symlink()
+    assert agents_skill.resolve() == archived
+    assert claude_skill.resolve() == archived
+
+
+def test_migrate_same_name_separate_copies_are_not_grouped(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    agents_global = tmp_path / "global" / ".agents" / "skills"
+    make_skill(project / ".codex" / "skills", "shared-skill")
+    make_skill(agents_global, "shared-skill")
+
+    code, _, stderr = run_cli(
+        tmp_path,
+        "--no-input",
+        "migrate",
+        "shared-skill",
+        project_root=project,
+        global_root=agents_global,
+    )
+
+    assert code == 2
+    assert "multiple active skills" in stderr
+    assert "linked setup" not in stderr
+
+
 def test_link_explicit_project_target(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
     project = tmp_path / "project"
@@ -316,6 +396,34 @@ def test_link_explicit_project_target(tmp_path: Path) -> None:
     target = project / ".codex" / "skills" / "typescript-expert"
     assert target.is_symlink()
     assert target.resolve() == skill
+
+
+def test_link_accepts_multiple_skill_names_and_prints_summary(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    first = make_skill(archive / "skills", "first-skill")
+    second = make_skill(archive / "skills", "second-skill")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "link",
+        "first-skill",
+        "second-skill",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "Summary:" in stdout
+    assert "linked: first-skill, second-skill" in stdout
+    first_target = project / ".codex" / "skills" / "first-skill"
+    second_target = project / ".codex" / "skills" / "second-skill"
+    assert first_target.resolve() == first
+    assert second_target.resolve() == second
 
 
 def test_link_fails_non_interactively_when_destination_is_ambiguous(tmp_path: Path) -> None:
@@ -362,6 +470,39 @@ def test_unlink_managed_symlink_with_yes_flag(tmp_path: Path) -> None:
     assert skill.is_dir()
 
 
+def test_unlink_accepts_multiple_skill_names_and_prints_summary(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    project = tmp_path / "project"
+    first = make_skill(archive / "skills", "first-skill")
+    second = make_skill(archive / "skills", "second-skill")
+    active_root = project / ".codex" / "skills"
+    active_root.mkdir(parents=True)
+    first_target = active_root / "first-skill"
+    second_target = active_root / "second-skill"
+    os.symlink(first, first_target)
+    os.symlink(second, second_target)
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "unlink",
+        "first-skill",
+        "second-skill",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "Summary:" in stdout
+    assert "unlinked: first-skill, second-skill" in stdout
+    assert not first_target.exists()
+    assert not second_target.exists()
+
+
 def test_unlink_unmanaged_directory_with_no_flag_cancels(tmp_path: Path) -> None:
     project = tmp_path / "project"
     active = make_skill(project / ".codex" / "skills", "local-only")
@@ -381,6 +522,85 @@ def test_unlink_unmanaged_directory_with_no_flag_cancels(tmp_path: Path) -> None
     assert stderr == ""
     assert "cancelled" in stdout
     assert active.is_dir()
+
+
+def test_unlink_unmanaged_directory_with_delete_flag_and_yes_removes_active_copy(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    archive = tmp_path / "archive"
+    active = make_skill(project / ".codex" / "skills", "local-only")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "unlink",
+        "local-only",
+        "--target",
+        "codex",
+        "--project",
+        "--delete-unmanaged",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "removed unmanaged" in stdout
+    assert not active.exists()
+    assert not (archive / "skills" / "local-only").exists()
+
+
+def test_unlink_unmanaged_directory_interactive_delete_choice_removes_active_copy(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    archive = tmp_path / "archive"
+    active = make_skill(project / ".codex" / "skills", "local-only")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "unlink",
+        "local-only",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+        input_text="2\n",
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "Choose action" in stdout
+    assert "unlink without migration" in stdout
+    assert "removed unmanaged" in stdout
+    assert not active.exists()
+    assert not (archive / "skills" / "local-only").exists()
+
+
+def test_unlink_unmanaged_directory_with_yes_migrates_first(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    archive = tmp_path / "archive"
+    active = make_skill(project / ".codex" / "skills", "local-only")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "unlink",
+        "local-only",
+        "--target",
+        "codex",
+        "--project",
+        archive_root=archive,
+        project_root=project,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "migrated and unlinked" in stdout
+    assert not active.exists()
+    assert (archive / "skills" / "local-only").is_dir()
 
 
 def test_repo_remove_requires_yes_in_non_interactive_mode(tmp_path: Path) -> None:
@@ -410,6 +630,29 @@ def test_repo_remove_with_yes_flag_removes_archived_skill(tmp_path: Path) -> Non
     assert code is None
     assert stderr == ""
     assert not (archive / "skills" / "old-skill").exists()
+
+
+def test_repo_remove_accepts_multiple_skill_names_and_prints_summary(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    make_skill(archive / "skills", "first-skill")
+    make_skill(archive / "skills", "second-skill")
+
+    code, stdout, stderr = run_cli(
+        tmp_path,
+        "-y",
+        "repo",
+        "remove",
+        "first-skill",
+        "second-skill",
+        archive_root=archive,
+    )
+
+    assert code is None
+    assert stderr == ""
+    assert "Summary:" in stdout
+    assert "removed: first-skill, second-skill" in stdout
+    assert not (archive / "skills" / "first-skill").exists()
+    assert not (archive / "skills" / "second-skill").exists()
 
 
 def test_repo_add_url_installs_direct_skill_md(
@@ -465,3 +708,27 @@ def test_repo_add_github_installs_skill_from_repo_path(
     assert code is None
     assert stderr == ""
     assert (archive / "skills" / "github-skill" / "SKILL.md").is_file()
+
+
+def test_interactive_rejects_no_input(tmp_path: Path) -> None:
+    code, _, stderr = run_cli(tmp_path, "--no-input", "interactive")
+
+    assert code == 2
+    assert "interactive cannot run with --no-input" in stderr
+
+
+def test_interactive_dispatches_to_textual_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[bool] = []
+
+    def fake_run_interactive(args: object) -> None:
+        called.append(True)
+
+    monkeypatch.setattr("x_skills.cli._run_interactive_app", fake_run_interactive, raising=False)
+
+    code, _, stderr = run_cli(tmp_path, "interactive")
+
+    assert code is None
+    assert stderr == ""
+    assert called == [True]

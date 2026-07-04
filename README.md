@@ -32,15 +32,18 @@ x-skills repo --unused
 
 x-skills link svelte-coder --target codex --project
 x-skills link typescript-expert --target codex --global
+x-skills link svelte-coder typescript-expert --target codex --project
 
 x-skills migrate next-best-practices --target codex --project
 x-skills unlink opentui-react --target agents --global
+x-skills unlink supergoal --target claude --global --delete-unmanaged
 
 x-skills repo add-github owner/repo path/to/skill
 x-skills repo add-github https://github.com/owner/repo/tree/main/skills/foo
 x-skills repo add-url https://example.com/skill.zip
 x-skills repo remove old-skill
 
+x-skills interactive
 x-skills doctor
 ```
 
@@ -59,6 +62,15 @@ directory without `SKILL.md`.
 
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
+
+`link`, `migrate`, `unlink`, and `repo remove` accept multiple skill names and
+print a summary for batch runs. Batch operations run in order and do not roll
+back earlier successful changes if a later item fails.
+
+When the same skill appears in multiple active roots, `x-skills` checks whether
+those entries resolve to the same physical skill. Linked setups are shown as a
+group and can be managed together; separate same-name copies are never merged
+automatically.
 
 ## Paths
 
@@ -99,6 +111,19 @@ Global prompt flags:
 
 `-y` and `-n` do not choose among ambiguous locations. Use explicit flags such as
 `--target codex --project` or answer the interactive selection prompt.
+
+For unmanaged active directories, `unlink` asks whether to migrate first, remove
+the active directory without migration, or cancel. For automation, use
+`--delete-unmanaged -y` to remove an unmanaged active directory without adding it
+to the repo.
+
+## Interactive Mode
+
+`x-skills interactive` opens a Textual-based manager for longer maintenance
+sessions. The first version shows active skills with status, path, and details,
+and supports refresh and quit. It uses the same discovery logic as the CLI
+commands; mutation actions will continue to require explicit confirmation as the
+TUI grows.
 
 ## Install Sources
 

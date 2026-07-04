@@ -150,12 +150,12 @@ def _build_parser() -> argparse.ArgumentParser:
     repo_add_url.set_defaults(func=cmd_repo_add_url)
 
     repo_remove = repo_subparsers.add_parser("remove", help="remove an archived skill")
-    repo_remove.add_argument("name")
+    repo_remove.add_argument("names", nargs="+")
     repo_remove.set_defaults(func=cmd_repo_remove)
 
     link_parser = subparsers.add_parser("link", help="link a repo skill into active skills")
     _add_active_filters(link_parser)
-    link_parser.add_argument("name")
+    link_parser.add_argument("names", nargs="+")
     link_parser.set_defaults(func=cmd_link)
 
     migrate_parser = subparsers.add_parser(
@@ -166,13 +166,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--replace-archive", action="store_true", help="replace archived copy"
     )
     migrate_parser.add_argument("--archive-as", help="archive under another name")
-    migrate_parser.add_argument("name")
+    migrate_parser.add_argument("names", nargs="+")
     migrate_parser.set_defaults(func=cmd_migrate)
 
     unlink_parser = subparsers.add_parser("unlink", help="remove an active skill")
     _add_active_filters(unlink_parser)
-    unlink_parser.add_argument("name")
+    unlink_parser.add_argument(
+        "--delete-unmanaged",
+        action="store_true",
+        help="remove unmanaged active directories instead of migrating them",
+    )
+    unlink_parser.add_argument("names", nargs="+")
     unlink_parser.set_defaults(func=cmd_unlink)
+
+    interactive = subparsers.add_parser("interactive", help="open interactive skill manager")
+    interactive.set_defaults(func=cmd_interactive)
 
     doctor = subparsers.add_parser("doctor", help="check configured roots and dependencies")
     doctor.set_defaults(func=cmd_doctor)
@@ -253,6 +261,10 @@ def cmd_repo(args: argparse.Namespace) -> None:
 
 
 def cmd_link(args: argparse.Namespace) -> None:
+    _run_name_batch(args, "linked", _cmd_link_one)
+
+
+def _cmd_link_one(args: argparse.Namespace) -> None:
     source = _archive_skill(args, args.name)
     if not _is_skill_dir(source):
         raise XSkillsError(f"repo skill not found: {args.name}")
@@ -266,6 +278,10 @@ def cmd_link(args: argparse.Namespace) -> None:
 
 
 def cmd_migrate(args: argparse.Namespace) -> None:
+    _run_name_batch(args, "migrated", _cmd_migrate_one)
+
+
+def _cmd_migrate_one(args: argparse.Namespace) -> None:
     candidates = _matching_active_skills(args, args.name)
     if not candidates:
         raise XSkillsError(f"active skill not found: {args.name}")
@@ -274,6 +290,11 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     unmanaged = [skill for skill in candidates if skill.status == "unmanaged"]
     if not unmanaged and managed:
         _print(args, f"already managed: {args.name}")
+        return
+
+    linked_group = _linked_active_group(unmanaged)
+    if linked_group and _resolve_linked_group_action(args, args.name, linked_group, "migrate"):
+        _migrate_linked_group(args, linked_group)
         return
 
     selected = _resolve_active_candidate(args, args.name, unmanaged, "migrate")
@@ -308,6 +329,10 @@ def cmd_migrate(args: argparse.Namespace) -> None:
 
 
 def cmd_unlink(args: argparse.Namespace) -> None:
+    _run_name_batch(args, "unlinked", _cmd_unlink_one)
+
+
+def _cmd_unlink_one(args: argparse.Namespace) -> None:
     candidates = _matching_active_skills(args, args.name)
     if not candidates:
         raise XSkillsError(f"active skill not found: {args.name}")
@@ -324,14 +349,19 @@ def cmd_unlink(args: argparse.Namespace) -> None:
         _print(args, f"unlinked {selected.root.scope} {selected.root.target}: {selected.name}")
         return
 
-    if not _confirm(
-        args,
-        (
-            f"Migrate unmanaged {selected.root.scope} {selected.root.target} skill "
-            f'"{selected.name}" before unlinking? [y/N]: '
-        ),
-    ):
+    action = _resolve_unmanaged_unlink_action(args, selected)
+    if action == "cancel":
         _print(args, "cancelled")
+        return
+    if action == "delete":
+        if args.delete_unmanaged and not _confirm_delete_unmanaged(args, selected):
+            _print(args, "cancelled")
+            return
+        shutil.rmtree(selected.path)
+        _print(
+            args,
+            f"removed unmanaged {selected.root.scope} {selected.root.target}: {selected.name}",
+        )
         return
 
     destination = _archive_skill(args, selected.name)
@@ -368,6 +398,10 @@ def cmd_repo_add_url(args: argparse.Namespace) -> None:
 
 
 def cmd_repo_remove(args: argparse.Namespace) -> None:
+    _run_name_batch(args, "removed", _cmd_repo_remove_one)
+
+
+def _cmd_repo_remove_one(args: argparse.Namespace) -> None:
     target = _archive_skill(args, args.name)
     if not _is_skill_dir(target):
         raise XSkillsError(f"repo skill not found: {args.name}")
@@ -395,6 +429,22 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     for command in ("git", "uv"):
         state = "found" if shutil.which(command) else "missing"
         _print(args, f"{command}: {state}")
+
+
+def cmd_interactive(args: argparse.Namespace) -> None:
+    if args.no_input:
+        raise XSkillsError("interactive cannot run with --no-input")
+    _run_interactive_app(args)
+
+
+def _run_interactive_app(args: argparse.Namespace) -> None:
+    try:
+        from x_skills.interactive import run_interactive
+    except ImportError as error:
+        raise XSkillsError(
+            "interactive mode requires Textual; reinstall with `uv tool install --upgrade git+https://github.com/InkyQuill/x-skills.git`"
+        ) from error
+    run_interactive(args)
 
 
 def _archive_skills_root(args: argparse.Namespace) -> Path:
@@ -435,6 +485,31 @@ def _active_root_path(args: argparse.Namespace, scope: str, target: str) -> Path
             return args.codex_global_root.expanduser()
         case unknown:
             raise XSkillsError(f"unknown target: {unknown}")
+
+
+def _run_name_batch(args: argparse.Namespace, success_label: str, operation: object) -> None:
+    names = args.names
+    if len(names) == 1:
+        args.name = names[0]
+        operation(args)
+        return
+
+    completed: list[str] = []
+    failed: list[str] = []
+    for name in names:
+        args.name = name
+        try:
+            operation(args)
+        except XSkillsError as error:
+            failed.append(f"{name} ({error})")
+        else:
+            completed.append(name)
+
+    _print(args, "Summary:")
+    if completed:
+        _print(args, f"  {success_label}: {', '.join(completed)}")
+    if failed:
+        _print(args, f"  failed: {', '.join(failed)}")
 
 
 def _active_skills(
@@ -520,6 +595,147 @@ def _resolve_active_candidate(
             f'multiple active skills named "{name}"; choose one:\n  ' + "\n  ".join(commands)
         )
     return _select(args, f"Select skill to {action}", candidates)
+
+
+def _resolve_unmanaged_unlink_action(args: argparse.Namespace, skill: ActiveSkill) -> str:
+    if args.delete_unmanaged:
+        return "delete"
+    if args.yes:
+        return "migrate"
+    if args.no:
+        return "cancel"
+    if _is_non_interactive(args):
+        raise XSkillsError(
+            f'unmanaged active directory "{skill.name}" requires a choice; '
+            "pass -y to migrate first or --delete-unmanaged -y to remove it"
+        )
+
+    _print(args, f'"{skill.name}" is an unmanaged directory at {_display_path(args, skill.path)}.')
+    _print(args, "")
+    _print(args, "Choose action:")
+    _print(args, "  1. migrate to repo, then unlink active copy")
+    _print(args, "  2. unlink without migration (remove active directory)")
+    _print(args, "  3. cancel")
+    args.output_stream.write("Select [1-3]: ")
+    args.output_stream.flush()
+    answer = args.input_stream.readline().strip()
+    match answer:
+        case "1":
+            return "migrate"
+        case "2":
+            return "delete"
+        case "3" | "":
+            return "cancel"
+        case _:
+            raise XSkillsError("invalid selection")
+
+
+def _linked_active_group(candidates: list[ActiveSkill]) -> list[ActiveSkill] | None:
+    if len(candidates) < 2:
+        return None
+    resolved_paths: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved_paths.add(candidate.path.resolve(strict=True))
+        except OSError:
+            return None
+    if len(resolved_paths) == 1:
+        return candidates
+    return None
+
+
+def _resolve_linked_group_action(
+    args: argparse.Namespace, name: str, group: list[ActiveSkill], action: str
+) -> bool:
+    if _is_non_interactive(args):
+        raise XSkillsError(
+            f'linked active setup found for "{name}"; '
+            f"run interactively to choose group or selected-location {action}"
+        )
+
+    _print(args, f'Found linked setup for "{name}":')
+    _print(args, "")
+    for index, skill in enumerate(group, start=1):
+        target = ""
+        if skill.path.is_symlink():
+            target = f" -> {os.readlink(skill.path)}"
+        location = _display_path(args, skill.path)
+        _print(
+            args,
+            f"  {index}. {skill.root.scope} {skill.root.target}  {location}{target}",
+        )
+    _print(args, "")
+    _print(args, "Apply action to:")
+    _print(args, "  1. linked group")
+    _print(args, "  2. selected location only")
+    _print(args, "  3. cancel")
+    args.output_stream.write("Select [1-3]: ")
+    args.output_stream.flush()
+    answer = args.input_stream.readline().strip()
+    match answer:
+        case "1":
+            return True
+        case "2":
+            return False
+        case "3" | "":
+            _print(args, "cancelled")
+            return True
+        case _:
+            raise XSkillsError("invalid selection")
+
+
+def _migrate_linked_group(args: argparse.Namespace, group: list[ActiveSkill]) -> None:
+    canonical = _linked_group_canonical(group)
+    archive_name = args.archive_as or canonical.name
+    destination = _archive_skill(args, archive_name)
+    if destination.exists() or destination.is_symlink():
+        if not args.replace_archive:
+            if not _confirm(
+                args,
+                f'Repo already contains "{archive_name}". Replace it? [y/N]: ',
+            ):
+                _print(args, "cancelled")
+                return
+            _prepare_archive_destination(destination, replace=True)
+        else:
+            _prepare_archive_destination(destination, replace=True)
+
+    if not _confirm(
+        args,
+        f'Migrate linked group "{canonical.name}" into repo? [y/N]: ',
+    ):
+        _print(args, "cancelled")
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(canonical.path.resolve(strict=True)), destination)
+    for skill in group:
+        if skill.path.exists() or skill.path.is_symlink():
+            if skill.path.is_symlink() or skill.path.is_file():
+                skill.path.unlink()
+            else:
+                shutil.rmtree(skill.path)
+        os.symlink(destination, skill.path, target_is_directory=True)
+    _print(args, f"migrated linked group: {canonical.name}")
+
+
+def _linked_group_canonical(group: list[ActiveSkill]) -> ActiveSkill:
+    directories = [skill for skill in group if not skill.path.is_symlink()]
+    if len(directories) == 1:
+        return directories[0]
+    if directories:
+        raise XSkillsError("linked group has multiple directory sources")
+    return group[0]
+
+
+def _confirm_delete_unmanaged(args: argparse.Namespace, skill: ActiveSkill) -> bool:
+    return _confirm(
+        args,
+        (
+            f"Remove unmanaged {skill.root.scope} {skill.root.target} skill "
+            f'"{skill.name}" without migrating? [y/N]: '
+        ),
+    )
 
 
 def _select(

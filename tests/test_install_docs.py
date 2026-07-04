@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,14 @@ def test_readme_documents_uv_prerequisite() -> None:
 
     assert "Requires `uv`" in readme
     assert "https://docs.astral.sh/uv/" in readme
+
+
+def test_pyproject_declares_textual_runtime_dependency() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert any(
+        dependency.startswith("textual") for dependency in pyproject["project"]["dependencies"]
+    )
 
 
 def test_install_script_checks_required_commands() -> None:

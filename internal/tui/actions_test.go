@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,5 +72,40 @@ func TestActiveMigrateDivergentArchiveOpensConflictModal(t *testing.T) {
 	}
 	if info.Description != "Archived." {
 		t.Fatalf("archive description = %q, want Archived.", info.Description)
+	}
+}
+
+func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "managed", "Managed.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(root, "managed")); err != nil {
+		t.Fatal(err)
+	}
+	makeSkill(t, root, "unmanaged", "Unmanaged.")
+	if err := os.Symlink(filepath.Join(home, "missing"), filepath.Join(root, "broken")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	m.selected = map[string]bool{}
+	for _, group := range m.active {
+		m.selected[group.ID] = true
+	}
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("unlink modal is nil")
+	}
+	view := m.modal.View(110, 35, m)
+	for _, want := range []string{"Unlink active skills", "Managed links", "Broken links", "Unmanaged directories", "Migrate to repo, then unlink active copies"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unlink modal missing %q:\n%s", want, view)
+		}
 	}
 }

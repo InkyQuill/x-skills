@@ -18,8 +18,8 @@ func symbolsFor(opts Options) symbols {
 			Cursor:      ">",
 			Unchecked:   "[ ]",
 			Checked:     "[x]",
-			Managed:     "ok",
-			Unmanaged:   "local",
+			Managed:     "@",
+			Unmanaged:   "#",
 			Broken:      "!",
 			CountPrefix: "x",
 		}

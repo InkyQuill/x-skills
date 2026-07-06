@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -21,6 +23,25 @@ var (
 	managedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	unmanaged     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 )
+
+func init() {
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		titleStyle = titleStyle.UnsetForeground().UnsetBackground()
+		tabStyle = tabStyle.UnsetForeground().UnsetBackground()
+		activeTab = activeTab.UnsetForeground().UnsetBackground()
+		panelStyle = panelStyle.UnsetBorderForeground()
+		wizardStyle = wizardStyle.UnsetBorderForeground()
+		cursorStyle = cursorStyle.UnsetForeground().UnsetBackground()
+		selectedStyle = selectedStyle.UnsetForeground().UnsetBackground()
+		mutedStyle = mutedStyle.UnsetForeground().UnsetBackground()
+		chipStyle = chipStyle.UnsetForeground().UnsetBackground()
+		okStyle = okStyle.UnsetForeground().UnsetBackground()
+		accentStyle = accentStyle.UnsetForeground().UnsetBackground()
+		dangerStyle = dangerStyle.UnsetForeground().UnsetBackground()
+		managedStyle = managedStyle.UnsetForeground().UnsetBackground()
+		unmanaged = unmanaged.UnsetForeground().UnsetBackground()
+	}
+}
 
 func tabLabel(active bool, key, label string) string {
 	text := key + ":" + label

@@ -115,6 +115,22 @@ func TestCtrlRRefreshesWithoutTakingRepoKey(t *testing.T) {
 	}
 }
 
+func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
+	m := New(cfg, Options{ASCII: true})
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+
+	view := m.View()
+	if strings.Contains(view, "◆") || strings.Contains(view, "□") || strings.Contains(view, "■") {
+		t.Fatalf("view contains unicode symbols in ASCII mode:\n%s", view)
+	}
+	if !strings.Contains(view, "* x-skills") {
+		t.Fatalf("view missing ASCII product mark:\n%s", view)
+	}
+}
+
 func TestWizardPreviewIncludesDestination(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -187,7 +203,7 @@ func TestRowsScrollToKeepCursorVisible(t *testing.T) {
 	}
 
 	view := m.View()
-	if !strings.Contains(view, ">[ ] skill-09") {
+	if !strings.Contains(view, "› □ skill-09") {
 		t.Fatalf("view does not show selected last row:\n%s", view)
 	}
 	if strings.Contains(view, "skill-00") {

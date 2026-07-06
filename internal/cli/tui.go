@@ -11,6 +11,7 @@ import (
 
 type tuiOptions struct {
 	noInput bool
+	ascii   bool
 }
 
 func newTUICommand(rootOptions *options) *cobra.Command {
@@ -23,11 +24,15 @@ func newTUICommand(rootOptions *options) *cobra.Command {
 			if opts.noInput {
 				return fmt.Errorf("tui requires an interactive terminal")
 			}
-			program := tea.NewProgram(tui.New(rootOptions.config()), tea.WithAltScreen())
+			program := tea.NewProgram(
+				tui.New(rootOptions.config(), tui.Options{ASCII: opts.ascii}),
+				tea.WithAltScreen(),
+			)
 			_, err := program.Run()
 			return err
 		},
 	}
 	cmd.Flags().BoolVar(&opts.noInput, "no-input", false, "fail instead of opening the interactive manager")
+	cmd.Flags().BoolVar(&opts.ascii, "ascii", false, "render ASCII symbols instead of Unicode")
 	return cmd
 }

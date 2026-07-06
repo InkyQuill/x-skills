@@ -211,13 +211,13 @@ func renderDoctorRows(m Model, width int) []string {
 func rowPrefix(m Model, index int, id string) string {
 	cursor := " "
 	if index == m.cursor {
-		cursor = ">"
+		cursor = m.symbols.Cursor
 	}
-	selected := " "
+	selected := m.symbols.Unchecked
 	if m.selected[id] {
-		selected = "x"
+		selected = m.symbols.Checked
 	}
-	return cursorStyle.Render(cursor) + selectedStyle.Render("["+selected+"]")
+	return cursorStyle.Render(cursor) + " " + selectedStyle.Render(selected)
 }
 
 func activeDetail(group ActiveGroup) string {

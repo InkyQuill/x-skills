@@ -68,7 +68,7 @@ x-skills repo add-github https://github.com/owner/repo/tree/main/skills/foo
 x-skills repo add-url https://example.com/skill.zip
 x-skills repo remove old-skill
 
-x-skills interactive
+x-skills tui
 x-skills doctor
 ```
 
@@ -151,20 +151,17 @@ the active directory without migration, or cancel. For automation, use
 `--delete-unmanaged -y` to remove an unmanaged active directory without adding it
 to the repo.
 
-## Interactive Mode
+## TUI Mode
 
-`x-skills interactive` opens a Textual-based manager for longer maintenance
-sessions. It has active and repo views: press `a` for active skills and `l` for
-local repo skills. Active skills are grouped by directory SHA fingerprint, not
-name, so identical linked copies collapse into one row while changed copies stay
-separate. Use Space for multi-select. In active view, `m` migrates, `u` unlinks,
-and `x` cleans broken links; when nothing is selected, `x` cleans all broken
-links.
+`x-skills tui` opens the Bubble Tea maintenance manager for longer maintenance
+sessions. It has Active, Repo, and Doctor views: press `A` for Active, `R` for
+Repo, and `D` for Doctor. Refresh is `ctrl+r`.
 
-In repo view, select saved skills and press `i` to link them into the chosen
-destination. The default destination is project `agents`; press `p`/`g` for
-project/global and `1`/`2`/`3` for agents/claude/codex. Press `s` to search;
-local repo matches appear before `skills.sh` results.
+Use Active to inspect current project/global skills, preview `SKILL.md`, migrate
+unmanaged directories into the archive, and unlink active copies. Use Repo to
+preview archived skills, link them into a selected destination, unlink visible
+current usages, or delete archives after visible usages are removed. Use Doctor
+to review and fix current issues.
 
 ## Install Sources
 

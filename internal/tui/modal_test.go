@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 )
 
@@ -107,5 +109,43 @@ func TestPreviewModalTogglesRawAndRendered(t *testing.T) {
 	raw := m.modal.View(100, 30, m)
 	if !strings.Contains(raw, "raw SKILL.md") {
 		t.Fatalf("preview missing raw marker:\n%s", raw)
+	}
+}
+
+func TestConflictModalShowsFileListAndDiff(t *testing.T) {
+	active := t.TempDir()
+	archive := t.TempDir()
+	makeSkill(t, active, "zen-of-go", "Active.")
+	makeSkill(t, archive, "zen-of-go", "Archived.")
+	diff, err := buildDirectoryDiff(filepath.Join(active, "zen-of-go"), filepath.Join(archive, "zen-of-go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.modal = newConflictDiffModal("zen-of-go", diff, func(string) {})
+
+	view := m.modal.View(120, 40, m)
+	for _, want := range []string{"Archive conflict: zen-of-go", "Decision applies to the whole skill directory", "Files", "SKILL.md", "-description: Archived.", "+description: Active.", "k keep archive", "l save active"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("conflict modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestConflictModalAppliesKeepArchiveKey(t *testing.T) {
+	called := ""
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Kind: "changed", Text: "-old\n+new"}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.modal = newConflictDiffModal("zen-of-go", diff, func(resolution string) {
+		called = resolution
+	})
+
+	updated, _ := m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if called != actions.ConflictResolutionKeepArchive {
+		t.Fatalf("called = %q, want keep archive", called)
+	}
+	if m.modal != nil {
+		t.Fatal("modal still open after resolution")
 	}
 }

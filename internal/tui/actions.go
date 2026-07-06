@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -432,14 +431,13 @@ func (m *Model) applyRepoDelete(name string) {
 			lines = append(lines, "x unlink "+target.Path+": "+err.Error())
 		}
 	}
-	archivePath, err := repo.SkillPath(m.cfg, name)
+	archivePath, err := repo.DeleteSkill(m.cfg, name)
 	if err != nil {
-		lines = append(lines, "x "+err.Error())
-		m.modal = newResultModal("Delete Results", lines)
-		return
-	}
-	if err := os.RemoveAll(archivePath); err != nil {
-		lines = append(lines, "x delete "+archivePath+": "+err.Error())
+		if archivePath == "" {
+			lines = append(lines, "x delete "+name+": "+err.Error())
+		} else {
+			lines = append(lines, "x delete "+archivePath+": "+err.Error())
+		}
 	} else {
 		lines = append(lines, "✓ deleted "+name)
 	}

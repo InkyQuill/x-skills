@@ -59,6 +59,17 @@ func SkillPath(cfg config.Config, name string) (string, error) {
 	return filepath.Join(cfg.ArchiveSkillsRoot(), name), nil
 }
 
+func DeleteSkill(cfg config.Config, name string) (string, error) {
+	path, err := SkillPath(cfg, name)
+	if err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return "", fmt.Errorf("delete repo skill %q: %w", path, err)
+	}
+	return path, nil
+}
+
 func ValidateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("invalid skill name: %q", name)

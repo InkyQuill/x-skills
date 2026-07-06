@@ -134,3 +134,33 @@ func TestSkillPathRejectsInvalidName(t *testing.T) {
 		t.Fatal("expected invalid skill name error")
 	}
 }
+
+func TestDeleteSkillRemovesArchivedSkill(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	path := filepath.Join(cfg.ArchiveSkillsRoot(), "golang-testing")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte("---\nname: golang-testing\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := DeleteSkill(cfg, "golang-testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != path {
+		t.Fatalf("DeleteSkill() path = %q, want %q", got, path)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("archived skill still exists or unexpected error: %v", err)
+	}
+}
+
+func TestDeleteSkillRejectsInvalidName(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+
+	if _, err := DeleteSkill(cfg, "../outside"); err == nil {
+		t.Fatal("expected invalid skill name error")
+	}
+}

@@ -35,20 +35,83 @@ func mustModel(t *testing.T, updated tea.Model) Model {
 	return m
 }
 
+func keyRunes(value string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
+}
+
+func keyCtrlR() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyCtrlR}
+}
+
 func TestModelSwitchesViews(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	if m.view != ViewRepo {
 		t.Fatalf("view = %q, want repo", m.view)
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	updated, _ = m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 	if m.view != ViewDoctor {
 		t.Fatalf("view = %q, want doctor", m.view)
+	}
+}
+
+func TestModelSwitchesViewsWithUppercaseGlobalTabs(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	if m.view != ViewRepo {
+		t.Fatalf("view = %q, want repo", m.view)
+	}
+
+	updated, _ = m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+	if m.view != ViewDoctor {
+		t.Fatalf("view = %q, want doctor", m.view)
+	}
+
+	updated, _ = m.Update(keyRunes("A"))
+	m = mustModel(t, updated)
+	if m.view != ViewActive {
+		t.Fatalf("view = %q, want active", m.view)
+	}
+}
+
+func TestLowercaseTabKeysDoNotSwitchViews(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+
+	updated, _ := m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	if m.view != ViewActive {
+		t.Fatalf("view = %q, want active because lowercase r is not a tab key", m.view)
+	}
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	if m.view != ViewActive {
+		t.Fatalf("view = %q, want active because lowercase d is not a tab key", m.view)
+	}
+}
+
+func TestCtrlRRefreshesWithoutTakingRepoKey(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.status = "old status"
+
+	updated, _ := m.Update(keyCtrlR())
+	m = mustModel(t, updated)
+	if m.view != ViewActive {
+		t.Fatalf("view = %q, want active after refresh", m.view)
+	}
+	if m.status != "refreshed" {
+		t.Fatalf("status = %q, want refreshed", m.status)
 	}
 }
 
@@ -59,7 +122,7 @@ func TestWizardPreviewIncludesDestination(t *testing.T) {
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
 
 	m := New(cfg)
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	m = mustModel(t, updated)
@@ -90,7 +153,7 @@ func TestWizardConsumesBackgroundKeys(t *testing.T) {
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
 
 	m := New(cfg)
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	m = mustModel(t, updated)
@@ -98,7 +161,7 @@ func TestWizardConsumesBackgroundKeys(t *testing.T) {
 		t.Fatal("wizard is not open")
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	updated, _ = m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 	if m.view != ViewRepo {
 		t.Fatalf("view = %q, want repo while wizard is open", m.view)
@@ -116,7 +179,7 @@ func TestRowsScrollToKeepCursorVisible(t *testing.T) {
 	m := New(cfg)
 	m.width = 80
 	m.height = 10
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	for i := 0; i < 9; i++ {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -144,7 +207,7 @@ func TestFooterShortcutsStayVisibleWithStatusAndWizard(t *testing.T) {
 	if !strings.Contains(view, "installed opentui-react") {
 		t.Fatalf("view missing status:\n%s", view)
 	}
-	if !strings.Contains(view, "space select  i install  m migrate  u unlink  f fix  q quit") {
+	if !strings.Contains(view, "enter details  / filter  p preview  m migrate  u unlink  ^R refresh") {
 		t.Fatalf("view missing footer shortcuts:\n%s", view)
 	}
 }

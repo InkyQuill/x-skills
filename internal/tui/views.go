@@ -123,11 +123,11 @@ func (m Model) View() string {
 
 func renderHeader(m Model, width int) string {
 	tabs := []string{
-		tabLabel(m.view == ViewActive, "a", "active"),
-		tabLabel(m.view == ViewRepo, "r", "repo"),
-		tabLabel(m.view == ViewDoctor, "d", "doctor"),
+		tabLabel(m.view == ViewActive, "A", "Active"),
+		tabLabel(m.view == ViewRepo, "R", "Repo"),
+		tabLabel(m.view == ViewDoctor, "D", "Doctor"),
 	}
-	title := titleStyle.Render("x-skills") + "  " + strings.Join(tabs, " ")
+	title := titleStyle.Render(m.symbols.ProductMark+" x-skills") + "  " + strings.Join(tabs, " ")
 	return truncate(title, width)
 }
 
@@ -248,7 +248,7 @@ func renderStatus(m Model, width int) string {
 	case m.status != "":
 		lines = append(lines, okStyle.Render(m.status))
 	}
-	lines = append(lines, mutedStyle.Render("space select  i install  m migrate  u unlink  f fix  q quit"))
+	lines = append(lines, mutedStyle.Render("enter details  / filter  p preview  m migrate  u unlink  ^R refresh  ? help  q quit"))
 	for i, line := range lines {
 		lines[i] = truncate(line, width)
 	}

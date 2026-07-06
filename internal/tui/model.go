@@ -22,6 +22,8 @@ const (
 
 type Model struct {
 	cfg      config.Config
+	opts     Options
+	symbols  symbols
 	view     ViewName
 	width    int
 	height   int
@@ -37,9 +39,15 @@ type Model struct {
 	err    error
 }
 
-func New(cfg config.Config) Model {
+func New(cfg config.Config, opts ...Options) Model {
+	options := defaultOptions()
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	m := Model{
 		cfg:      cfg,
+		opts:     options,
+		symbols:  symbolsFor(options),
 		view:     ViewActive,
 		selected: map[string]bool{},
 	}
@@ -106,14 +114,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if isRefreshKey(msg) {
+		m.reload()
+		m.status = "refreshed"
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
-	case "a":
+	case keyActive:
 		m.setView(ViewActive)
-	case "r":
+	case keyRepo:
 		m.setView(ViewRepo)
-	case "d":
+	case keyDoctor:
 		m.setView(ViewDoctor)
 	case "up", "k":
 		m.moveCursor(-1)

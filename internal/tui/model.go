@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -175,6 +176,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.Active = true
 			m.filter.Query = ""
 		}
+	case "enter":
+		m.openDetailModal()
+	case keyHelp:
+		m.modal = newHelpModal()
+	case "p":
+		m.openPreviewModal()
 	case "i":
 		m.openWizard(ActionInstall)
 	case "m":
@@ -186,6 +193,37 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *Model) openDetailModal() {
+	switch m.view {
+	case ViewActive:
+		if m.cursor >= 0 && m.cursor < len(m.active) {
+			m.modal = activeDetailModal(m.active[m.cursor])
+		}
+	}
+}
+
+func (m *Model) openPreviewModal() {
+	switch m.view {
+	case ViewActive:
+		if m.cursor >= 0 && m.cursor < len(m.active) && len(m.active[m.cursor].Members) > 0 {
+			m.modal = newPreviewModal("Preview: "+m.active[m.cursor].Name, resolvedSkillPath(m.active[m.cursor].Members[0].Path))
+		}
+	case ViewRepo:
+		if m.cursor >= 0 && m.cursor < len(m.repo) {
+			if path, err := repo.SkillPath(m.cfg, m.repo[m.cursor].Name); err == nil {
+				m.modal = newPreviewModal("Preview: "+m.repo[m.cursor].Name, path)
+			}
+		}
+	}
+}
+
+func resolvedSkillPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 func (m *Model) reload() {

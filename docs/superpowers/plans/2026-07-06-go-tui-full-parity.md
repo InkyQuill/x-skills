@@ -6,7 +6,7 @@
 
 **Architecture:** Keep filesystem mutations in `internal/actions`, `internal/repo`, and `internal/doctor`; move terminal interaction into focused `internal/tui` models. Replace the current inline wizard with typed modal models, a list-plus-inspector shell, deterministic row/group view models, and small renderers that can be tested with string assertions rather than fragile full-screen snapshots.
 
-**Tech Stack:** Go 1.23, Bubble Tea, Bubbles `viewport` and `textinput`, Lip Gloss, Glamour, Cobra, existing `internal/actions` mutation APIs.
+**Tech Stack:** Go 1.26, Bubble Tea, Bubbles `viewport` and `textinput`, Lip Gloss, latest Glamour, Cobra, existing `internal/actions` mutation APIs.
 
 ---
 

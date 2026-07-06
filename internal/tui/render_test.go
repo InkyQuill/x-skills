@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
 )
 
 func TestWideShellRendersListInspectorStatusAndFooter(t *testing.T) {
@@ -36,5 +37,40 @@ func TestNarrowShellCollapsesInspector(t *testing.T) {
 	}
 	if !strings.Contains(view, "Active skills") || !strings.Contains(view, "^R refresh") {
 		t.Fatalf("narrow shell missing list/footer:\n%s", view)
+	}
+}
+
+func TestRepoInspectorDoesNotStretchToBodyHeight(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 24
+	m.setView(ViewRepo)
+
+	view := m.View()
+	if !strings.Contains(view, "Repo skills") || !strings.Contains(view, "Inspector") || !strings.Contains(view, "^R refresh") {
+		t.Fatalf("repo shell missing expected regions:\n%s", view)
+	}
+	if strings.Contains(view, "┘ └") {
+		t.Fatalf("inspector appears stretched to list height; want inspector bottom above list bottom:\n%s", view)
+	}
+}
+
+func TestDoctorInspectorDoesNotStretchToBodyHeight(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 24
+	m.issues = append(m.issues, doctor.Issue{Kind: doctor.KindBrokenSymlink, Name: "zen-of-go", Location: ".Ag", Reason: "missing"})
+	m.setView(ViewDoctor)
+
+	view := m.View()
+	if !strings.Contains(view, "Doctor issues") || !strings.Contains(view, "Inspector") || !strings.Contains(view, "^R refresh") {
+		t.Fatalf("doctor shell missing expected regions:\n%s", view)
+	}
+	if strings.Contains(view, "┘ └") {
+		t.Fatalf("inspector appears stretched to list height; want inspector bottom above list bottom:\n%s", view)
 	}
 }

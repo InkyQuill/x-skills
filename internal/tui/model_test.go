@@ -222,3 +222,62 @@ func TestActiveGroupsMergeByFingerprint(t *testing.T) {
 		t.Fatalf("view leaked internal fingerprint:\n%s", m.View())
 	}
 }
+
+func TestActiveViewSortsSkillsAlphabeticallyByName(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zeta-skill", "Zeta.")
+	makeSkill(t, cfg.MustActiveRoot("project", "claude"), "alpha-skill", "Alpha.")
+
+	m := New(cfg)
+	if len(m.active) < 2 {
+		t.Fatalf("active groups = %#v, want at least 2", m.active)
+	}
+	if m.active[0].Name != "alpha-skill" || m.active[1].Name != "zeta-skill" {
+		t.Fatalf("active order = %#v, want alphabetical by name", []string{m.active[0].Name, m.active[1].Name})
+	}
+}
+
+func TestRepoViewSortsSkillsAlphabeticallyByName(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zeta-skill", "Zeta.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	skills := m.visibleRepoSkills()
+	if len(skills) < 2 {
+		t.Fatalf("repo skills = %#v, want at least 2", skills)
+	}
+	if skills[0].Name != "alpha-skill" || skills[1].Name != "zeta-skill" {
+		t.Fatalf("repo order = %#v, want alphabetical by name", []string{skills[0].Name, skills[1].Name})
+	}
+}
+
+func TestDoctorViewSortsIssuesAlphabeticallyByName(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	agentsRoot := cfg.MustActiveRoot("project", "agents")
+	claudeRoot := cfg.MustActiveRoot("project", "claude")
+	if err := os.MkdirAll(agentsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-zeta"), filepath.Join(agentsRoot, "zeta-skill")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-alpha"), filepath.Join(claudeRoot, "alpha-skill")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+	if len(m.issues) < 2 {
+		t.Fatalf("doctor issues = %#v, want at least 2", m.issues)
+	}
+	if m.issues[0].Name != "alpha-skill" || m.issues[1].Name != "zeta-skill" {
+		t.Fatalf("doctor issue order = %#v, want alphabetical by name", []string{m.issues[0].Name, m.issues[1].Name})
+	}
+}

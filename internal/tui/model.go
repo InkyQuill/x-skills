@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -206,6 +207,9 @@ func (m *Model) reload() {
 		m.err = err
 	}
 	m.issues = issues
+	sort.Slice(m.issues, func(i, j int) bool {
+		return skillNameLess(m.issues[i].Name, m.issues[j].Name)
+	})
 	m.clampCursor()
 }
 

@@ -117,9 +117,6 @@ func renderInspector(m Model, width, height int) string {
 			lines = append(lines, "◇ "+issue.Kind, "path", issue.Path, "reason", issue.Reason, "fix", issue.SafeFix)
 		}
 	}
-	for len(lines) < contentHeight {
-		lines = append(lines, "")
-	}
 	if len(lines) > contentHeight {
 		lines = lines[:contentHeight]
 	}

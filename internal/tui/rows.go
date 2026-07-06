@@ -3,6 +3,7 @@ package tui
 import (
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
@@ -59,7 +60,19 @@ func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
 		sort.Strings(groups[key].Aliases)
 		result = append(result, *groups[key])
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return skillNameLess(result[i].Name, result[j].Name)
+	})
 	return result
+}
+
+func skillNameLess(left, right string) bool {
+	leftFolded := strings.ToLower(left)
+	rightFolded := strings.ToLower(right)
+	if leftFolded == rightFolded {
+		return left < right
+	}
+	return leftFolded < rightFolded
 }
 
 func activeGroupKey(skill actions.ActiveSkill) (string, string) {

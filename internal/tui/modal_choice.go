@@ -53,8 +53,5 @@ func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	case "enter":
 		c.apply(m, c.index)
 	}
-	if msg.Type == tea.KeyEnter {
-		c.apply(m, c.index)
-	}
 	return false, nil
 }

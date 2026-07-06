@@ -213,7 +213,7 @@ func TestUnlinkRejectsInvalidScopeAndTarget(t *testing.T) {
 	}
 }
 
-func TestUnlinkUnmanagedExternalSymlinkWithoutDeleteReturnsError(t *testing.T) {
+func TestUnlinkUnmanagedExternalSymlinkWithoutDeleteArchivesTarget(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
@@ -227,18 +227,57 @@ func TestUnlinkUnmanagedExternalSymlinkWithoutDeleteReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Unlink(cfg, UnlinkRequest{Name: "external-only", Scope: "project", Target: "codex", Confirmed: true})
-	if err == nil {
-		t.Fatal("expected unmanaged symlink error")
+	result, err := Unlink(cfg, UnlinkRequest{Name: "external-only", Scope: "project", Target: "codex", Confirmed: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "unmanaged symlink") {
-		t.Fatalf("error = %q, want unmanaged symlink", err)
+	if result.Status != ResultMigratedUnlinked {
+		t.Fatalf("Status = %q, want %q", result.Status, ResultMigratedUnlinked)
 	}
-	if _, err := os.Lstat(active); err != nil {
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "external-only")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("active link still exists or unexpected err: %v", err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnlinkUnmanagedSymlinkArchivesResolvedSkillAndRemovesOnlyLink(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	source := makeSkill(t, cfg.MustActiveRoot("global", "agents"), "code-review", "Review.")
+	claudeRoot := cfg.MustActiveRoot("global", "claude")
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(claudeRoot, "code-review")
+	if err := os.Symlink(source, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Unlink(cfg, UnlinkRequest{Name: "code-review", Scope: "global", Target: "claude", Confirmed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := filepath.Join(cfg.ArchiveSkillsRoot(), "code-review")
+	if result.Path != archived {
+		t.Fatalf("Path = %q, want %q", result.Path, archived)
+	}
+	if result.Status != ResultMigratedUnlinked {
+		t.Fatalf("Status = %q, want %q", result.Status, ResultMigratedUnlinked)
+	}
+	if _, err := os.Stat(archived); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(source); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Lstat(alias); !os.IsNotExist(err) {
+		t.Fatalf("alias still exists or unexpected err: %v", err)
 	}
 }
 

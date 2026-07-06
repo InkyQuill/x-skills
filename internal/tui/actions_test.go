@@ -103,7 +103,7 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 		t.Fatal("unlink modal is nil")
 	}
 	view := m.modal.View(110, 35, m)
-	for _, want := range []string{"Unlink active skills", "Managed links", "Broken links", "Unmanaged directories", "Migrate to repo, then unlink active copies"} {
+	for _, want := range []string{"Unlink usages:", "■ .Ag", "Unlink selected"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("unlink modal missing %q:\n%s", want, view)
 		}
@@ -175,6 +175,62 @@ func TestActiveUnlinkManagedGroupRemovesEachSelectedLocation(t *testing.T) {
 
 	if _, err := os.Lstat(agentsPath); !os.IsNotExist(err) {
 		t.Fatalf("agents link still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("claude link still exists or unexpected error: %v", err)
+	}
+	if m.modal == nil || strings.Contains(m.modal.View(120, 35, m), "active skill not found") {
+		t.Fatalf("unexpected unlink result modal: %#v", m.modal)
+	}
+}
+
+func TestActiveUnlinkUnmanagedAliasChoosesLocationThenArchivesSelectedLink(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	agentsPath := makeSkill(t, cfg.MustActiveRoot("global", "agents"), "code-review", "Review.")
+	claudePath := filepath.Join(cfg.MustActiveRoot("global", "claude"), "code-review")
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(agentsPath, claudePath); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("unlink modal is nil")
+	}
+	view := m.modal.View(120, 35, m)
+	for _, want := range []string{"Unlink usages: code-review", "~Ag", "~Cl", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unlink locations modal missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("copy/delete choice modal is nil")
+	}
+	if !strings.Contains(m.modal.View(120, 35, m), "Copy selected unmanaged skills to repo") {
+		t.Fatalf("expected copy/delete choice modal:\n%s", m.modal.View(120, 35, m))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	archived := filepath.Join(cfg.ArchiveSkillsRoot(), "code-review")
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(agentsPath); err != nil {
+		t.Fatalf("agents source should remain: %v", err)
 	}
 	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
 		t.Fatalf("claude link still exists or unexpected error: %v", err)

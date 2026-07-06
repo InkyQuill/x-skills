@@ -73,36 +73,14 @@ func (m *Model) openUnlinkModal() {
 		m.modal = newResultModal("Unlink active skills", []string{"No active skills selected."})
 		return
 	}
-	if allActiveTargetsAlreadyArchived(targets) {
-		m.modal = repoUsageModal{name: activeUnlinkTitle(targets), targets: activeUsageTargets(targets), selected: selectedIndexes(len(targets))}
-		return
+	m.modal = repoUsageModal{
+		name:     activeUnlinkTitle(targets),
+		targets:  activeUsageTargets(targets),
+		selected: selectedIndexes(len(targets)),
+		apply: func(current *Model, modal repoUsageModal) {
+			current.applyActiveUsageUnlink(modal)
+		},
 	}
-	lines := []string{"Managed links"}
-	for _, target := range targets {
-		if target.Status == actions.StatusManaged {
-			lines = append(lines, "  ✓ "+filepath.Base(target.Path)+"  "+rootChip(target.Root.Scope, target.Root.Target)+"  remove symlink only")
-		}
-	}
-	lines = append(lines, "", "Broken links")
-	for _, target := range targets {
-		if target.Status == actions.StatusBroken {
-			lines = append(lines, "  ▲ "+filepath.Base(target.Path)+"  "+rootChip(target.Root.Scope, target.Root.Target)+"  remove broken symlink")
-		}
-	}
-	lines = append(lines, "", "Unmanaged directories")
-	for _, target := range targets {
-		if target.Status == actions.StatusUnmanaged {
-			lines = append(lines, "  ◆ "+filepath.Base(target.Path)+"  "+rootChip(target.Root.Scope, target.Root.Target))
-		}
-	}
-	choices := []string{"Migrate to repo, then unlink active copies", "Delete active copies without archiving", "Cancel"}
-	m.modal = newChoiceModal("Unlink active skills", lines, choices, 0, func(current *Model, choice int) {
-		if choice == 2 {
-			current.modal = nil
-			return
-		}
-		current.applyUnlinkTargets(targets, choice == 1)
-	})
 }
 
 func (m Model) selectedActiveSkills(action string) []actions.ActiveSkill {
@@ -136,15 +114,6 @@ func (m Model) selectedActiveSkills(action string) []actions.ActiveSkill {
 	return skills
 }
 
-func allActiveTargetsAlreadyArchived(targets []actions.ActiveSkill) bool {
-	for _, target := range targets {
-		if target.Status == actions.StatusUnmanaged {
-			return false
-		}
-	}
-	return true
-}
-
 func activeUsageTargets(targets []actions.ActiveSkill) []repoUsageTarget {
 	usageTargets := make([]repoUsageTarget, 0, len(targets))
 	for _, target := range targets {
@@ -154,6 +123,7 @@ func activeUsageTargets(targets []actions.ActiveSkill) []repoUsageTarget {
 			Target: target.Root.Target,
 			Chip:   rootChip(target.Root.Scope, target.Root.Target),
 			Path:   target.Path,
+			Status: target.Status,
 		})
 	}
 	return usageTargets
@@ -192,6 +162,30 @@ func (m *Model) applyUnlinkTargets(targets []actions.ActiveSkill, deleteUnmanage
 	}
 	m.reload()
 	m.modal = newResultModal("Unlink Results", lines)
+}
+
+func (m *Model) applyActiveUsageUnlink(r repoUsageModal) {
+	targets := selectedUsageTargets(r)
+	if len(targets) == 0 {
+		m.modal = newResultModal("Unlink Results", []string{"No locations selected."})
+		return
+	}
+	if usageTargetsContainUnmanaged(targets) {
+		lines := []string{"Selected locations"}
+		for _, target := range targets {
+			lines = append(lines, "  "+target.Chip+"  "+target.Path)
+		}
+		choices := []string{"Copy selected unmanaged skills to repo, then unlink", "Unlink selected without copying to repo", "Cancel"}
+		m.modal = newChoiceModal("Unlink active skills", lines, choices, 0, func(current *Model, choice int) {
+			if choice == 2 {
+				current.modal = nil
+				return
+			}
+			current.applyUsageTargets(targets, choice == 1)
+		})
+		return
+	}
+	m.applyUsageTargets(targets, false)
 }
 
 type repoLinkModal struct {
@@ -336,6 +330,7 @@ type repoUsageTarget struct {
 	Target string
 	Chip   string
 	Path   string
+	Status string
 }
 
 type repoUsageModal struct {
@@ -343,6 +338,7 @@ type repoUsageModal struct {
 	targets  []repoUsageTarget
 	selected map[int]bool
 	index    int
+	apply    func(*Model, repoUsageModal)
 }
 
 func (m *Model) openRepoUnlinkModal() {
@@ -373,6 +369,7 @@ func (m Model) repoUsageTargets(name string) []repoUsageTarget {
 					Target: member.Root.Target,
 					Chip:   rootChip(member.Root.Scope, member.Root.Target),
 					Path:   member.Path,
+					Status: member.Status,
 				})
 			}
 		}
@@ -423,18 +420,42 @@ func (r repoUsageModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		r.selected[r.index] = !r.selected[r.index]
 		m.modal = r
 	case "enter":
-		m.applyRepoUsageUnlink(r)
+		if r.apply != nil {
+			r.apply(m, r)
+		} else {
+			m.applyRepoUsageUnlink(r)
+		}
 	}
 	return false, nil
 }
 
 func (m *Model) applyRepoUsageUnlink(r repoUsageModal) {
-	var lines []string
+	m.applyUsageTargets(selectedUsageTargets(r), false)
+}
+
+func selectedUsageTargets(r repoUsageModal) []repoUsageTarget {
+	var targets []repoUsageTarget
 	for i, target := range r.targets {
-		if !r.selected[i] {
-			continue
+		if r.selected[i] {
+			targets = append(targets, target)
 		}
-		result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{Name: target.Name, Scope: target.Scope, Target: target.Target, Confirmed: true})
+	}
+	return targets
+}
+
+func usageTargetsContainUnmanaged(targets []repoUsageTarget) bool {
+	for _, target := range targets {
+		if target.Status == actions.StatusUnmanaged {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) applyUsageTargets(targets []repoUsageTarget, deleteUnmanaged bool) {
+	var lines []string
+	for _, target := range targets {
+		result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{Name: target.Name, Scope: target.Scope, Target: target.Target, Confirmed: true, DeleteUnmanaged: deleteUnmanaged})
 		if err != nil {
 			lines = append(lines, "x "+target.Path+": "+err.Error())
 			continue

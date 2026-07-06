@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"io"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -29,7 +31,7 @@ func newUnlinkCommand(rootOptions *options) *cobra.Command {
 				return fmt.Errorf("unlink requires confirmation; rerun with -y")
 			}
 
-			scope := opts.scope()
+			scope := opts.scopeFilter()
 			results, failures := unlinkNames(
 				rootOptions.config(),
 				args,
@@ -55,6 +57,27 @@ func newUnlinkCommand(rootOptions *options) *cobra.Command {
 	return cmd
 }
 
+func (o unlinkOptions) validate() error {
+	if o.project && o.global {
+		return fmt.Errorf("choose at most one of --project or --global")
+	}
+	if o.target != "" && !slices.Contains(config.Targets, o.target) {
+		return fmt.Errorf("unknown target %q", o.target)
+	}
+	return nil
+}
+
+func (o unlinkOptions) scopeFilter() string {
+	switch {
+	case o.project:
+		return config.ScopeProject
+	case o.global:
+		return config.ScopeGlobal
+	default:
+		return ""
+	}
+}
+
 func unlinkNames(
 	cfg config.Config,
 	names []string,
@@ -65,6 +88,9 @@ func unlinkNames(
 ) ([]actions.MutationResult, []mutationFailure) {
 	var results []actions.MutationResult
 	var failures []mutationFailure
+	if scope == "" || target == "" {
+		return unlinkMatchingNames(cfg, names, actions.ScanFilter{Scope: scope, Target: target}, confirmed, deleteUnmanaged)
+	}
 	for _, name := range names {
 		result, err := actions.Unlink(cfg, actions.UnlinkRequest{
 			Name:            name,
@@ -78,6 +104,56 @@ func unlinkNames(
 			continue
 		}
 		results = append(results, result)
+	}
+	return results, failures
+}
+
+func unlinkMatchingNames(
+	cfg config.Config,
+	names []string,
+	filter actions.ScanFilter,
+	confirmed bool,
+	deleteUnmanaged bool,
+) ([]actions.MutationResult, []mutationFailure) {
+	activeSkills, err := actions.ScanActive(cfg, filter)
+	if err != nil {
+		failures := make([]mutationFailure, 0, len(names))
+		for _, name := range names {
+			failures = append(failures, mutationFailure{name: name, err: err})
+		}
+		return nil, failures
+	}
+	wanted := map[string]bool{}
+	for _, name := range names {
+		wanted[name] = true
+	}
+	matched := map[string]bool{}
+	var results []actions.MutationResult
+	var failures []mutationFailure
+	for _, skill := range activeSkills {
+		requestName := filepath.Base(skill.Path)
+		if !wanted[skill.Name] && !wanted[requestName] {
+			continue
+		}
+		matched[skill.Name] = true
+		matched[requestName] = true
+		result, err := actions.Unlink(cfg, actions.UnlinkRequest{
+			Name:            requestName,
+			Scope:           skill.Root.Scope,
+			Target:          skill.Root.Target,
+			Confirmed:       confirmed,
+			DeleteUnmanaged: deleteUnmanaged,
+		})
+		if err != nil {
+			failures = append(failures, mutationFailure{name: requestName, err: err})
+			continue
+		}
+		results = append(results, result)
+	}
+	for _, name := range names {
+		if !matched[name] {
+			failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("active skill not found")})
+		}
 	}
 	return results, failures
 }

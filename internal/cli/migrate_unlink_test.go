@@ -61,6 +61,54 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	}
 }
 
+func TestUnlinkWithYesDefaultsToAllMatchingActiveRoots(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	agents := makeSkill(t, filepath.Join(home, ".agents", "skills"), "code-review", "Review.")
+	claudeRoot := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claude := filepath.Join(claudeRoot, "code-review")
+	if err := os.Symlink(agents, claude); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "code-review", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(agents); !os.IsNotExist(err) {
+		t.Fatalf("agents skill still exists or unexpected err: %v", err)
+	}
+	if _, err := os.Lstat(claude); !os.IsNotExist(err) {
+		t.Fatalf("claude link still exists or unexpected err: %v", err)
+	}
+	if strings.Contains(out.String(), "failed") {
+		t.Fatalf("unlink output contains failure:\n%s", out.String())
+	}
+}
+
+func TestUnlinkGlobalWithYesDefaultsToGlobalMatchingRoots(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	global := makeSkill(t, filepath.Join(home, ".agents", "skills"), "commit-context", "Context.")
+	projectSkill := makeSkill(t, filepath.Join(project, ".agents", "skills"), "commit-context", "Project.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "--global", "commit-context", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(global); !os.IsNotExist(err) {
+		t.Fatalf("global skill still exists or unexpected err: %v", err)
+	}
+	if _, err := os.Stat(projectSkill); err != nil {
+		t.Fatalf("project skill should remain: %v", err)
+	}
+}
+
 func TestUnlinkDeleteUnmanagedWithoutYesReturnsConfirmationError(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

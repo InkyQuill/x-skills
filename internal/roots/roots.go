@@ -1,6 +1,10 @@
 package roots
 
-import "github.com/InkyQuill/x-skills/internal/config"
+import (
+	"slices"
+
+	"github.com/InkyQuill/x-skills/internal/config"
+)
 
 type ActiveRoot struct {
 	Scope  string
@@ -15,10 +19,10 @@ type Filter struct {
 }
 
 func ActiveRoots(cfg config.Config, filter Filter) []ActiveRoot {
-	if filter.Scope != "" && !contains(config.Scopes, filter.Scope) {
+	if filter.Scope != "" && !slices.Contains(config.Scopes, filter.Scope) {
 		return nil
 	}
-	if filter.Target != "" && !contains(config.Targets, filter.Target) {
+	if filter.Target != "" && !slices.Contains(config.Targets, filter.Target) {
 		return nil
 	}
 
@@ -31,23 +35,18 @@ func ActiveRoots(cfg config.Config, filter Filter) []ActiveRoot {
 			if filter.Target != "" && target != filter.Target {
 				continue
 			}
+			path, err := cfg.ActiveRoot(scope, target)
+			if err != nil {
+				continue
+			}
 			roots = append(roots, ActiveRoot{
 				Scope:  scope,
 				Target: target,
-				Path:   cfg.ActiveRoot(scope, target),
+				Path:   path,
 				Label:  config.LocationLabel(scope, target),
 			})
 		}
 	}
 
 	return roots
-}
-
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

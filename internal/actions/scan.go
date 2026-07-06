@@ -9,6 +9,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
+	"github.com/InkyQuill/x-skills/internal/symlinkcheck"
 )
 
 const (
@@ -117,34 +118,27 @@ type symlinkClassification struct {
 }
 
 func classifySymlink(cfg config.Config, activePath, name string) symlinkClassification {
-	resolvedPath, err := filepath.EvalSymlinks(activePath)
-	if err != nil {
-		return symlinkClassification{status: StatusBroken, reason: fmt.Sprintf("resolve symlink: %v", err)}
-	}
-
-	info, err := os.Stat(resolvedPath)
-	if err != nil {
-		return symlinkClassification{status: StatusBroken, reason: fmt.Sprintf("stat target: %v", err)}
-	}
-	if !info.IsDir() {
-		return symlinkClassification{status: StatusBroken, reason: "target is not a directory"}
-	}
-	if !skills.IsDir(resolvedPath) {
-		return symlinkClassification{status: StatusBroken, reason: "target is not a skill directory"}
+	result := symlinkcheck.ValidateSkillTarget(activePath)
+	if result.Broken {
+		return symlinkClassification{status: StatusBroken, reason: result.Reason}
 	}
 
 	status := StatusUnmanaged
-	repoPath := repo.SkillPath(cfg, name)
-	if resolvedRepoPath, err := filepath.EvalSymlinks(repoPath); err == nil {
-		repoPath = resolvedRepoPath
+	repoPath, err := repo.SkillPath(cfg, name)
+	if err == nil {
+		if resolvedRepoPath, err := filepath.EvalSymlinks(repoPath); err == nil {
+			repoPath = resolvedRepoPath
+		}
 	}
-	if samePath(resolvedPath, repoPath) {
-		status = StatusManaged
+	if err == nil {
+		if samePath(result.ResolvedPath, repoPath) {
+			status = StatusManaged
+		}
 	}
 
 	return symlinkClassification{
 		status:       status,
-		resolvedPath: resolvedPath,
+		resolvedPath: result.ResolvedPath,
 	}
 }
 

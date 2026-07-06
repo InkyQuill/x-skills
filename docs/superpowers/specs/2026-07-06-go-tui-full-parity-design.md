@@ -12,14 +12,15 @@ without hiding filesystem risk.
 This design supersedes the quick `2026-07-06-go-tui-parity-design.md` note as
 the implementation target. The earlier note remains historical context.
 
+See [Go TUI Views and Mockups Spec](./2026-07-06-go-tui-views-mockups.md) for concrete character-based terminal mockups and visual layouts for the top-level TUI views and critical modal states.
+
 ## Scope
 
 In scope:
 
 - List + inspector shell for Active, Repo, and Doctor views.
 - Restrained Unicode visual language with color-coded root chips.
-- Typed modal system for details, confirmations, previews, diffs, results, and
-  help.
+- Typed modal system for details, confirmations, previews, diffs, results, and help.
 - Fullscreen archive conflict review with file list and full-file unified diff.
 - Active/repo/doctor action flows described below.
 - Local filtering for Active and Repo.
@@ -89,12 +90,24 @@ The current built-in target labels are:
 Future managed-agent configuration may define arbitrary short labels, including
 emoji or custom glyphs.
 
+## Global Navigation
+
+Top-level views use one global uppercase tab schema:
+
+- `A`: Active
+- `R`: Repo
+- `D`: Doctor
+- `I`: Install, reserved for the planned Install view
+
+Lowercase action keys remain view-specific. Refresh is global `ctrl+r` so `R`
+can consistently mean Repo navigation.
+
 ## Reference Mockups
 
 Wide shell:
 
 ```text
-◆ x-skills  active  repo  doctor       scope: .Ag .Cl .Cd ~Ag ~Cl ~Cd
+◆ x-skills  A Active  R Repo  D Doctor       scope: .Ag .Cl .Cd ~Ag ~Cl ~Cd
 ┌ Active skills ───────────────────────────────┐ ┌ Inspector ───────────────┐
 │ › □ zen-of-go       ● .Ag ◆ ~Cl  ◆ unmanaged ×2 │ ◇ zen-of-go             │
 │   □ opentui-react   ● .Cd       ✓ managed      │ aliases                  │
@@ -104,19 +117,19 @@ Wide shell:
 │                                                │ target  ~/.x-skills/...   │
 └────────────────────────────────────────────────┘ └─────────────────────────┘
 relinked zen-of-go to existing archive
-enter details  / filter  p preview  m migrate  u unlink  R refresh  ? help  q quit
+enter details  / filter  p preview  m migrate  u unlink  ^R refresh  ? help  q quit
 ```
 
 Narrow shell:
 
 ```text
-◆ x-skills  active  repo  doctor                         scope: all roots
+◆ x-skills  A Active  R Repo  D Doctor                         scope: all roots
 ┌ Active skills ─────────────────────────────────────────────────────┐
 │ › □ zen-of-go       ● .Ag ◆ ~Cl  ◆ unmanaged ×2                   │
 │   □ opentui-react   ● .Cd       ✓ managed                         │
 │   ■ svelte-coder    ◆ ~Ag       ▲ broken                          │
 └────────────────────────────────────────────────────────────────────┘
-enter details  / filter  p preview  m migrate  u unlink  R refresh  ? help  q quit
+enter details  / filter  p preview  m migrate  u unlink  ^R refresh  ? help  q quit
 ```
 
 Fullscreen archive conflict:
@@ -297,7 +310,7 @@ Active view keys:
 - `p`: preview readable `SKILL.md`
 - `m`: migrate selected rows, or cursor row if none selected
 - `u`: unlink selected rows, or cursor row if none selected
-- `R`: refresh
+- `ctrl+r`: refresh
 - `?`: help
 - `q`: quit
 
@@ -307,6 +320,13 @@ Active preview:
 - For content groups, preview canonical resolved content automatically.
 - Metadata shows member count and aliases.
 - `r` toggles raw/rendered in the preview modal.
+
+Active migrate:
+
+- Copies the selected active skill directory (or cursor row if none selected) to the repo archive and links it back.
+- If the archive destination already exists, compares the whole-folder fingerprint (SHA).
+- **Fingerprint Match (Same SHA)**: Removes the duplicate active directory and relinks it to the existing archive without error. Displays `relinked <name> to existing archive` in the status bar.
+- **Divergent Content (Different SHA)**: Pauses the migration (and any surrounding batch actions) and opens the fullscreen archive conflict diff modal (see "Archive Conflict Diff" below) showing the changes.
 
 Active unlink:
 
@@ -333,7 +353,7 @@ Repo view keys:
 - `l`: link selected repo skills into an active root
 - `u`: unlink active usages through a usage chooser modal
 - `d`: delete archive
-- `R`: refresh
+- `ctrl+r`: refresh
 - `?`: help
 - `q`: quit
 
@@ -367,7 +387,7 @@ Doctor keys:
 
 - `enter`: issue details
 - `f`: fix all current Doctor issues
-- `R`: refresh
+- `ctrl+r`: refresh
 - `?`: help
 - `q`: quit
 
@@ -407,9 +427,10 @@ Main shell:
 
 | Key | Active | Repo | Doctor |
 | --- | --- | --- | --- |
-| `a` | switch Active | switch Active | switch Active |
-| `r` | switch Repo | switch Repo | switch Repo |
+| `A` | switch Active | switch Active | switch Active |
+| `R` | switch Repo | switch Repo | switch Repo |
 | `D` | switch Doctor | switch Doctor | switch Doctor |
+| `I` | reserved for Install | reserved for Install | reserved for Install |
 | `enter` | details | details | details |
 | `/` | filter | filter | no filter in parity |
 | `space` | toggle selection | toggle selection | no selection in parity |
@@ -419,7 +440,7 @@ Main shell:
 | `l` | none | link | none |
 | `d` | none | delete archive | none |
 | `f` | none | none | fix all |
-| `R` | refresh | refresh | refresh |
+| `ctrl+r` | refresh | refresh | refresh |
 | `?` | help | help | help |
 | `q` | quit | quit | quit |
 
@@ -442,6 +463,30 @@ Modals:
 | details | `↑↓` scroll, `esc`, `q` |
 | result | `↑↓` scroll if needed, `enter`/`esc`/`q` close |
 | help | `↑↓` scroll if needed, `esc`/`q` close |
+
+## Spec Coverage Matrix
+
+This matrix is the implementation contract. A row is not ready to implement if
+the required data, modal behavior, or verification path is missing.
+
+| Area | User task | Required presentation | Required data | Modal/state | Verification |
+| --- | --- | --- | --- | --- | --- |
+| Active browse | See active skills across current project and global roots | List + inspector, root chips, status, `×N` group count | active scan, repo state, aliases, fingerprints, root labels | browse state | grouping tests, rendered row assertions |
+| Active details | Inspect exact paths and symlink targets | Detail modal with full paths, targets, aliases, debug fingerprint | selected active group members, resolved targets, broken reasons | detail modal | modal content tests |
+| Active preview | Read selected skill instructions | Glamour preview with path/member metadata and raw toggle | canonical readable `SKILL.md`, aliases/member count | preview modal | rendered/raw toggle tests |
+| Active migrate | Archive unmanaged active content and link back | Workbench confirmation, status/result, conflict diff if needed | active path, archive path, fingerprints, batch queue | confirmation, conflict diff, result | same-SHA relink, divergent conflict, batch resume tests |
+| Active unlink | Remove links or remove/migrate unmanaged active dirs | Grouped workbench modal by managed/broken/unmanaged categories | active members by status, root labels, archive paths | workbench choice/result | mixed unlink plan tests |
+| Repo browse | See archived skills and current usage | List + inspector, usage chips, description | repo list, active usages in current project/global roots | browse state | usage chip/rendered row tests |
+| Repo details | Inspect archive metadata and usages | Detail modal with archive path and current usages | repo skill, source metadata if present, usage paths | detail modal | modal content tests |
+| Repo preview | Read archived `SKILL.md` | Glamour preview, archive path, usage chips, raw toggle | archived `SKILL.md`, usage chips | preview modal | rendered/raw toggle tests |
+| Repo link | Link archive skill into an active root | Workbench modal with destination scope/target and exact destination path | selected repo skills, destination root, existing destination state | workbench choice/result | destination selection and existing-path tests |
+| Repo unlink | Remove current usages of archived skill | Usage chooser modal, all current usages selected by default | active usages in current project/global roots | workbench choice/result | usage chooser tests |
+| Repo delete | Delete archive safely | Destructive modal; active usages must be unlinked first; scope limitation visible | archive path, current project/global usages | compact/workbench confirmation/result | active-usage block/delete tests |
+| Doctor browse | Review current issues | Doctor list + inspector with issue reason and safe fix | doctor issues, affected paths, fix categories | browse state | issue row/rendered assertions |
+| Doctor fix | Apply safe fixes | Compact confirmation with issue counts/categories | current doctor issues and safe-fix actions | compact confirmation/result | fix-all confirmation tests |
+| Filtering | Narrow Active/Repo rows | Inline command bar above footer | filter text, searchable row fields | filter state | matching/reset tests |
+| Help | Discover keys and symbols | Compact help modal with keymap and chip/symbol legend | current view keymap, symbol mode | help modal | content assertions |
+| Responsive shell | Use app in narrow terminals | Inspector collapsed below `100x30`; details via Enter | width/height, active view state | layout state | responsive render tests |
 
 ## Charm Stack Responsibilities
 

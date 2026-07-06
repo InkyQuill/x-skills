@@ -1,31 +1,55 @@
 package actions
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
 const (
 	ResultMigrated             = "migrated"
+	ResultRelinked             = "relinked existing archive"
 	ResultMigratedUnlinked     = "migrated unmanaged"
 	ResultRemovedUnmanaged     = "removed unmanaged"
 	ResultRemovedUnmanagedLink = "removed unmanaged symlink"
 	ResultRemovedActiveLink    = "removed link"
+
+	ConflictResolutionAsk         = ""
+	ConflictResolutionKeepArchive = "keep-archive"
+	ConflictResolutionUseActive   = "use-active"
 )
 
 type MigrateRequest struct {
-	Name      string
-	Scope     string
-	Target    string
-	Confirmed bool
+	Name               string
+	Scope              string
+	Target             string
+	Confirmed          bool
+	ConflictResolution string
+}
+
+type ArchiveConflictError struct {
+	Name         string
+	ActivePath   string
+	ArchivedPath string
+	Summary      string
+}
+
+func (e *ArchiveConflictError) Error() string {
+	return fmt.Sprintf("archive destination differs: %s\n%s", e.ArchivedPath, e.Summary)
 }
 
 func Migrate(cfg config.Config, req MigrateRequest) (MutationResult, error) {
@@ -37,15 +61,21 @@ func Migrate(cfg config.Config, req MigrateRequest) (MutationResult, error) {
 		return MutationResult{}, fmt.Errorf("migrate requires confirmation; rerun with -y")
 	}
 
-	if err := migrateActiveDirectory(paths.active, paths.archived, true); err != nil {
+	status, err := migrateActiveDirectory(paths.active, paths.archived, true, req.ConflictResolution)
+	if err != nil {
+		var conflict *ArchiveConflictError
+		if errors.As(err, &conflict) {
+			conflict.Name = req.Name
+		}
 		return MutationResult{}, err
 	}
-	return MutationResult{Name: req.Name, Path: paths.archived, Status: ResultMigrated}, nil
+	return MutationResult{Name: req.Name, Path: paths.archived, Status: status}, nil
 }
 
 type mutationPathSet struct {
-	active   string
-	archived string
+	activeRoot string
+	active     string
+	archived   string
 }
 
 func mutationPaths(cfg config.Config, name, scope, target string) (mutationPathSet, error) {
@@ -59,41 +89,204 @@ func mutationPaths(cfg config.Config, name, scope, target string) (mutationPathS
 		return mutationPathSet{}, fmt.Errorf("unknown target %q", target)
 	}
 
-	root := cfg.ActiveRoot(scope, target)
+	root, err := cfg.ActiveRoot(scope, target)
+	if err != nil {
+		return mutationPathSet{}, err
+	}
+	archived, err := repo.SkillPath(cfg, name)
+	if err != nil {
+		return mutationPathSet{}, err
+	}
 	return mutationPathSet{
-		active:   filepath.Join(root, name),
-		archived: repo.SkillPath(cfg, name),
+		activeRoot: root,
+		active:     filepath.Join(root, name),
+		archived:   archived,
 	}, nil
 }
 
-func migrateActiveDirectory(active, archived string, linkBack bool) error {
+func migrateActiveDirectory(active, archived string, linkBack bool, conflictResolution string) (string, error) {
 	if err := ensureUnmanagedSkillDirectory(active, archived); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := os.Lstat(archived); err == nil {
-		return fmt.Errorf("archive destination exists: %s", archived)
+		return handleExistingArchive(active, archived, linkBack, conflictResolution)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect archive destination %q: %w", archived, err)
+		return "", fmt.Errorf("inspect archive destination %q: %w", archived, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
-		return fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
+		return "", fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
 	}
 	if err := os.Rename(active, archived); err != nil {
 		if errors.Is(err, syscall.EXDEV) {
-			return fmt.Errorf("move %q to %q: active and archive roots are on different filesystems", active, archived)
+			return "", fmt.Errorf("move %q to %q: active and archive roots are on different filesystems", active, archived)
 		}
-		return fmt.Errorf("move %q to %q: %w", active, archived, err)
+		return "", fmt.Errorf("move %q to %q: %w", active, archived, err)
 	}
 	if !linkBack {
-		return nil
+		return ResultMigratedUnlinked, nil
 	}
 	if err := os.Symlink(archived, active); err != nil {
 		if restoreErr := os.Rename(archived, active); restoreErr != nil {
-			return fmt.Errorf("link %q to %q: %w (restore failed: %v)", archived, active, err, restoreErr)
+			return "", fmt.Errorf("link %q to %q: %w (restore failed: %w)", archived, active, err, restoreErr)
 		}
-		return fmt.Errorf("link %q to %q: %w", archived, active, err)
+		return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
 	}
-	return nil
+	return ResultMigrated, nil
+}
+
+func handleExistingArchive(active, archived string, linkBack bool, conflictResolution string) (string, error) {
+	activeFingerprint, err := fingerprint.Directory(active)
+	if err != nil {
+		return "", fmt.Errorf("fingerprint active skill %q: %w", active, err)
+	}
+	archivedFingerprint, err := fingerprint.Directory(archived)
+	if err != nil {
+		return "", fmt.Errorf("fingerprint archived skill %q: %w", archived, err)
+	}
+	if activeFingerprint == archivedFingerprint {
+		if err := os.RemoveAll(active); err != nil {
+			return "", fmt.Errorf("remove duplicate active skill %q: %w", active, err)
+		}
+		if !linkBack {
+			return ResultMigratedUnlinked, nil
+		}
+		if err := os.Symlink(archived, active); err != nil {
+			return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
+		}
+		return ResultRelinked, nil
+	}
+
+	switch conflictResolution {
+	case ConflictResolutionKeepArchive:
+		if err := os.RemoveAll(active); err != nil {
+			return "", fmt.Errorf("discard active skill %q: %w", active, err)
+		}
+		if !linkBack {
+			return ResultMigratedUnlinked, nil
+		}
+		if err := os.Symlink(archived, active); err != nil {
+			return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
+		}
+		return ResultRelinked, nil
+	case ConflictResolutionUseActive:
+		if err := os.RemoveAll(archived); err != nil {
+			return "", fmt.Errorf("discard archived skill %q: %w", archived, err)
+		}
+		if err := os.Rename(active, archived); err != nil {
+			return "", fmt.Errorf("move %q to %q: %w", active, archived, err)
+		}
+		if !linkBack {
+			return ResultMigratedUnlinked, nil
+		}
+		if err := os.Symlink(archived, active); err != nil {
+			return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
+		}
+		return ResultMigrated, nil
+	case ConflictResolutionAsk:
+		return "", &ArchiveConflictError{
+			ActivePath:   active,
+			ArchivedPath: archived,
+			Summary:      directoryDiffSummary(active, archived),
+		}
+	default:
+		return "", fmt.Errorf("unknown conflict resolution %q", conflictResolution)
+	}
+}
+
+func directoryDiffSummary(active, archived string) string {
+	activeEntries := describeDirectory(active)
+	archiveEntries := describeDirectory(archived)
+	keys := make([]string, 0, len(activeEntries)+len(archiveEntries))
+	seen := map[string]bool{}
+	for key := range activeEntries {
+		keys = append(keys, key)
+		seen[key] = true
+	}
+	for key := range archiveEntries {
+		if !seen[key] {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+
+	lines := []string{"archive                              active"}
+	for _, key := range keys {
+		archiveValue := archiveEntries[key]
+		activeValue := activeEntries[key]
+		if archiveValue == activeValue {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%-36s %s", diffCell(key, archiveValue), diffCell(key, activeValue)))
+		if len(lines) >= 13 {
+			lines = append(lines, "...")
+			break
+		}
+	}
+	if len(lines) == 1 {
+		return "contents differ, but no individual file summary was available"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func diffCell(path, value string) string {
+	if value == "" {
+		return "-"
+	}
+	return truncateDiff(path+" "+value, 34)
+}
+
+func truncateDiff(value string, width int) string {
+	if len(value) <= width {
+		return value
+	}
+	if width <= 3 {
+		return value[:width]
+	}
+	return value[:width-3] + "..."
+}
+
+func describeDirectory(root string) map[string]string {
+	entries := map[string]string{}
+	_ = filepath.WalkDir(root, func(path string, dirEntry fs.DirEntry, err error) error {
+		if err != nil || path == root {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		switch {
+		case dirEntry.Type()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				entries[rel] = "symlink unreadable"
+				return nil
+			}
+			entries[rel] = "symlink -> " + target
+		case dirEntry.IsDir():
+			entries[rel] = "dir"
+		default:
+			entries[rel] = fileDigest(path)
+		}
+		return nil
+	})
+	return entries
+}
+
+func fileDigest(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return "file unreadable"
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "file unreadable"
+	}
+	return "file " + hex.EncodeToString(hash.Sum(nil))[:12]
 }
 
 func ensureUnmanagedSkillDirectory(active, archived string) error {

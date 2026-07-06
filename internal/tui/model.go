@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -68,6 +69,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			m.wizard = Wizard{}
+			return m, nil
+		case "k":
+			if m.wizard.Conflict != nil {
+				m.wizard.ConflictResolution = actions.ConflictResolutionKeepArchive
+				m.applyWizard()
+			}
+			return m, nil
+		case "l":
+			if m.wizard.Conflict != nil {
+				m.wizard.ConflictResolution = actions.ConflictResolutionUseActive
+				m.applyWizard()
+			}
 			return m, nil
 		case "enter":
 			m.applyWizard()
@@ -259,8 +272,13 @@ func (m *Model) applyWizard() {
 	if !m.wizard.Open {
 		return
 	}
-	results, err := applyWizard(m.cfg, m.wizard)
+	results, err := applyWizard(m.cfg, &m.wizard)
 	if err != nil {
+		var conflict *actions.ArchiveConflictError
+		if errors.As(err, &conflict) {
+			m.status = "archive conflict: choose k or l"
+			return
+		}
 		m.status = fmt.Sprintf("failed: %v", err)
 		m.wizard = Wizard{}
 		m.reload()

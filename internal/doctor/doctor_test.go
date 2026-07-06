@@ -25,7 +25,7 @@ func TestDiagnoseReportsBrokenSymlink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestDiagnoseReportsSymlinkToFile(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestDiagnoseReportsSymlinkToNonSkillDir(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestFixBrokenSymlinkRelinksWhenRepoSkillExists(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	repoSkill := makeSkill(t, cfg.ArchiveSkillsRoot(), "chapter-drafter")
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestFixBrokenSymlinkRemovesWhenRepoSkillMissing(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestFixRespectsFilter(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 
-	projectRoot := cfg.ActiveRoot("project", "claude")
+	projectRoot := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestFixRespectsFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	globalRoot := cfg.ActiveRoot("global", "claude")
+	globalRoot := cfg.MustActiveRoot("global", "claude")
 	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestFixWithoutYesDoesNotMutate(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestDoctorIgnoresUnmanagedDirectories(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	unmanaged := makeSkill(t, cfg.ActiveRoot("project", "claude"), "local-skill")
+	unmanaged := makeSkill(t, cfg.MustActiveRoot("project", "claude"), "local-skill")
 
 	issues, err := Diagnose(cfg, Filter{})
 	if err != nil {
@@ -256,7 +256,7 @@ func TestFixReturnsAppliedResultsWhenLaterIssueFails(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "claude")
+	root := cfg.MustActiveRoot("project", "claude")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}

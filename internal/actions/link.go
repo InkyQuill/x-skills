@@ -3,8 +3,6 @@ package actions
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/repo"
@@ -23,32 +21,25 @@ type MutationResult struct {
 }
 
 func Link(cfg config.Config, req LinkRequest) (MutationResult, error) {
-	if err := repo.ValidateName(req.Name); err != nil {
+	paths, err := mutationPaths(cfg, req.Name, req.Scope, req.Target)
+	if err != nil {
 		return MutationResult{}, err
-	}
-	if !slices.Contains(config.Scopes, req.Scope) {
-		return MutationResult{}, fmt.Errorf("unknown scope %q", req.Scope)
-	}
-	if !slices.Contains(config.Targets, req.Target) {
-		return MutationResult{}, fmt.Errorf("unknown target %q", req.Target)
 	}
 	if !repo.HasSkill(cfg, req.Name) {
 		return MutationResult{}, fmt.Errorf("repo skill %q not found", req.Name)
 	}
 
-	root := cfg.ActiveRoot(req.Scope, req.Target)
-	destination := filepath.Join(root, req.Name)
+	destination := paths.active
 	if _, err := os.Lstat(destination); err == nil {
 		return MutationResult{}, fmt.Errorf("destination exists: %s", destination)
 	} else if !os.IsNotExist(err) {
 		return MutationResult{}, fmt.Errorf("inspect destination %q: %w", destination, err)
 	}
 
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return MutationResult{}, fmt.Errorf("create active root %q: %w", root, err)
+	if err := os.MkdirAll(paths.activeRoot, 0o755); err != nil {
+		return MutationResult{}, fmt.Errorf("create active root %q: %w", paths.activeRoot, err)
 	}
-	source := repo.SkillPath(cfg, req.Name)
-	if err := os.Symlink(source, destination); err != nil {
+	if err := os.Symlink(paths.archived, destination); err != nil {
 		if os.IsExist(err) {
 			return MutationResult{}, fmt.Errorf("destination exists: %s", destination)
 		}

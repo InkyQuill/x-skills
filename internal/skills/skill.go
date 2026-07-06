@@ -1,11 +1,12 @@
 package skills
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Info struct {
@@ -47,32 +48,45 @@ func IsDir(path string) bool {
 }
 
 func parseFrontmatter(content string) (string, string) {
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
+	frontmatter, ok := frontmatterBlock(content)
+	if !ok {
 		return "", ""
 	}
 
-	var name string
-	var description string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "---" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		switch strings.TrimSpace(key) {
-		case "name":
-			name = value
-		case "description":
-			description = value
-		}
+	var fields struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &fields); err != nil {
+		return "", ""
 	}
 
-	return name, description
+	return fields.Name, fields.Description
+}
+
+func frontmatterBlock(content string) (string, bool) {
+	content = strings.TrimPrefix(content, "\ufeff")
+	if !strings.HasPrefix(content, "---") {
+		return "", false
+	}
+	afterStart := content[3:]
+	if strings.HasPrefix(afterStart, "\r\n") {
+		afterStart = afterStart[2:]
+	} else if strings.HasPrefix(afterStart, "\n") {
+		afterStart = afterStart[1:]
+	} else {
+		return "", false
+	}
+	for _, marker := range []string{"\n---\r\n", "\n---\n", "\r\n---\r\n", "\r\n---\n"} {
+		if before, _, ok := strings.Cut(afterStart, marker); ok {
+			return before, true
+		}
+	}
+	if strings.HasSuffix(afterStart, "\n---") {
+		return strings.TrimSuffix(afterStart, "\n---"), true
+	}
+	if strings.HasSuffix(afterStart, "\r\n---") {
+		return strings.TrimSuffix(afterStart, "\r\n---"), true
+	}
+	return "", false
 }

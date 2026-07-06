@@ -39,7 +39,7 @@ func newMigrateCommand(rootOptions *options) *cobra.Command {
 			scope := opts.scope()
 			results, failures := migrateNames(rootOptions.config(), args, scope, opts.target, rootOptions.yes)
 			if len(args) == 1 && len(failures) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "migrated %s %s: %s\n", scope, opts.target, results[0].Name)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "migrated %s %s: %s\n", scope, opts.target, results[0].Name)
 				return nil
 			}
 
@@ -111,15 +111,15 @@ func writeMutationSummary(
 	results []actions.MutationResult,
 	failures []mutationFailure,
 ) {
-	fmt.Fprintln(out, "Summary:")
+	_, _ = fmt.Fprintln(out, "Summary:")
 	if len(results) > 0 {
 		names := make([]string, 0, len(results))
 		for _, result := range results {
 			names = append(names, result.Name)
 		}
-		fmt.Fprintf(out, "%s: %s\n", successLabel, strings.Join(names, ", "))
+		_, _ = fmt.Fprintf(out, "%s: %s\n", successLabel, strings.Join(names, ", "))
 	}
 	for _, failure := range failures {
-		fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
+		_, _ = fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
 	}
 }

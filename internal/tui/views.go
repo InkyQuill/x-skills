@@ -101,7 +101,8 @@ func (m Model) View() string {
 		height = 32
 	}
 
-	bodyHeight := height - 6
+	footerHeight := 2
+	bodyHeight := height - 4 - footerHeight
 	if m.wizard.Open {
 		bodyHeight -= 5
 	}
@@ -144,12 +145,33 @@ func renderRows(m Model, width, maxRows int) string {
 		rows = []string{mutedStyle.Render("No items.")}
 	}
 	if len(rows) > maxRows {
-		rows = rows[:maxRows]
+		start := visibleStart(m.cursor, len(rows), maxRows)
+		rows = rows[start : start+maxRows]
 	}
 	for len(rows) < maxRows {
 		rows = append(rows, "")
 	}
 	return panelStyle.Width(width - 2).Render(strings.Join(rows, "\n"))
+}
+
+func visibleStart(cursor, count, maxRows int) int {
+	if count <= maxRows || maxRows <= 0 {
+		return 0
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= count {
+		cursor = count - 1
+	}
+	start := cursor - maxRows + 1
+	if start < 0 {
+		return 0
+	}
+	if start+maxRows > count {
+		return count - maxRows
+	}
+	return start
 }
 
 func renderActiveRows(m Model, width int) []string {
@@ -219,14 +241,16 @@ func renderWizard(m Model, width int) string {
 }
 
 func renderStatus(m Model, width int) string {
-	var text string
+	var lines []string
 	switch {
 	case m.err != nil:
-		text = dangerStyle.Render(m.err.Error())
+		lines = append(lines, dangerStyle.Render(m.err.Error()))
 	case m.status != "":
-		text = okStyle.Render(m.status)
-	default:
-		text = mutedStyle.Render("space select  i install  m migrate  u unlink  f fix  q quit")
+		lines = append(lines, okStyle.Render(m.status))
 	}
-	return truncate(text, width)
+	lines = append(lines, mutedStyle.Render("space select  i install  m migrate  u unlink  f fix  q quit"))
+	for i, line := range lines {
+		lines[i] = truncate(line, width)
+	}
+	return strings.Join(lines, "\n")
 }

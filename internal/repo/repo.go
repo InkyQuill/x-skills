@@ -36,7 +36,7 @@ func List(cfg config.Config) ([]Skill, error) {
 
 		info, err := skills.Read(path)
 		if err != nil {
-			return nil, fmt.Errorf("read repo skill %q: %w", entry.Name(), err)
+			continue
 		}
 		found = append(found, Skill{
 			Name:        entry.Name(),
@@ -52,8 +52,11 @@ func List(cfg config.Config) ([]Skill, error) {
 	return found, nil
 }
 
-func SkillPath(cfg config.Config, name string) string {
-	return filepath.Join(cfg.ArchiveSkillsRoot(), name)
+func SkillPath(cfg config.Config, name string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(cfg.ArchiveSkillsRoot(), name), nil
 }
 
 func ValidateName(name string) error {
@@ -70,8 +73,9 @@ func ValidateName(name string) error {
 }
 
 func HasSkill(cfg config.Config, name string) bool {
-	if ValidateName(name) != nil {
+	path, err := SkillPath(cfg, name)
+	if err != nil {
 		return false
 	}
-	return skills.IsDir(SkillPath(cfg, name))
+	return skills.IsDir(path)
 }

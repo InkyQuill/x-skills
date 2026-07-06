@@ -86,12 +86,51 @@ func TestListRepoSkillsIgnoresNonSkillsAndSortsByName(t *testing.T) {
 	}
 }
 
+func TestListRepoSkillsSkipsUnreadableSkillMetadata(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	readable := filepath.Join(cfg.ArchiveSkillsRoot(), "readable")
+	if err := os.MkdirAll(readable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(readable, "SKILL.md"), []byte("---\nname: readable\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(cfg.ArchiveSkillsRoot(), "unreadable")
+	if err := os.MkdirAll(unreadable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unreadableSkill := filepath.Join(unreadable, "SKILL.md")
+	if err := os.WriteFile(unreadableSkill, []byte("---\nname: unreadable\n---\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := List(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 || skills[0].Name != "readable" {
+		t.Fatalf("skills = %#v, want only readable", skills)
+	}
+}
+
 func TestSkillPath(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 
-	got := SkillPath(cfg, "golang-testing")
+	got, err := SkillPath(cfg, "golang-testing")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := filepath.Join(cfg.ArchiveSkillsRoot(), "golang-testing")
 	if got != want {
 		t.Fatalf("SkillPath() = %q, want %q", got, want)
+	}
+}
+
+func TestSkillPathRejectsInvalidName(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+
+	if _, err := SkillPath(cfg, "../outside"); err == nil {
+		t.Fatal("expected invalid skill name error")
 	}
 }

@@ -25,15 +25,15 @@ func TestScanActiveStatusesAndBrokenReasons(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	managed := makeSkill(t, cfg.ArchiveSkillsRoot(), "managed-codex", "Managed.")
-	codexRoot := cfg.ActiveRoot("project", "codex")
+	codexRoot := cfg.MustActiveRoot("project", "codex")
 	if err := os.MkdirAll(codexRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managed, filepath.Join(codexRoot, "managed-codex")); err != nil {
 		t.Fatal(err)
 	}
-	makeSkill(t, cfg.ActiveRoot("project", "claude"), "local-claude", "Local.")
-	globalAgents := cfg.ActiveRoot("global", "agents")
+	makeSkill(t, cfg.MustActiveRoot("project", "claude"), "local-claude", "Local.")
+	globalAgents := cfg.MustActiveRoot("global", "agents")
 	if err := os.MkdirAll(globalAgents, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestScanActiveReportsBrokenSymlinkTargetNotDirectory(t *testing.T) {
 	if err := os.WriteFile(target, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	root := cfg.ActiveRoot("project", "agents")
+	root := cfg.MustActiveRoot("project", "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestScanActiveReportsBrokenSymlinkTargetMissingSkillMD(t *testing.T) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	root := cfg.ActiveRoot("project", "agents")
+	root := cfg.MustActiveRoot("project", "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestScanActiveManagedThroughSymlinkedArchiveRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := cfg.ActiveRoot("project", "agents")
+	root := cfg.MustActiveRoot("project", "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -1,19 +1,21 @@
 package actions
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
 func TestMigrateMovesDirectoryToRepoAndLinksBack(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	active := makeSkill(t, cfg.ActiveRoot("project", "codex"), "next-best-practices", "Next.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "next-best-practices", "Next.")
 
 	result, err := Migrate(cfg, MigrateRequest{Name: "next-best-practices", Scope: "project", Target: "codex", Confirmed: true})
 	if err != nil {
@@ -39,7 +41,7 @@ func TestMigrateRequiresConfirmationBeforeMoving(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	active := makeSkill(t, cfg.ActiveRoot("project", "codex"), "local-only", "Local.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "local-only", "Local.")
 
 	_, err := Migrate(cfg, MigrateRequest{Name: "local-only", Scope: "project", Target: "codex"})
 	if err == nil {
@@ -53,19 +55,60 @@ func TestMigrateRequiresConfirmationBeforeMoving(t *testing.T) {
 	}
 }
 
-func TestMigrateFailsWhenArchiveDestinationExists(t *testing.T) {
+func TestMigrateRejectsInvalidScopeAndTarget(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+
+	_, err := Migrate(cfg, MigrateRequest{Name: "local-only", Scope: "workspace", Target: "codex", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), `unknown scope "workspace"`) {
+		t.Fatalf("invalid scope error = %v", err)
+	}
+
+	_, err = Migrate(cfg, MigrateRequest{Name: "local-only", Scope: "project", Target: "cursor", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), `unknown target "cursor"`) {
+		t.Fatalf("invalid target error = %v", err)
+	}
+}
+
+func TestMigrateRelinksWhenArchiveDestinationHasSameFingerprint(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	active := makeSkill(t, cfg.ActiveRoot("project", "codex"), "local-only", "Local.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "local-only", "Local.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "local-only", "Archived.")
+	if err := os.WriteFile(filepath.Join(archived, "SKILL.md"), []byte("---\nname: local-only\ndescription: Local.\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Migrate(cfg, MigrateRequest{Name: "local-only", Scope: "project", Target: "codex", Confirmed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != ResultRelinked {
+		t.Fatalf("Status = %q, want %q", result.Status, ResultRelinked)
+	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != archived {
+		t.Fatalf("active resolved to %q, want %q", resolved, archived)
+	}
+}
+
+func TestMigrateReturnsConflictWhenArchiveDestinationDiffers(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "local-only", "Local.")
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "local-only", "Archived.")
 
 	_, err := Migrate(cfg, MigrateRequest{Name: "local-only", Scope: "project", Target: "codex", Confirmed: true})
 	if err == nil {
-		t.Fatal("expected archive destination error")
+		t.Fatal("expected archive conflict error")
 	}
-	if !strings.Contains(err.Error(), "archive destination exists") {
-		t.Fatalf("error = %q, want archive destination exists", err)
+	var conflict *ArchiveConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %[1]v, want ArchiveConflictError", err)
 	}
 	if _, err := os.Stat(active); err != nil {
 		t.Fatal(err)
@@ -75,12 +118,45 @@ func TestMigrateFailsWhenArchiveDestinationExists(t *testing.T) {
 	}
 }
 
+func TestMigrateConflictUseActiveReplacesArchive(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "local-only", "Local.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "local-only", "Archived.")
+
+	_, err := Migrate(cfg, MigrateRequest{
+		Name:               "local-only",
+		Scope:              "project",
+		Target:             "codex",
+		Confirmed:          true,
+		ConflictResolution: ConflictResolutionUseActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := skills.Read(archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Local." {
+		t.Fatalf("Description = %q, want Local.", info.Description)
+	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != archived {
+		t.Fatalf("active resolved to %q, want %q", resolved, archived)
+	}
+}
+
 func TestUnlinkManagedRemovesSymlink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	source := makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
-	root := cfg.ActiveRoot("project", "codex")
+	root := cfg.MustActiveRoot("project", "codex")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +181,7 @@ func TestUnlinkBrokenSymlinkRemovesSymlink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	root := cfg.ActiveRoot("project", "codex")
+	root := cfg.MustActiveRoot("project", "codex")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -123,12 +199,26 @@ func TestUnlinkBrokenSymlinkRemovesSymlink(t *testing.T) {
 	}
 }
 
+func TestUnlinkRejectsInvalidScopeAndTarget(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+
+	_, err := Unlink(cfg, UnlinkRequest{Name: "local-only", Scope: "workspace", Target: "codex", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), `unknown scope "workspace"`) {
+		t.Fatalf("invalid scope error = %v", err)
+	}
+
+	_, err = Unlink(cfg, UnlinkRequest{Name: "local-only", Scope: "project", Target: "cursor", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), `unknown target "cursor"`) {
+		t.Fatalf("invalid target error = %v", err)
+	}
+}
+
 func TestUnlinkUnmanagedExternalSymlinkWithoutDeleteReturnsError(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	source := makeSkill(t, filepath.Join(home, "external"), "external-only", "External.")
-	root := cfg.ActiveRoot("project", "codex")
+	root := cfg.MustActiveRoot("project", "codex")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +247,7 @@ func TestUnlinkUnmanagedExternalSymlinkWithDeleteRemovesOnlySymlink(t *testing.T
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	source := makeSkill(t, filepath.Join(home, "external"), "external-only", "External.")
-	root := cfg.ActiveRoot("project", "codex")
+	root := cfg.MustActiveRoot("project", "codex")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +275,7 @@ func TestUnlinkUnmanagedMigratesToRepoWithoutActiveCopy(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	active := makeSkill(t, cfg.ActiveRoot("project", "codex"), "local-only", "Local.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "local-only", "Local.")
 
 	result, err := Unlink(cfg, UnlinkRequest{Name: "local-only", Scope: "project", Target: "codex", Confirmed: true})
 	if err != nil {
@@ -207,7 +297,7 @@ func TestUnlinkUnmanagedDeleteRemovesActiveDirectory(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
-	active := makeSkill(t, cfg.ActiveRoot("project", "codex"), "local-only", "Local.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "local-only", "Local.")
 
 	_, err := Unlink(cfg, UnlinkRequest{Name: "local-only", Scope: "project", Target: "codex", DeleteUnmanaged: true, Confirmed: true})
 	if err != nil {

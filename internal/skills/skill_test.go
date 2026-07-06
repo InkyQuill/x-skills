@@ -50,6 +50,26 @@ func TestReadUsesDirectoryNameWhenNameMissing(t *testing.T) {
 	}
 }
 
+func TestReadParsesYamlFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "yaml-skill")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: yaml-skill\ndescription: >\n  Manage richer YAML\n  metadata.\ntags:\n  - go\n---\n# Body\n"
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := Read(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Manage richer YAML metadata.\n" {
+		t.Fatalf("Description = %q", info.Description)
+	}
+}
+
 func TestReadReturnsEmptyDescriptionWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	skill := filepath.Join(dir, "no-description")

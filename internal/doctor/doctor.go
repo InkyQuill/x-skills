@@ -9,6 +9,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
+	"github.com/InkyQuill/x-skills/internal/symlinkcheck"
 )
 
 const KindBrokenSymlink = "broken-symlink"
@@ -116,23 +117,8 @@ func diagnoseRoot(cfg config.Config, root roots.ActiveRoot) ([]Issue, error) {
 }
 
 func classifyBrokenSymlink(path string) (string, bool) {
-	resolvedPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return fmt.Sprintf("resolve symlink: %v", err), true
-	}
-
-	info, err := os.Stat(resolvedPath)
-	if err != nil {
-		return fmt.Sprintf("stat target: %v", err), true
-	}
-	if !info.IsDir() {
-		return "target is not a directory", true
-	}
-	if !skills.IsDir(resolvedPath) {
-		return "target is not a skill directory", true
-	}
-
-	return "", false
+	result := symlinkcheck.ValidateSkillTarget(path)
+	return result.Reason, result.Broken
 }
 
 func brokenSymlinkIssue(
@@ -152,7 +138,7 @@ func brokenSymlinkIssue(
 	}
 	if repo.HasSkill(cfg, name) {
 		issue.SafeFix = "relink"
-		issue.RepoTarget = repo.SkillPath(cfg, name)
+		issue.RepoTarget, _ = repo.SkillPath(cfg, name)
 	}
 	return issue
 }

@@ -32,8 +32,7 @@ func newListCommand(rootOptions *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			writeList(cmd.OutOrStdout(), skills, filter)
-			return nil
+			return writeList(cmd.OutOrStdout(), skills, filter)
 		},
 	}
 
@@ -74,25 +73,32 @@ func (o listOptions) scanFilter() actions.ScanFilter {
 	}
 }
 
-func writeList(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanFilter) {
+func writeList(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanFilter) error {
 	if len(skills) == 0 {
-		fmt.Fprintln(out, "No active skills found.")
-		return
+		_, err := fmt.Fprintln(out, "No active skills found.")
+		return err
 	}
 
 	for _, root := range rootsForSkills(skills, filter) {
-		fmt.Fprintf(out, "%s %s (%s)\n", strings.ToUpper(root.Scope), root.Target, root.Label)
+		if _, err := fmt.Fprintf(out, "%s %s (%s)\n", strings.ToUpper(root.Scope), root.Target, root.Label); err != nil {
+			return err
+		}
 		for _, skill := range skills {
 			if skill.Root.Scope != root.Scope || skill.Root.Target != root.Target {
 				continue
 			}
 			if skill.Status == actions.StatusBroken {
-				fmt.Fprintf(out, "  %s  %s  %s\n", skill.Name, skill.Status, skill.Reason)
+				if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Name, skill.Status, skill.Reason); err != nil {
+					return err
+				}
 				continue
 			}
-			fmt.Fprintf(out, "  %s  %s  %s\n", skill.Name, skill.Status, skill.Description)
+			if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Name, skill.Status, skill.Description); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func rootsForSkills(skills []actions.ActiveSkill, filter actions.ScanFilter) []roots.ActiveRoot {

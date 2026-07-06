@@ -56,7 +56,7 @@ func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
 		return MutationResult{Name: req.Name, Path: paths.active, Status: ResultRemovedUnmanaged}, nil
 	}
 
-	if err := migrateActiveDirectory(paths.active, paths.archived, false); err != nil {
+	if _, err := migrateActiveDirectory(paths.active, paths.archived, false, ConflictResolutionAsk); err != nil {
 		return MutationResult{}, err
 	}
 	return MutationResult{Name: req.Name, Path: paths.archived, Status: ResultMigratedUnlinked}, nil

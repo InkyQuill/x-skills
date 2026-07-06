@@ -17,10 +17,10 @@ func TestDefaultConfigUsesProjectRootAndHome(t *testing.T) {
 	if got := cfg.ArchiveSkillsRoot(); got != filepath.Join(home, ".x-skills", "skills") {
 		t.Fatalf("ArchiveSkillsRoot = %q", got)
 	}
-	if got := cfg.ActiveRoot("project", "agents"); got != filepath.Join(project, ".agents", "skills") {
+	if got := cfg.MustActiveRoot("project", "agents"); got != filepath.Join(project, ".agents", "skills") {
 		t.Fatalf("project agents root = %q", got)
 	}
-	if got := cfg.ActiveRoot("global", "claude"); got != filepath.Join(home, ".claude", "skills") {
+	if got := cfg.MustActiveRoot("global", "claude"); got != filepath.Join(home, ".claude", "skills") {
 		t.Fatalf("global claude root = %q", got)
 	}
 }
@@ -76,19 +76,27 @@ func TestActiveRoot(t *testing.T) {
 			name:   "invalid scope",
 			scope:  "typo",
 			target: TargetCodex,
-			want:   "",
 		},
 		{
 			name:   "invalid target",
 			scope:  ScopeProject,
 			target: "bad",
-			want:   "",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cfg.ActiveRoot(tc.scope, tc.target); got != tc.want {
+			got, err := cfg.ActiveRoot(tc.scope, tc.target)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("ActiveRoot(%q, %q) error = nil, want error", tc.scope, tc.target)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
 				t.Fatalf("ActiveRoot(%q, %q) = %q, want %q", tc.scope, tc.target, got, tc.want)
 			}
 		})

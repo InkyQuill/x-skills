@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,10 @@ type Wizard struct {
 
 	DestinationScope  string
 	DestinationTarget string
+
+	Conflict           *actions.ArchiveConflictError
+	ConflictSkill      actions.ActiveSkill
+	ConflictResolution string
 }
 
 func (m *Model) openWizard(action WizardAction) {
@@ -44,7 +49,7 @@ func (m *Model) openWizard(action WizardAction) {
 	case ActionInstall:
 		wizard.RepoNames = m.selectedRepoNames()
 	case ActionMigrate, ActionUnlink:
-		wizard.Active = m.selectedActiveSkills()
+		wizard.Active = m.selectedActiveSkills(action)
 	case ActionFixDoctor:
 		wizard.Issues = m.selectedIssues()
 	}
@@ -84,16 +89,30 @@ func (m Model) selectedRepoNames() []string {
 	return names
 }
 
-func (m Model) selectedActiveSkills() []actions.ActiveSkill {
+func (m Model) selectedActiveSkills(action WizardAction) []actions.ActiveSkill {
 	selected := map[string]bool{}
 	for _, id := range m.selectedIDsForView() {
 		selected[id] = true
 	}
 
 	var skills []actions.ActiveSkill
+	seen := map[string]bool{}
 	for _, group := range m.active {
 		if selected[group.ID] {
-			skills = append(skills, group.Members...)
+			for _, skill := range group.Members {
+				if action == ActionMigrate && skill.Status != actions.StatusUnmanaged {
+					continue
+				}
+				key := skill.Path
+				if resolved, err := filepath.EvalSymlinks(skill.Path); err == nil {
+					key = resolved
+				}
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				skills = append(skills, skill)
+			}
 		}
 	}
 	return skills
@@ -118,13 +137,24 @@ func buildPreview(cfg config.Config, wizard Wizard) string {
 	switch wizard.Action {
 	case ActionInstall:
 		destination := config.LocationLabel(wizard.DestinationScope, wizard.DestinationTarget)
+		root, err := cfg.ActiveRoot(wizard.DestinationScope, wizard.DestinationTarget)
+		if err != nil {
+			return err.Error()
+		}
 		if len(wizard.RepoNames) == 0 {
 			return "No repo skills selected."
 		}
-		return fmt.Sprintf("Install %s to %s\n%s\np/g scope  1/2/3 target", strings.Join(wizard.RepoNames, ", "), destination, cfg.ActiveRoot(wizard.DestinationScope, wizard.DestinationTarget))
+		return fmt.Sprintf("Install %s to %s\n%s\np/g scope  1/2/3 target", strings.Join(wizard.RepoNames, ", "), destination, root)
 	case ActionMigrate:
 		if len(wizard.Active) == 0 {
-			return "No active skills selected."
+			return "No unmanaged active skill directories selected."
+		}
+		if wizard.Conflict != nil {
+			return fmt.Sprintf(
+				"Archive conflict for %s\n%s\n\nk keep archive, discard active  l save active over archive  esc cancel",
+				wizard.Conflict.Name,
+				wizard.Conflict.Summary,
+			)
 		}
 		return fmt.Sprintf("Migrate %d active skill instance(s) into %s and link back.", len(wizard.Active), cfg.ArchiveSkillsRoot())
 	case ActionUnlink:
@@ -142,7 +172,7 @@ func buildPreview(cfg config.Config, wizard Wizard) string {
 	}
 }
 
-func applyWizard(cfg config.Config, wizard Wizard) ([]string, error) {
+func applyWizard(cfg config.Config, wizard *Wizard) ([]string, error) {
 	var results []string
 	switch wizard.Action {
 	case ActionInstall:
@@ -160,12 +190,20 @@ func applyWizard(cfg config.Config, wizard Wizard) ([]string, error) {
 	case ActionMigrate:
 		for _, skill := range wizard.Active {
 			result, err := actions.Migrate(cfg, actions.MigrateRequest{
-				Name:      filepath.Base(skill.Path),
-				Scope:     skill.Root.Scope,
-				Target:    skill.Root.Target,
-				Confirmed: true,
+				Name:               filepath.Base(skill.Path),
+				Scope:              skill.Root.Scope,
+				Target:             skill.Root.Target,
+				Confirmed:          true,
+				ConflictResolution: conflictResolutionForSkill(*wizard, skill),
 			})
 			if err != nil {
+				var conflict *actions.ArchiveConflictError
+				if errors.As(err, &conflict) {
+					wizard.Conflict = conflict
+					wizard.ConflictSkill = skill
+					wizard.ConflictResolution = ""
+					wizard.Preview = buildPreview(cfg, *wizard)
+				}
 				return results, err
 			}
 			results = append(results, result.Name)
@@ -193,4 +231,14 @@ func applyWizard(cfg config.Config, wizard Wizard) ([]string, error) {
 		}
 	}
 	return results, nil
+}
+
+func conflictResolutionForSkill(wizard Wizard, skill actions.ActiveSkill) string {
+	if wizard.Conflict == nil || wizard.ConflictResolution == "" {
+		return actions.ConflictResolutionAsk
+	}
+	if skill.Path != wizard.ConflictSkill.Path {
+		return actions.ConflictResolutionAsk
+	}
+	return wizard.ConflictResolution
 }

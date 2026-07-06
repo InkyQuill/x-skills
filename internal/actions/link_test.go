@@ -36,7 +36,7 @@ func TestLinkFailsWhenDestinationExists(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "typescript-expert", "TS.")
-	makeSkill(t, cfg.ActiveRoot("project", "codex"), "typescript-expert", "Existing.")
+	makeSkill(t, cfg.MustActiveRoot("project", "codex"), "typescript-expert", "Existing.")
 
 	_, err := Link(cfg, LinkRequest{Name: "typescript-expert", Scope: "project", Target: "codex"})
 	if err == nil {
@@ -58,6 +58,20 @@ func TestLinkFailsWhenRepoSkillMissing(t *testing.T) {
 	}
 }
 
+func TestLinkRejectsInvalidScopeAndTarget(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+
+	_, err := Link(cfg, LinkRequest{Name: "missing", Scope: "workspace", Target: "codex"})
+	if err == nil || !strings.Contains(err.Error(), `unknown scope "workspace"`) {
+		t.Fatalf("invalid scope error = %v", err)
+	}
+
+	_, err = Link(cfg, LinkRequest{Name: "missing", Scope: "project", Target: "cursor"})
+	if err == nil || !strings.Contains(err.Error(), `unknown target "cursor"`) {
+		t.Fatalf("invalid target error = %v", err)
+	}
+}
+
 func TestLinkRejectsPathLikeSkillNames(t *testing.T) {
 	for _, name := range []string{"", "../outside", "/absolute", ".", "..", "nested/name", `nested\name`} {
 		t.Run(name, func(t *testing.T) {
@@ -72,7 +86,7 @@ func TestLinkRejectsPathLikeSkillNames(t *testing.T) {
 			if !strings.Contains(err.Error(), "invalid skill name") {
 				t.Fatalf("error = %q, want invalid skill name", err)
 			}
-			if _, statErr := os.Stat(cfg.ActiveRoot("project", "codex")); !os.IsNotExist(statErr) {
+			if _, statErr := os.Stat(cfg.MustActiveRoot("project", "codex")); !os.IsNotExist(statErr) {
 				t.Fatalf("active root stat error = %v, want not exist", statErr)
 			}
 		})

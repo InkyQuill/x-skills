@@ -1,6 +1,10 @@
 package config
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"slices"
+)
 
 const (
 	ScopeProject = "project"
@@ -38,23 +42,34 @@ func (c Config) ArchiveSkillsRoot() string {
 	return filepath.Join(c.ArchiveRoot, "skills")
 }
 
-func (c Config) ActiveRoot(scope, target string) string {
-	if !validScope(scope) || !validTarget(target) {
-		return ""
+func (c Config) ActiveRoot(scope, target string) (string, error) {
+	if !validScope(scope) {
+		return "", fmt.Errorf("unknown scope %q", scope)
+	}
+	if !validTarget(target) {
+		return "", fmt.Errorf("unknown target %q", target)
 	}
 	if scope == ScopeProject {
-		return filepath.Join(c.ProjectRoot, "."+target, "skills")
+		return filepath.Join(c.ProjectRoot, "."+target, "skills"), nil
 	}
 	switch target {
 	case TargetAgents:
-		return c.GlobalAgentsRoot
+		return c.GlobalAgentsRoot, nil
 	case TargetClaude:
-		return c.GlobalClaudeRoot
+		return c.GlobalClaudeRoot, nil
 	case TargetCodex:
-		return c.GlobalCodexRoot
+		return c.GlobalCodexRoot, nil
 	default:
-		return ""
+		return "", fmt.Errorf("unknown target %q", target)
 	}
+}
+
+func (c Config) MustActiveRoot(scope, target string) string {
+	root, err := c.ActiveRoot(scope, target)
+	if err != nil {
+		panic(err)
+	}
+	return root
 }
 
 func LocationLabel(scope, target string) string {
@@ -69,19 +84,9 @@ func LocationLabel(scope, target string) string {
 }
 
 func validScope(scope string) bool {
-	for _, candidate := range Scopes {
-		if candidate == scope {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Scopes, scope)
 }
 
 func validTarget(target string) bool {
-	for _, candidate := range Targets {
-		if candidate == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Targets, target)
 }

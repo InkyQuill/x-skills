@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -68,11 +69,22 @@ func hashEntry(hash hashWriter, root string, entry entry) error {
 	case entry.info.IsDir():
 		writeHash(hash, "dir", entry.path, "")
 	default:
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(entry.path)))
+		file, err := os.Open(filepath.Join(root, filepath.FromSlash(entry.path)))
 		if err != nil {
 			return fmt.Errorf("read file %q: %w", entry.path, err)
 		}
-		writeHash(hash, "file", entry.path, string(data))
+		defer func() {
+			_ = file.Close()
+		}()
+		info, err := file.Stat()
+		if err != nil {
+			return fmt.Errorf("stat file %q: %w", entry.path, err)
+		}
+		writeHashPrefix(hash, "file", entry.path, info.Size())
+		if _, err := io.Copy(hash, file); err != nil {
+			return fmt.Errorf("hash file %q: %w", entry.path, err)
+		}
+		_, _ = hash.Write([]byte{0})
 	}
 
 	return nil
@@ -80,4 +92,8 @@ func hashEntry(hash hashWriter, root string, entry entry) error {
 
 func writeHash(hash hashWriter, kind, path, value string) {
 	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00%s\x00", kind, path, len(value), value)
+}
+
+func writeHashPrefix(hash hashWriter, kind, path string, size int64) {
+	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00", kind, path, size)
 }

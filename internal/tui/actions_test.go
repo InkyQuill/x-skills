@@ -232,3 +232,38 @@ func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(root, "zen-of-go")
+	if err := os.Symlink(filepath.Join(home, "missing"), broken); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("f"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("doctor fix modal is nil")
+	}
+	view := m.modal.View(100, 30, m)
+	for _, want := range []string{"Confirm", "Apply", "Doctor fixes", "broken symlink"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("doctor fix modal missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(broken); !os.IsNotExist(err) {
+		t.Fatalf("broken symlink still exists or unexpected error: %v", err)
+	}
+}

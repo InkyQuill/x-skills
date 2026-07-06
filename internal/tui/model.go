@@ -201,7 +201,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openRepoDeleteModal()
 		}
 	case "f":
-		m.openWizard(ActionFixDoctor)
+		if m.view == ViewDoctor {
+			m.openDoctorFixModal()
+		}
 	}
 
 	return m, nil

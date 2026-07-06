@@ -11,6 +11,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
 )
 
@@ -414,4 +415,34 @@ func (m *Model) applyRepoDelete(name string) {
 	}
 	m.reload()
 	m.modal = newResultModal("Delete Results", lines)
+}
+
+func (m *Model) openDoctorFixModal() {
+	if len(m.issues) == 0 {
+		m.modal = newResultModal("Doctor Results", []string{"No doctor issues."})
+		return
+	}
+	brokenCount := 0
+	for _, issue := range m.issues {
+		if issue.Kind == doctor.KindBrokenSymlink {
+			brokenCount++
+		}
+	}
+	lines := []string{
+		fmt.Sprintf("Apply %d Doctor fixes?", len(m.issues)),
+		"",
+		fmt.Sprintf("  - %d broken symlink issues", brokenCount),
+	}
+	m.modal = newConfirmModal("Confirm", lines, false, func(current *Model) {
+		results, err := doctor.FixIssues(current.issues)
+		var output []string
+		for _, result := range results {
+			output = append(output, "✓ "+result.Name+"  "+result.Action)
+		}
+		if err != nil {
+			output = append(output, "x "+err.Error())
+		}
+		current.reload()
+		current.modal = newResultModal("Doctor Results", output)
+	})
 }

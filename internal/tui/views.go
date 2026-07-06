@@ -91,13 +91,15 @@ func renderInspector(m Model, width, height int) string {
 	lines := []string{"Inspector", ""}
 	switch m.view {
 	case ViewActive:
-		if m.cursor >= 0 && m.cursor < len(m.active) {
-			group := m.active[m.cursor]
+		groups := m.visibleActiveGroups()
+		if m.cursor >= 0 && m.cursor < len(groups) {
+			group := groups[m.cursor]
 			lines = append(lines, "◇ "+group.Name, "aliases", "  "+strings.Join(group.Aliases, ", "), "repo", "  "+group.Status)
 		}
 	case ViewRepo:
-		if m.cursor >= 0 && m.cursor < len(m.repo) {
-			skill := m.repo[m.cursor]
+		skills := m.visibleRepoSkills()
+		if m.cursor >= 0 && m.cursor < len(skills) {
+			skill := skills[m.cursor]
 			lines = append(lines, "◇ "+skill.Name, "description", skill.Description, "usages", "  "+strings.Join(m.repoUsage[skill.Name], " "))
 		}
 	case ViewDoctor:
@@ -137,10 +139,7 @@ func visibleStart(cursor, count, maxRows int) int {
 
 func renderActiveRows(m Model, width int) []string {
 	var rows []string
-	for i, group := range m.active {
-		if !m.filter.matches(group.Name, group.Description, group.Status, strings.Join(group.Chips, " "), strings.Join(group.Aliases, " ")) {
-			continue
-		}
+	for i, group := range m.visibleActiveGroups() {
 		prefix := rowPrefix(m, i, group.ID)
 		chips := chipStyle.Render(strings.Join(group.Chips, " "))
 		status := renderStatusChip(m, group.Status)
@@ -156,10 +155,7 @@ func renderActiveRows(m Model, width int) []string {
 
 func renderRepoRows(m Model, width int) []string {
 	var rows []string
-	for i, skill := range m.repo {
-		if !m.filter.matches(skill.Name, skill.Description, strings.Join(m.repoUsage[skill.Name], " ")) {
-			continue
-		}
+	for i, skill := range m.visibleRepoSkills() {
 		id := repoID(skill.Name)
 		prefix := rowPrefix(m, i, id)
 		usages := strings.Join(m.repoUsage[skill.Name], " ")

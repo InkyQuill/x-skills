@@ -45,3 +45,31 @@ func (f *filterState) update(msg tea.KeyMsg) bool {
 	}
 	return true
 }
+
+func (m Model) visibleActiveGroups() []ActiveGroup {
+	if strings.TrimSpace(m.filter.Query) == "" {
+		return m.active
+	}
+	var groups []ActiveGroup
+	for _, group := range m.active {
+		if m.filter.matches(group.Name, group.Description, group.Status, strings.Join(group.Chips, " "), strings.Join(group.Aliases, " ")) {
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
+
+func (m Model) visibleRepoSkills() []repoSkillView {
+	var skills []repoSkillView
+	for _, skill := range m.repo {
+		if m.filter.matches(skill.Name, skill.Description, strings.Join(m.repoUsage[skill.Name], " ")) {
+			skills = append(skills, repoSkillView{Name: skill.Name, Description: skill.Description})
+		}
+	}
+	return skills
+}
+
+type repoSkillView struct {
+	Name        string
+	Description string
+}

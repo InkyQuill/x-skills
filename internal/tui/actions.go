@@ -160,10 +160,11 @@ type repoLinkModal struct {
 }
 
 func (m *Model) currentRepoSkillName() (string, bool) {
-	if m.view != ViewRepo || m.cursor < 0 || m.cursor >= len(m.repo) {
+	skills := m.visibleRepoSkills()
+	if m.view != ViewRepo || m.cursor < 0 || m.cursor >= len(skills) {
 		return "", false
 	}
-	return m.repo[m.cursor].Name, true
+	return skills[m.cursor].Name, true
 }
 
 func (m *Model) openRepoLinkModal() {

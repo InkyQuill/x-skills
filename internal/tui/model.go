@@ -92,20 +92,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.filter.Active {
-		switch msg.String() {
-		case keyActive:
-			m.setView(ViewActive)
-			return m, nil
-		case keyRepo:
-			m.setView(ViewRepo)
-			return m, nil
-		case keyDoctor:
-			m.setView(ViewDoctor)
-			return m, nil
-		}
-	}
-
-	if m.filter.Active {
 		if m.filter.update(msg) {
 			m.cursor = 0
 			return m, nil
@@ -166,8 +152,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) openDetailModal() {
 	switch m.view {
 	case ViewActive:
-		if m.cursor >= 0 && m.cursor < len(m.active) {
-			m.modal = activeDetailModal(m.active[m.cursor])
+		groups := m.visibleActiveGroups()
+		if m.cursor >= 0 && m.cursor < len(groups) {
+			m.modal = activeDetailModal(groups[m.cursor])
 		}
 	}
 }
@@ -175,13 +162,15 @@ func (m *Model) openDetailModal() {
 func (m *Model) openPreviewModal() {
 	switch m.view {
 	case ViewActive:
-		if m.cursor >= 0 && m.cursor < len(m.active) && len(m.active[m.cursor].Members) > 0 {
-			m.modal = newPreviewModal("Preview: "+m.active[m.cursor].Name, resolvedSkillPath(m.active[m.cursor].Members[0].Path))
+		groups := m.visibleActiveGroups()
+		if m.cursor >= 0 && m.cursor < len(groups) && len(groups[m.cursor].Members) > 0 {
+			m.modal = newPreviewModal("Preview: "+groups[m.cursor].Name, resolvedSkillPath(groups[m.cursor].Members[0].Path))
 		}
 	case ViewRepo:
-		if m.cursor >= 0 && m.cursor < len(m.repo) {
-			if path, err := repo.SkillPath(m.cfg, m.repo[m.cursor].Name); err == nil {
-				m.modal = newPreviewModal("Preview: "+m.repo[m.cursor].Name, path)
+		skills := m.visibleRepoSkills()
+		if m.cursor >= 0 && m.cursor < len(skills) {
+			if path, err := repo.SkillPath(m.cfg, skills[m.cursor].Name); err == nil {
+				m.modal = newPreviewModal("Preview: "+skills[m.cursor].Name, path)
 			}
 		}
 	}
@@ -254,13 +243,13 @@ func (m *Model) selectedIDsForView() []string {
 	var ids []string
 	switch m.view {
 	case ViewActive:
-		for _, group := range m.active {
+		for _, group := range m.visibleActiveGroups() {
 			if m.selected[group.ID] {
 				ids = append(ids, group.ID)
 			}
 		}
 	case ViewRepo:
-		for _, skill := range m.repo {
+		for _, skill := range m.visibleRepoSkills() {
 			id := repoID(skill.Name)
 			if m.selected[id] {
 				ids = append(ids, id)
@@ -287,15 +276,17 @@ func (m *Model) selectedIDsForView() []string {
 func (m *Model) currentID() (string, bool) {
 	switch m.view {
 	case ViewActive:
-		if m.cursor < 0 || m.cursor >= len(m.active) {
+		groups := m.visibleActiveGroups()
+		if m.cursor < 0 || m.cursor >= len(groups) {
 			return "", false
 		}
-		return m.active[m.cursor].ID, true
+		return groups[m.cursor].ID, true
 	case ViewRepo:
-		if m.cursor < 0 || m.cursor >= len(m.repo) {
+		skills := m.visibleRepoSkills()
+		if m.cursor < 0 || m.cursor >= len(skills) {
 			return "", false
 		}
-		return repoID(m.repo[m.cursor].Name), true
+		return repoID(skills[m.cursor].Name), true
 	case ViewDoctor:
 		if m.cursor < 0 || m.cursor >= len(m.issues) {
 			return "", false
@@ -309,9 +300,9 @@ func (m *Model) currentID() (string, bool) {
 func (m *Model) itemCount() int {
 	switch m.view {
 	case ViewActive:
-		return len(m.active)
+		return len(m.visibleActiveGroups())
 	case ViewRepo:
-		return len(m.repo)
+		return len(m.visibleRepoSkills())
 	case ViewDoctor:
 		return len(m.issues)
 	default:

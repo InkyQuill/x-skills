@@ -32,7 +32,7 @@ func TestFilterNarrowsActiveRowsAndExcludesFullPaths(t *testing.T) {
 	}
 }
 
-func TestFilterClearsOnViewSwitch(t *testing.T) {
+func TestFilterClearsOnViewSwitchAfterFilterAccept(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
 	m := New(cfg)
@@ -40,6 +40,8 @@ func TestFilterClearsOnViewSwitch(t *testing.T) {
 	updated, _ := m.Update(keyRunes("/"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("zen"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
@@ -66,5 +68,78 @@ func TestSelectionClearsOnViewSwitch(t *testing.T) {
 	m = mustModel(t, updated)
 	if len(m.selected) != 0 {
 		t.Fatalf("selected = %#v, want cleared", m.selected)
+	}
+}
+
+func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.MustActiveRoot("project", "claude"), "target-skill", "Target.")
+	m := New(cfg)
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("target"))
+	m = mustModel(t, updated)
+
+	view := m.View()
+	if !strings.Contains(view, "› □ target-skill") {
+		t.Fatalf("filtered cursor is not drawn on target row:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected detail modal")
+	}
+	detail := m.modal.View(100, 30, m)
+	if !strings.Contains(detail, "Detail: target-skill") {
+		t.Fatalf("detail opened wrong skill:\n%s", detail)
+	}
+}
+
+func TestFilterCursorAndActionsUseFilteredRepoRows(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("target"))
+	m = mustModel(t, updated)
+
+	view := m.View()
+	if !strings.Contains(view, "› □ target-skill") {
+		t.Fatalf("filtered repo cursor is not drawn on target row:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	if !m.selected[repoID("target-skill")] {
+		t.Fatalf("selected = %#v, want target-skill selected", m.selected)
+	}
+}
+
+func TestFilterInputDoesNotInterceptUppercaseTabLetters(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "React-skill", "React.")
+	m := New(cfg)
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+
+	if m.view != ViewActive {
+		t.Fatalf("view = %q, want active while typing uppercase R in filter", m.view)
+	}
+	if m.filter.Query != "R" {
+		t.Fatalf("filter query = %q, want R", m.filter.Query)
 	}
 }

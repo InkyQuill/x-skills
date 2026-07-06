@@ -102,3 +102,20 @@ func appendUnique(values []string, value string) []string {
 	}
 	return append(values, value)
 }
+
+func usageByRepoName(groups []ActiveGroup) map[string][]string {
+	usage := map[string][]string{}
+	for _, group := range groups {
+		for _, member := range group.Members {
+			if member.Status != actions.StatusManaged {
+				continue
+			}
+			chip := rootChip(member.Root.Scope, member.Root.Target)
+			usage[member.Name] = appendUnique(usage[member.Name], chip)
+		}
+	}
+	for name := range usage {
+		sort.Strings(usage[name])
+	}
+	return usage
+}

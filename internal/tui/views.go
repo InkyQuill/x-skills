@@ -111,7 +111,8 @@ func renderRepoRows(m Model, width int) []string {
 	for i, skill := range m.repo {
 		id := repoID(skill.Name)
 		prefix := rowPrefix(m, i, id)
-		text := fmt.Sprintf("%s %s %s", prefix, skill.Name, mutedStyle.Render(skill.Description))
+		usages := strings.Join(m.repoUsage[skill.Name], " ")
+		text := fmt.Sprintf("%s %s %s %s", prefix, skill.Name, mutedStyle.Render(skill.Description), chipStyle.Render(usages))
 		rows = append(rows, truncate(text, width-6))
 	}
 	return rows
@@ -122,7 +123,7 @@ func renderDoctorRows(m Model, width int) []string {
 	for i, issue := range m.issues {
 		id := issueID(issue)
 		prefix := rowPrefix(m, i, id)
-		text := fmt.Sprintf("%s %s %s %s  %s", prefix, issue.Name, chipStyle.Render(issue.Location), dangerStyle.Render(issue.Kind), issue.Reason)
+		text := fmt.Sprintf("%s %s %s %s  %s %s", prefix, dangerStyle.Render(m.symbols.Broken), issue.Kind, chipStyle.Render(issue.Location), issue.Name, issue.Reason)
 		rows = append(rows, truncate(text, width-6))
 	}
 	return rows

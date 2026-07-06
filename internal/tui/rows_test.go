@@ -8,6 +8,8 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
 
@@ -70,6 +72,48 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 	for _, want := range []string{"› □", "zen-of-go", ".Ag", "~Cl", "◆ unmanaged", "×2"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("row missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
+	m := Model{
+		symbols:  symbolsFor(Options{}),
+		view:     ViewRepo,
+		cursor:   0,
+		selected: map[string]bool{"repo:zen-of-go": true},
+		repo: []repo.Skill{{
+			Name:        "zen-of-go",
+			Description: "Go style guide",
+		}},
+		repoUsage: map[string][]string{"zen-of-go": {".Ag", "~Cl"}},
+	}
+
+	got := strings.Join(renderRepoRows(m, 100), "\n")
+	for _, want := range []string{"› ■", "zen-of-go", "Go style guide", ".Ag", "~Cl"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("repo row missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
+	m := Model{
+		symbols:  symbolsFor(Options{}),
+		view:     ViewDoctor,
+		selected: map[string]bool{},
+		issues: []doctor.Issue{{
+			Kind:     doctor.KindBrokenSymlink,
+			Name:     "zen-of-go",
+			Location: ".Ag",
+			Reason:   "symlink target missing",
+		}},
+	}
+
+	got := strings.Join(renderDoctorRows(m, 100), "\n")
+	for _, want := range []string{"›", "▲", "broken-symlink", "zen-of-go", ".Ag", "symlink target missing"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor row missing %q:\n%s", want, got)
 		}
 	}
 }

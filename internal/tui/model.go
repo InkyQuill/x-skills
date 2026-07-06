@@ -30,9 +30,10 @@ type Model struct {
 	cursor   int
 	selected map[string]bool
 
-	active []ActiveGroup
-	repo   []repo.Skill
-	issues []doctor.Issue
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
 
 	wizard Wizard
 	status string
@@ -155,6 +156,7 @@ func (m *Model) reload() {
 		m.err = err
 	}
 	m.active = groupActiveSkills(activeSkills)
+	m.repoUsage = usageByRepoName(m.active)
 
 	repoSkills, err := repo.List(m.cfg)
 	if err != nil && m.err == nil {

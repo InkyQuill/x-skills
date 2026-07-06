@@ -16,7 +16,7 @@ import (
 )
 
 func (m *Model) activeTargets() []actions.ActiveSkill {
-	return m.selectedActiveSkills(ActionMigrate)
+	return m.selectedActiveSkills("migrate")
 }
 
 func (m *Model) openMigrateModal() {
@@ -69,7 +69,7 @@ func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution st
 }
 
 func (m *Model) openUnlinkModal() {
-	targets := m.selectedActiveSkills(ActionUnlink)
+	targets := m.selectedActiveSkills("unlink")
 	if len(targets) == 0 {
 		m.modal = newResultModal("Unlink active skills", []string{"No active skills selected."})
 		return
@@ -100,6 +100,35 @@ func (m *Model) openUnlinkModal() {
 		}
 		current.applyUnlinkTargets(targets, choice == 1)
 	})
+}
+
+func (m Model) selectedActiveSkills(action string) []actions.ActiveSkill {
+	selected := map[string]bool{}
+	for _, id := range m.selectedIDsForView() {
+		selected[id] = true
+	}
+
+	var skills []actions.ActiveSkill
+	seen := map[string]bool{}
+	for _, group := range m.active {
+		if selected[group.ID] {
+			for _, skill := range group.Members {
+				if action == "migrate" && skill.Status != actions.StatusUnmanaged {
+					continue
+				}
+				key := skill.Path
+				if resolved, err := filepath.EvalSymlinks(skill.Path); err == nil {
+					key = resolved
+				}
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				skills = append(skills, skill)
+			}
+		}
+	}
+	return skills
 }
 
 func (m *Model) applyUnlinkTargets(targets []actions.ActiveSkill, deleteUnmanaged bool) {

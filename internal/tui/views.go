@@ -21,9 +21,6 @@ func (m Model) View() string {
 
 	footerHeight := 2
 	bodyHeight := height - 4 - footerHeight
-	if m.wizard.Open {
-		bodyHeight -= 5
-	}
 	if bodyHeight < 4 {
 		bodyHeight = 4
 	}
@@ -31,9 +28,6 @@ func (m Model) View() string {
 	parts := []string{
 		renderHeader(m, width),
 		renderBody(m, width, bodyHeight),
-	}
-	if m.wizard.Open {
-		parts = append(parts, renderWizard(m, width))
 	}
 	if m.modal != nil {
 		parts = append(parts, m.modal.View(width, height, m))
@@ -206,16 +200,6 @@ func activeDetail(group ActiveGroup) string {
 		return mutedStyle.Render(fmt.Sprintf("%d linked locations", len(group.Members)))
 	}
 	return mutedStyle.Render(group.Description)
-}
-
-func renderWizard(m Model, width int) string {
-	title := fmt.Sprintf("%s wizard", m.wizard.Action)
-	lines := []string{
-		accentStyle.Render(title),
-		truncate(m.wizard.Preview, width-6),
-		mutedStyle.Render("enter apply  esc cancel"),
-	}
-	return wizardStyle.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
 
 func renderStatus(m Model, width int) string {

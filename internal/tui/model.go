@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"errors"
-	"fmt"
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,7 +35,6 @@ type Model struct {
 	issues    []doctor.Issue
 	repoUsage map[string][]string
 
-	wizard Wizard
 	modal  modal
 	status string
 	err    error
@@ -86,47 +83,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modal = nil
 		}
 		return m, cmd
-	}
-
-	if m.wizard.Open {
-		switch msg.String() {
-		case "esc":
-			m.wizard = Wizard{}
-			return m, nil
-		case "k":
-			if m.wizard.Conflict != nil {
-				m.wizard.ConflictResolution = actions.ConflictResolutionKeepArchive
-				m.applyWizard()
-			}
-			return m, nil
-		case "l":
-			if m.wizard.Conflict != nil {
-				m.wizard.ConflictResolution = actions.ConflictResolutionUseActive
-				m.applyWizard()
-			}
-			return m, nil
-		case "enter":
-			m.applyWizard()
-			return m, nil
-		case "ctrl+c":
-			return m, tea.Quit
-		case "p":
-			m.setWizardScope(config.ScopeProject)
-			return m, nil
-		case "g":
-			m.setWizardScope(config.ScopeGlobal)
-			return m, nil
-		case "1":
-			m.setWizardTarget(config.TargetAgents)
-			return m, nil
-		case "2":
-			m.setWizardTarget(config.TargetClaude)
-			return m, nil
-		case "3":
-			m.setWizardTarget(config.TargetCodex)
-			return m, nil
-		}
-		return m, nil
 	}
 
 	if isRefreshKey(msg) {
@@ -186,8 +142,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.view == ViewRepo {
 			m.openRepoLinkModal()
 		}
-	case "i":
-		m.openWizard(ActionInstall)
 	case "m":
 		m.openMigrateModal()
 	case "u":
@@ -271,7 +225,6 @@ func (m *Model) setView(view ViewName) {
 	m.cursor = 0
 	m.selected = map[string]bool{}
 	m.filter = filterState{}
-	m.wizard = Wizard{}
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -375,27 +328,6 @@ func (m *Model) clampCursor() {
 	if m.cursor >= count {
 		m.cursor = count - 1
 	}
-}
-
-func (m *Model) applyWizard() {
-	if !m.wizard.Open {
-		return
-	}
-	results, err := applyWizard(m.cfg, &m.wizard)
-	if err != nil {
-		var conflict *actions.ArchiveConflictError
-		if errors.As(err, &conflict) {
-			m.status = "archive conflict: choose k or l"
-			return
-		}
-		m.status = fmt.Sprintf("failed: %v", err)
-		m.wizard = Wizard{}
-		m.reload()
-		return
-	}
-	m.status = fmt.Sprintf("applied %d change(s)", len(results))
-	m.wizard = Wizard{}
-	m.reload()
 }
 
 func repoID(name string) string {

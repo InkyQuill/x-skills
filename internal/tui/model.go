@@ -29,6 +29,7 @@ type Model struct {
 	height   int
 	cursor   int
 	selected map[string]bool
+	filter   filterState
 
 	active    []ActiveGroup
 	repo      []repo.Skill
@@ -121,6 +122,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.filter.Active {
+		switch msg.String() {
+		case keyActive:
+			m.setView(ViewActive)
+			return m, nil
+		case keyRepo:
+			m.setView(ViewRepo)
+			return m, nil
+		case keyDoctor:
+			m.setView(ViewDoctor)
+			return m, nil
+		}
+	}
+
+	if m.filter.Active {
+		if m.filter.update(msg) {
+			m.cursor = 0
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
@@ -136,6 +158,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursor(1)
 	case " ":
 		m.toggleSelection()
+	case "/":
+		if m.view == ViewActive || m.view == ViewRepo {
+			m.filter.Active = true
+			m.filter.Query = ""
+		}
 	case "i":
 		m.openWizard(ActionInstall)
 	case "m":
@@ -178,6 +205,8 @@ func (m *Model) setView(view ViewName) {
 	}
 	m.view = view
 	m.cursor = 0
+	m.selected = map[string]bool{}
+	m.filter = filterState{}
 	m.wizard = Wizard{}
 }
 

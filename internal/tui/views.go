@@ -93,6 +93,9 @@ func visibleStart(cursor, count, maxRows int) int {
 func renderActiveRows(m Model, width int) []string {
 	var rows []string
 	for i, group := range m.active {
+		if !m.filter.matches(group.Name, group.Description, group.Status, strings.Join(group.Chips, " "), strings.Join(group.Aliases, " ")) {
+			continue
+		}
 		prefix := rowPrefix(m, i, group.ID)
 		chips := chipStyle.Render(strings.Join(group.Chips, " "))
 		status := renderStatusChip(m, group.Status)
@@ -109,6 +112,9 @@ func renderActiveRows(m Model, width int) []string {
 func renderRepoRows(m Model, width int) []string {
 	var rows []string
 	for i, skill := range m.repo {
+		if !m.filter.matches(skill.Name, skill.Description, strings.Join(m.repoUsage[skill.Name], " ")) {
+			continue
+		}
 		id := repoID(skill.Name)
 		prefix := rowPrefix(m, i, id)
 		usages := strings.Join(m.repoUsage[skill.Name], " ")
@@ -168,6 +174,10 @@ func renderStatus(m Model, width int) string {
 		lines = append(lines, dangerStyle.Render(m.err.Error()))
 	case m.status != "":
 		lines = append(lines, okStyle.Render(m.status))
+	}
+	if m.filter.Active {
+		lines = append(lines, accentStyle.Render("/ filter: "+m.filter.Query+"_"))
+		lines = append(lines, mutedStyle.Render("enter accept   esc clear/exit"))
 	}
 	lines = append(lines, mutedStyle.Render("enter details  / filter  p preview  m migrate  u unlink  ^R refresh  ? help  q quit"))
 	for i, line := range lines {

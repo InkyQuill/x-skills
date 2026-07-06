@@ -11,3 +11,7 @@
 - Add per-file and per-conflict merge choices for archive conflict resolution. Context: first parity implementation resolves conflicts at the whole-skill level; granular control over which changed files are copied or discarded should be designed and implemented later. Evidence: design discussion for Go TUI parity.
 - Add option to persist multi-selection across view switches. Context: parity design resets selections when changing tabs for safety, but if users find this workflow awkward, we can introduce configuration or state tracking to keep selections per-tab. Evidence: design discussion for Go TUI parity.
 - Add command palette (triggered by `:`). Context: direct shortcuts and a help modal are sufficient for parity, but a command palette can be introduced if the keymap grows too large to manage. Evidence: design discussion for Go TUI parity.
+
+## Testing
+
+- Investigate a mock or virtual filesystem layer for mutation and error-path tests. Context: current tests use real syscalls in `t.TempDir`, which is simple and reliable, but permission failures and platform-specific filesystem errors remain hard to exercise directly. Evidence: code quality review of filesystem-heavy packages such as `internal/repo`, `internal/actions`, and `internal/symlinkcheck`.

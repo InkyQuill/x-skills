@@ -322,8 +322,8 @@ func TestActiveGroupsMergeByFingerprint(t *testing.T) {
 	if len(m.active) != 1 {
 		t.Fatalf("active groups = %d, want 1", len(m.active))
 	}
-	if len(m.active[0].Locations) != 2 {
-		t.Fatalf("locations = %#v, want 2", m.active[0].Locations)
+	if len(m.active[0].Chips) != 2 {
+		t.Fatalf("chips = %#v, want 2", m.active[0].Chips)
 	}
 	if strings.Contains(m.View(), "sha:") {
 		t.Fatalf("view leaked internal fingerprint:\n%s", m.View())

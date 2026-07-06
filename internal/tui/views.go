@@ -2,94 +2,10 @@ package tui
 
 import (
 	"fmt"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
-	"github.com/InkyQuill/x-skills/internal/fingerprint"
 )
-
-type ActiveGroup struct {
-	ID          string
-	Name        string
-	Status      string
-	Description string
-	Locations   []string
-	Members     []actions.ActiveSkill
-	Reason      string
-}
-
-func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
-	groups := map[string]*ActiveGroup{}
-	var order []string
-
-	for _, skill := range skills {
-		key := activeGroupKey(skill)
-		group, ok := groups[key]
-		if !ok {
-			group = &ActiveGroup{
-				ID:          "active:" + key,
-				Name:        skill.Name,
-				Status:      skill.Status,
-				Description: skill.Description,
-				Reason:      skill.Reason,
-			}
-			groups[key] = group
-			order = append(order, key)
-		}
-		group.Members = append(group.Members, skill)
-		group.Locations = appendUnique(group.Locations, skill.Root.Label)
-		if group.Description == "" {
-			group.Description = skill.Description
-		}
-		if group.Reason == "" {
-			group.Reason = skill.Reason
-		}
-		group.Status = mergedStatus(group.Status, skill.Status)
-	}
-
-	result := make([]ActiveGroup, 0, len(order))
-	for _, key := range order {
-		sort.Strings(groups[key].Locations)
-		result = append(result, *groups[key])
-	}
-	return result
-}
-
-func activeGroupKey(skill actions.ActiveSkill) string {
-	if skill.Status == actions.StatusBroken {
-		return "broken:" + skill.Path
-	}
-
-	target := skill.Path
-	if resolved, err := filepath.EvalSymlinks(skill.Path); err == nil {
-		target = resolved
-	}
-	if fp, err := fingerprint.Directory(target); err == nil {
-		return "sha:" + fp
-	}
-	return "path:" + target
-}
-
-func mergedStatus(current, next string) string {
-	if current == actions.StatusBroken || next == actions.StatusBroken {
-		return actions.StatusBroken
-	}
-	if current == actions.StatusUnmanaged || next == actions.StatusUnmanaged {
-		return actions.StatusUnmanaged
-	}
-	return actions.StatusManaged
-}
-
-func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
-}
 
 func (m Model) View() string {
 	width := m.width
@@ -178,9 +94,13 @@ func renderActiveRows(m Model, width int) []string {
 	var rows []string
 	for i, group := range m.active {
 		prefix := rowPrefix(m, i, group.ID)
-		locations := chipStyle.Render(strings.Join(group.Locations, ", "))
-		status := renderStatusChip(group.Status)
-		text := fmt.Sprintf("%s %s %s %s  %s", prefix, group.Name, locations, status, activeDetail(group))
+		chips := chipStyle.Render(strings.Join(group.Chips, " "))
+		status := renderStatusChip(m, group.Status)
+		count := ""
+		if len(group.Members) > 1 {
+			count = " " + mutedStyle.Render(fmt.Sprintf("%s%d", m.symbols.CountPrefix, len(group.Members)))
+		}
+		text := fmt.Sprintf("%s %s %s %s%s  %s", prefix, group.Name, chips, status, count, activeDetail(group))
 		rows = append(rows, truncate(text, width-6))
 	}
 	return rows

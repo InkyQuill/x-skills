@@ -51,14 +51,14 @@ func tabLabel(active bool, key, label string) string {
 	return tabStyle.Render(text)
 }
 
-func renderStatusChip(status string) string {
+func renderStatusChip(m Model, status string) string {
 	switch status {
 	case "managed":
-		return managedStyle.Render(status)
+		return managedStyle.Render(m.symbols.Managed + " managed")
 	case "unmanaged":
-		return unmanaged.Render(status)
+		return unmanaged.Render(m.symbols.Unmanaged + " unmanaged")
 	case "broken":
-		return dangerStyle.Render(status)
+		return dangerStyle.Render(m.symbols.Broken + " broken")
 	default:
 		return mutedStyle.Render(status)
 	}

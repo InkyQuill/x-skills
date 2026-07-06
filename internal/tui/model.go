@@ -185,7 +185,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		m.openWizard(ActionInstall)
 	case "m":
-		m.openWizard(ActionMigrate)
+		m.openMigrateModal()
 	case "u":
 		m.openWizard(ActionUnlink)
 	case "f":

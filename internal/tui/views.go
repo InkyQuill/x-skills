@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/InkyQuill/x-skills/internal/actions"
 )
 
@@ -28,7 +30,7 @@ func (m Model) View() string {
 
 	parts := []string{
 		renderHeader(m, width),
-		renderRows(m, width, bodyHeight),
+		renderBody(m, width, bodyHeight),
 	}
 	if m.wizard.Open {
 		parts = append(parts, renderWizard(m, width))
@@ -51,13 +53,31 @@ func renderHeader(m Model, width int) string {
 }
 
 func renderRows(m Model, width, maxRows int) string {
+	return renderListPanel(m, width, maxRows)
+}
+
+func renderBody(m Model, width, height int) string {
+	if width < 100 {
+		return renderListPanel(m, width, height)
+	}
+	inspectorWidth := 32
+	listWidth := width - inspectorWidth - 3
+	left := renderListPanel(m, listWidth, height)
+	right := renderInspector(m, inspectorWidth, height)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+func renderListPanel(m Model, width, maxRows int) string {
 	var rows []string
+	title := "Active skills"
 	switch m.view {
 	case ViewActive:
 		rows = renderActiveRows(m, width)
 	case ViewRepo:
+		title = "Repo skills"
 		rows = renderRepoRows(m, width)
 	case ViewDoctor:
+		title = "Doctor issues"
 		rows = renderDoctorRows(m, width)
 	}
 	if len(rows) == 0 {
@@ -70,7 +90,35 @@ func renderRows(m Model, width, maxRows int) string {
 	for len(rows) < maxRows {
 		rows = append(rows, "")
 	}
-	return panelStyle.Width(width - 2).Render(strings.Join(rows, "\n"))
+	return panelStyle.Width(width - 2).Render(title + "\n" + strings.Join(rows, "\n"))
+}
+
+func renderInspector(m Model, width, height int) string {
+	lines := []string{"Inspector", ""}
+	switch m.view {
+	case ViewActive:
+		if m.cursor >= 0 && m.cursor < len(m.active) {
+			group := m.active[m.cursor]
+			lines = append(lines, "◇ "+group.Name, "aliases", "  "+strings.Join(group.Aliases, ", "), "repo", "  "+group.Status)
+		}
+	case ViewRepo:
+		if m.cursor >= 0 && m.cursor < len(m.repo) {
+			skill := m.repo[m.cursor]
+			lines = append(lines, "◇ "+skill.Name, "description", skill.Description, "usages", "  "+strings.Join(m.repoUsage[skill.Name], " "))
+		}
+	case ViewDoctor:
+		if m.cursor >= 0 && m.cursor < len(m.issues) {
+			issue := m.issues[m.cursor]
+			lines = append(lines, "◇ "+issue.Kind, "path", issue.Path, "reason", issue.Reason, "fix", issue.SafeFix)
+		}
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return panelStyle.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
 
 func visibleStart(cursor, count, maxRows int) int {

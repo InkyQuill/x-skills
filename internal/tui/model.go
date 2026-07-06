@@ -37,6 +37,7 @@ type Model struct {
 	repoUsage map[string][]string
 
 	wizard Wizard
+	modal  modal
 	status string
 	err    error
 }
@@ -75,6 +76,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.modal != nil {
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		close, cmd := m.modal.Update(msg, &m)
+		if close {
+			m.modal = nil
+		}
+		return m, cmd
+	}
+
 	if m.wizard.Open {
 		switch msg.String() {
 		case "esc":

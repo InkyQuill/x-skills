@@ -33,6 +33,9 @@ func (m Model) View() string {
 	if m.wizard.Open {
 		parts = append(parts, renderWizard(m, width))
 	}
+	if m.modal != nil {
+		parts = append(parts, m.modal.View(width, height, m))
+	}
 	parts = append(parts, renderStatus(m, width))
 	return strings.Join(parts, "\n")
 }

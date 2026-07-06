@@ -29,18 +29,21 @@ func newMigrateCommand(rootOptions *options) *cobra.Command {
 		Short: "Move unmanaged active skills into the archive",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opts.validate(); err != nil {
+			if err := opts.validateFilter(); err != nil {
 				return err
 			}
-			if !rootOptions.yes {
-				return fmt.Errorf("migrate requires confirmation; rerun with -y")
-			}
 
-			scope := opts.scope()
-			results, failures := migrateNames(rootOptions.config(), args, scope, opts.target, rootOptions.yes)
-			if len(args) == 1 && len(failures) == 0 {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "migrated %s %s: %s\n", scope, opts.target, results[0].Name)
+			results, failures := migrateNames(cmd, rootOptions, args, opts)
+			if len(results) == 0 && len(failures) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 				return nil
+			}
+			if len(args) == 1 && len(failures) == 0 {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", results[0].Status, results[0].Name)
+				return nil
+			}
+			if len(args) == 1 && len(failures) == 1 {
+				return failures[0].err
 			}
 
 			writeMutationSummary(cmd.OutOrStdout(), "migrated", results, failures)
@@ -73,6 +76,16 @@ func (o activeRootOptions) validate() error {
 	return nil
 }
 
+func (o activeRootOptions) validateFilter() error {
+	if o.project && o.global {
+		return fmt.Errorf("choose at most one of --project or --global")
+	}
+	if o.target != "" && !slices.Contains(config.Targets, o.target) {
+		return fmt.Errorf("unknown target %q", o.target)
+	}
+	return nil
+}
+
 func (o activeRootOptions) scope() string {
 	if o.project {
 		return config.ScopeProject
@@ -80,21 +93,50 @@ func (o activeRootOptions) scope() string {
 	return config.ScopeGlobal
 }
 
+func (o activeRootOptions) scopeFilter() string {
+	switch {
+	case o.project:
+		return config.ScopeProject
+	case o.global:
+		return config.ScopeGlobal
+	default:
+		return ""
+	}
+}
+
 func migrateNames(
-	cfg config.Config,
+	cmd *cobra.Command,
+	rootOptions *options,
 	names []string,
-	scope string,
-	target string,
-	confirmed bool,
+	opts activeRootOptions,
 ) ([]actions.MutationResult, []mutationFailure) {
+	cfg := rootOptions.config()
 	var results []actions.MutationResult
 	var failures []mutationFailure
 	for _, name := range names {
+		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "migrate", opts)
+		if err != nil {
+			failures = append(failures, mutationFailure{name: name, err: err})
+			continue
+		}
+		ok, err := confirm(
+			cmd,
+			rootOptions,
+			fmt.Sprintf("Migrate %s %s skill %q into repo? [y/N]: ", skill.Root.Scope, skill.Root.Target, name),
+			"migrate requires confirmation; rerun with -y",
+		)
+		if err != nil {
+			failures = append(failures, mutationFailure{name: name, err: err})
+			continue
+		}
+		if !ok {
+			continue
+		}
 		result, err := actions.Migrate(cfg, actions.MigrateRequest{
 			Name:      name,
-			Scope:     scope,
-			Target:    target,
-			Confirmed: confirmed,
+			Scope:     skill.Root.Scope,
+			Target:    skill.Root.Target,
+			Confirmed: true,
 		})
 		if err != nil {
 			failures = append(failures, mutationFailure{name: name, err: err})

@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
-	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -27,22 +25,18 @@ func newUnlinkCommand(rootOptions *options) *cobra.Command {
 			if err := opts.validate(); err != nil {
 				return err
 			}
-			if !rootOptions.yes {
-				return fmt.Errorf("unlink requires confirmation; rerun with -y")
-			}
 
-			scope := opts.scopeFilter()
-			results, failures := unlinkNames(
-				rootOptions.config(),
-				args,
-				scope,
-				opts.target,
-				rootOptions.yes,
-				opts.deleteUnmanaged,
-			)
-			if len(args) == 1 && len(failures) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s: %s\n", results[0].Status, scope, opts.target, results[0].Name)
+			results, failures := unlinkNamesWithOptions(cmd, rootOptions, args, opts)
+			if len(results) == 0 && len(failures) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 				return nil
+			}
+			if len(args) == 1 && len(failures) == 0 {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", results[0].Status, results[0].Name)
+				return nil
+			}
+			if len(args) == 1 && len(failures) == 1 {
+				return failures[0].err
 			}
 
 			writeUnlinkSummary(cmd.OutOrStdout(), results, failures)
@@ -58,102 +52,69 @@ func newUnlinkCommand(rootOptions *options) *cobra.Command {
 }
 
 func (o unlinkOptions) validate() error {
-	if o.project && o.global {
-		return fmt.Errorf("choose at most one of --project or --global")
-	}
-	if o.target != "" && !slices.Contains(config.Targets, o.target) {
-		return fmt.Errorf("unknown target %q", o.target)
-	}
-	return nil
+	return o.validateFilter()
 }
 
-func (o unlinkOptions) scopeFilter() string {
-	switch {
-	case o.project:
-		return config.ScopeProject
-	case o.global:
-		return config.ScopeGlobal
-	default:
-		return ""
-	}
-}
-
-func unlinkNames(
-	cfg config.Config,
+func unlinkNamesWithOptions(
+	cmd *cobra.Command,
+	rootOptions *options,
 	names []string,
-	scope string,
-	target string,
-	confirmed bool,
-	deleteUnmanaged bool,
+	opts unlinkOptions,
 ) ([]actions.MutationResult, []mutationFailure) {
+	cfg := rootOptions.config()
 	var results []actions.MutationResult
 	var failures []mutationFailure
-	if scope == "" || target == "" {
-		return unlinkMatchingNames(cfg, names, actions.ScanFilter{Scope: scope, Target: target}, confirmed, deleteUnmanaged)
-	}
 	for _, name := range names {
-		result, err := actions.Unlink(cfg, actions.UnlinkRequest{
-			Name:            name,
-			Scope:           scope,
-			Target:          target,
-			Confirmed:       confirmed,
-			DeleteUnmanaged: deleteUnmanaged,
-		})
+		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "unlink", opts.activeRootOptions)
 		if err != nil {
 			failures = append(failures, mutationFailure{name: name, err: err})
 			continue
 		}
-		results = append(results, result)
-	}
-	return results, failures
-}
-
-func unlinkMatchingNames(
-	cfg config.Config,
-	names []string,
-	filter actions.ScanFilter,
-	confirmed bool,
-	deleteUnmanaged bool,
-) ([]actions.MutationResult, []mutationFailure) {
-	activeSkills, err := actions.ScanActive(cfg, filter)
-	if err != nil {
-		failures := make([]mutationFailure, 0, len(names))
-		for _, name := range names {
-			failures = append(failures, mutationFailure{name: name, err: err})
-		}
-		return nil, failures
-	}
-	wanted := map[string]bool{}
-	for _, name := range names {
-		wanted[name] = true
-	}
-	matched := map[string]bool{}
-	var results []actions.MutationResult
-	var failures []mutationFailure
-	for _, skill := range activeSkills {
-		requestName := filepath.Base(skill.Path)
-		if !wanted[skill.Name] && !wanted[requestName] {
+		if rootOptions.no {
 			continue
 		}
-		matched[skill.Name] = true
-		matched[requestName] = true
+
+		confirmed := false
+		deleteUnmanaged := opts.deleteUnmanaged
+		if skill.Status == actions.StatusUnmanaged && !opts.deleteUnmanaged {
+			confirmed, deleteUnmanaged, err = chooseUnmanagedUnlinkAction(cmd, rootOptions, skill)
+			if err != nil {
+				failures = append(failures, mutationFailure{name: name, err: err})
+				continue
+			}
+		} else {
+			prompt := fmt.Sprintf("Unlink %s %s skill %q? [y/N]: ", skill.Root.Scope, skill.Root.Target, name)
+			noInputErr := "unlink requires confirmation; rerun with -y"
+			if skill.Status == actions.StatusUnmanaged && opts.deleteUnmanaged {
+				prompt = fmt.Sprintf("Remove unmanaged %s %s skill %q without archiving? [y/N]: ", skill.Root.Scope, skill.Root.Target, name)
+				noInputErr = "unmanaged delete requires confirmation; rerun with --delete-unmanaged -y"
+			}
+			confirmed, err = confirm(
+				cmd,
+				rootOptions,
+				prompt,
+				noInputErr,
+			)
+			if err != nil {
+				failures = append(failures, mutationFailure{name: name, err: err})
+				continue
+			}
+		}
+		if !confirmed {
+			continue
+		}
 		result, err := actions.Unlink(cfg, actions.UnlinkRequest{
-			Name:            requestName,
+			Name:            filepath.Base(skill.Path),
 			Scope:           skill.Root.Scope,
 			Target:          skill.Root.Target,
-			Confirmed:       confirmed,
+			Confirmed:       true,
 			DeleteUnmanaged: deleteUnmanaged,
 		})
 		if err != nil {
-			failures = append(failures, mutationFailure{name: requestName, err: err})
+			failures = append(failures, mutationFailure{name: name, err: err})
 			continue
 		}
 		results = append(results, result)
-	}
-	for _, name := range names {
-		if !matched[name] {
-			failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("active skill not found")})
-		}
 	}
 	return results, failures
 }

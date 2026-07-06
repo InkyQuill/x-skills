@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 
@@ -17,6 +18,8 @@ type options struct {
 	globalClaudeRoot string
 	globalCodexRoot  string
 	yes              bool
+	no               bool
+	noInput          bool
 
 	flags *pflag.FlagSet
 }
@@ -54,6 +57,12 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		Use:           "x-skills",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if opts.yes && opts.no {
+				return fmt.Errorf("--yes and --no are mutually exclusive")
+			}
+			return nil
+		},
 	}
 	root.SetIn(stdin)
 	root.SetOut(stdout)
@@ -67,6 +76,8 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 	flags.StringVar(&opts.globalClaudeRoot, "claude-global-root", opts.globalClaudeRoot, "global Claude skills root")
 	flags.StringVar(&opts.globalCodexRoot, "codex-global-root", opts.globalCodexRoot, "global Codex skills root")
 	flags.BoolVarP(&opts.yes, "yes", "y", false, "confirm mutating commands")
+	flags.BoolVarP(&opts.no, "no", "n", false, "decline confirmations")
+	flags.BoolVar(&opts.noInput, "no-input", false, "fail instead of prompting")
 	flags.StringVar(&opts.homeDir, "home", opts.homeDir, "home directory")
 	if err := flags.MarkHidden("home"); err != nil {
 		return nil, err

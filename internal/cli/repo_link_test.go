@@ -81,3 +81,44 @@ func TestLinkBatchReportsPartialFailureAndContinues(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkFailsNoInputWhenDestinationIsAmbiguous(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	makeSkill(t, filepath.Join(home, ".x-skills", "skills"), "typescript-expert", "TypeScript.")
+
+	var stderr bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "link", "typescript-expert"}, strings.NewReader(""), &bytes.Buffer{}, &stderr)
+	if err == nil {
+		t.Fatal("expected ambiguous destination error")
+	}
+	if !strings.Contains(err.Error(), "choose a destination") {
+		t.Fatalf("error = %q, want choose a destination", err)
+	}
+	if !strings.Contains(err.Error(), "x-skills link typescript-expert --target codex --project") {
+		t.Fatalf("error missing one-shot hint: %v", err)
+	}
+}
+
+func TestLinkPromptsForAmbiguousDestination(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	source := makeSkill(t, filepath.Join(home, ".x-skills", "skills"), "typescript-expert", "TypeScript.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "link", "typescript-expert"}, strings.NewReader("3\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Select destination for link [1-6]:") {
+		t.Fatalf("link output missing prompt:\n%s", out.String())
+	}
+	target := filepath.Join(project, ".codex", "skills", "typescript-expert")
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != source {
+		t.Fatalf("resolved = %q, want %q", resolved, source)
+	}
+}

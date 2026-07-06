@@ -28,18 +28,67 @@ func TestMigrateWithYesFlag(t *testing.T) {
 	}
 }
 
-func TestMigrateWithoutYesReturnsConfirmationError(t *testing.T) {
+func TestMigrateWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
-	var stderr bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &bytes.Buffer{}, &stderr)
-	if err == nil {
-		t.Fatal("expected confirmation error")
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "requires confirmation") {
-		t.Fatalf("error = %q, want confirmation", err)
+	if !strings.Contains(out.String(), "cancelled") {
+		t.Fatalf("output = %q, want cancelled", out.String())
+	}
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active skill changed: %v", err)
+	}
+}
+
+func TestMigrateFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	makeSkill(t, filepath.Join(project, ".codex", "skills"), "svelte-coder", "Project.")
+	makeSkill(t, filepath.Join(home, ".agents", "skills"), "svelte-coder", "Global.")
+
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "migrate", "svelte-coder"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected ambiguous active skill error")
+	}
+	if !strings.Contains(err.Error(), `multiple active skills named "svelte-coder"`) {
+		t.Fatalf("error = %q, want multiple active skills", err)
+	}
+	if !strings.Contains(err.Error(), "x-skills migrate svelte-coder --target codex --project") ||
+		!strings.Contains(err.Error(), "x-skills migrate svelte-coder --target agents --global") {
+		t.Fatalf("error missing one-shot hints: %v", err)
+	}
+}
+
+func TestMigratePromptsForAmbiguousActiveSkillAndConfirmation(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "svelte-coder", "Project.")
+	makeSkill(t, filepath.Join(home, ".agents", "skills"), "svelte-coder", "Global.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "svelte-coder"}, strings.NewReader("1\ny\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Select skill to migrate [1-2]:") {
+		t.Fatalf("output missing selection prompt:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `Migrate project codex skill "svelte-coder" into repo? [y/N]:`) {
+		t.Fatalf("output missing confirmation prompt:\n%s", out.String())
+	}
+	archived := filepath.Join(home, ".x-skills", "skills", "svelte-coder")
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != archived {
+		t.Fatalf("resolved = %q, want %q", resolved, archived)
 	}
 }
 
@@ -61,7 +110,69 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	}
 }
 
-func TestUnlinkWithYesDefaultsToAllMatchingActiveRoots(t *testing.T) {
+func TestUnlinkUnmanagedPromptsForArchiveOrDelete(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex"}, strings.NewReader("1\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Select unlink action [1-3]:") {
+		t.Fatalf("output missing unmanaged choice prompt:\n%s", out.String())
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("active skill still exists or unexpected err: %v", err)
+	}
+	archived := filepath.Join(home, ".x-skills", "skills", "local-only")
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("archived skill missing: %v", err)
+	}
+}
+
+func TestUnlinkUnmanagedPromptCanDeleteWithoutArchive(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex"}, strings.NewReader("2\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "removed unmanaged") {
+		t.Fatalf("unlink output:\n%s", out.String())
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("active skill still exists or unexpected err: %v", err)
+	}
+	archived := filepath.Join(home, ".x-skills", "skills", "local-only")
+	if _, err := os.Stat(archived); !os.IsNotExist(err) {
+		t.Fatalf("archived skill should not exist or unexpected err: %v", err)
+	}
+}
+
+func TestUnlinkUnmanagedNoInputRequiresChoice(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "unlink", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected unmanaged choice error")
+	}
+	if !strings.Contains(err.Error(), "archive then unlink with -y") ||
+		!strings.Contains(err.Error(), "remove without archiving with --delete-unmanaged -y") {
+		t.Fatalf("error missing one-shot hints: %v", err)
+	}
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active skill changed: %v", err)
+	}
+}
+
+func TestUnlinkWithYesStillRequiresAmbiguousLocationSelection(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	agents := makeSkill(t, filepath.Join(home, ".agents", "skills"), "code-review", "Review.")
@@ -76,17 +187,55 @@ func TestUnlinkWithYesDefaultsToAllMatchingActiveRoots(t *testing.T) {
 
 	var out bytes.Buffer
 	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "code-review", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected selection error")
+	}
+	if !strings.Contains(err.Error(), "invalid selection") {
+		t.Fatalf("error = %q, want invalid selection", err)
+	}
+	if _, err := os.Stat(agents); err != nil {
+		t.Fatalf("agents skill should remain: %v", err)
+	}
+	if _, err := os.Lstat(claude); err != nil {
+		t.Fatalf("claude link should remain: %v", err)
+	}
+}
+
+func TestUnlinkFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	makeSkill(t, filepath.Join(project, ".codex", "skills"), "code-review", "Project.")
+	makeSkill(t, filepath.Join(home, ".agents", "skills"), "code-review", "Global.")
+
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "unlink", "code-review"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected ambiguous active skill error")
+	}
+	if !strings.Contains(err.Error(), `multiple active skills named "code-review"`) {
+		t.Fatalf("error = %q, want multiple active skills", err)
+	}
+	if !strings.Contains(err.Error(), "x-skills unlink code-review --target codex --project") ||
+		!strings.Contains(err.Error(), "x-skills unlink code-review --target agents --global") {
+		t.Fatalf("error missing one-shot hints: %v", err)
+	}
+}
+
+func TestUnlinkPromptsForAmbiguousActiveSkill(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "code-review", "Project.")
+	makeSkill(t, filepath.Join(home, ".agents", "skills"), "code-review", "Global.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "code-review", "--delete-unmanaged"}, strings.NewReader("1\n"), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(agents); !os.IsNotExist(err) {
-		t.Fatalf("agents skill still exists or unexpected err: %v", err)
+	if !strings.Contains(out.String(), "Select skill to unlink [1-2]:") {
+		t.Fatalf("output missing selection prompt:\n%s", out.String())
 	}
-	if _, err := os.Lstat(claude); !os.IsNotExist(err) {
-		t.Fatalf("claude link still exists or unexpected err: %v", err)
-	}
-	if strings.Contains(out.String(), "failed") {
-		t.Fatalf("unlink output contains failure:\n%s", out.String())
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("selected active skill still exists or unexpected err: %v", err)
 	}
 }
 
@@ -109,17 +258,20 @@ func TestUnlinkGlobalWithYesDefaultsToGlobalMatchingRoots(t *testing.T) {
 	}
 }
 
-func TestUnlinkDeleteUnmanagedWithoutYesReturnsConfirmationError(t *testing.T) {
+func TestUnlinkDeleteUnmanagedWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
+	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
-	var stderr bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex", "--delete-unmanaged"}, strings.NewReader(""), &bytes.Buffer{}, &stderr)
-	if err == nil {
-		t.Fatal("expected confirmation error")
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "requires confirmation") {
-		t.Fatalf("error = %q, want confirmation", err)
+	if !strings.Contains(out.String(), "cancelled") {
+		t.Fatalf("output = %q, want cancelled", out.String())
+	}
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active skill changed: %v", err)
 	}
 }

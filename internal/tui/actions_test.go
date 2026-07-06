@@ -109,3 +109,126 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("repo link modal is nil")
+	}
+	view := m.modal.View(100, 30, m)
+	for _, want := range []string{"Link repo skill", "scope", "project", "target", ".Ag", "Will create"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("link modal missing %q:\n%s", want, view)
+		}
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go")); err != nil {
+		t.Fatalf("link was not created: %v", err)
+	}
+}
+
+func TestRepoLinkModalCanChangeDestination(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if _, err := os.Lstat(filepath.Join(cfg.GlobalCodexRoot, "zen-of-go")); err != nil {
+		t.Fatalf("global codex link was not created: %v", err)
+	}
+}
+
+func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	projectRoot := cfg.MustActiveRoot("project", "agents")
+	globalRoot := cfg.MustActiveRoot("global", "claude")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(projectRoot, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(globalRoot, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	view := m.modal.View(110, 35, m)
+	for _, want := range []string{"Unlink usages: zen-of-go", "■ .Ag", "■ ~Cl", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("usage chooser missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(projectRoot, "zen-of-go")); !os.IsNotExist(err) {
+		t.Fatalf("project usage still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(globalRoot, "zen-of-go")); !os.IsNotExist(err) {
+		t.Fatalf("global usage still exists or unexpected error: %v", err)
+	}
+}
+
+func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(root, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := m.modal.View(110, 35, m)
+	for _, want := range []string{"Delete archive: zen-of-go", "Visible usages", "Only current project roots and global roots are known", "Unlink visible usages, then delete archive"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("delete modal missing %q:\n%s", want, view)
+		}
+	}
+}

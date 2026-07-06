@@ -182,12 +182,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.modal = newHelpModal()
 	case "p":
 		m.openPreviewModal()
+	case "l":
+		if m.view == ViewRepo {
+			m.openRepoLinkModal()
+		}
 	case "i":
 		m.openWizard(ActionInstall)
 	case "m":
 		m.openMigrateModal()
 	case "u":
-		m.openUnlinkModal()
+		if m.view == ViewRepo {
+			m.openRepoUnlinkModal()
+		} else {
+			m.openUnlinkModal()
+		}
+	case "d":
+		if m.view == ViewRepo {
+			m.openRepoDeleteModal()
+		}
 	case "f":
 		m.openWizard(ActionFixDoctor)
 	}

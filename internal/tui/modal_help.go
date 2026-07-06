@@ -27,6 +27,7 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  enter    view row details",
 		"  /        enter local filter mode",
 		"  space    toggle row selection",
+		"  c        clear selection",
 		"  p        preview SKILL.md",
 		"  ^R       rescan filesystem",
 		"  ?        show this help screen",

@@ -19,21 +19,22 @@ func (m Model) View() string {
 		height = 32
 	}
 
-	footerHeight := 2
-	bodyHeight := height - 4 - footerHeight
+	status := renderStatus(m, width)
+	statusHeight := lipgloss.Height(status)
+	bodyHeight := height - 1 - statusHeight
 	if bodyHeight < 4 {
 		bodyHeight = 4
 	}
 
-	parts := []string{
+	base := strings.Join([]string{
 		renderHeader(m, width),
 		renderBody(m, width, bodyHeight),
-	}
+		status,
+	}, "\n")
 	if m.modal != nil {
-		parts = append(parts, m.modal.View(width, height, m))
+		return renderOverlay(base, m.modal.View(width, height, m), width, height)
 	}
-	parts = append(parts, renderStatus(m, width))
-	return strings.Join(parts, "\n")
+	return normalizeViewHeight(base, width, height)
 }
 
 func renderHeader(m Model, width int) string {
@@ -62,6 +63,10 @@ func renderBody(m Model, width, height int) string {
 }
 
 func renderListPanel(m Model, width, maxRows int) string {
+	rowCount := maxRows - 3
+	if rowCount < 1 {
+		rowCount = 1
+	}
 	var rows []string
 	title := "Active skills"
 	switch m.view {
@@ -77,17 +82,21 @@ func renderListPanel(m Model, width, maxRows int) string {
 	if len(rows) == 0 {
 		rows = []string{mutedStyle.Render("No items.")}
 	}
-	if len(rows) > maxRows {
-		start := visibleStart(m.cursor, len(rows), maxRows)
-		rows = rows[start : start+maxRows]
+	if len(rows) > rowCount {
+		start := visibleStart(m.cursor, len(rows), rowCount)
+		rows = rows[start : start+rowCount]
 	}
-	for len(rows) < maxRows {
+	for len(rows) < rowCount {
 		rows = append(rows, "")
 	}
 	return panelStyle.Width(width - 2).Render(title + "\n" + strings.Join(rows, "\n"))
 }
 
 func renderInspector(m Model, width, height int) string {
+	contentHeight := height - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
 	lines := []string{"Inspector", ""}
 	switch m.view {
 	case ViewActive:
@@ -108,11 +117,11 @@ func renderInspector(m Model, width, height int) string {
 			lines = append(lines, "◇ "+issue.Kind, "path", issue.Path, "reason", issue.Reason, "fix", issue.SafeFix)
 		}
 	}
-	for len(lines) < height {
+	for len(lines) < contentHeight {
 		lines = append(lines, "")
 	}
-	if len(lines) > height {
-		lines = lines[:height]
+	if len(lines) > contentHeight {
+		lines = lines[:contentHeight]
 	}
 	return panelStyle.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
@@ -210,9 +219,55 @@ func renderStatus(m Model, width int) string {
 		lines = append(lines, accentStyle.Render("/ filter: "+m.filter.Query+"_"))
 		lines = append(lines, mutedStyle.Render("enter accept   esc clear/exit"))
 	}
-	lines = append(lines, mutedStyle.Render("enter details  / filter  p preview  m migrate  u unlink  ^R refresh  ? help  q quit"))
+	lines = append(lines, mutedStyle.Render("enter details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh  ? help  q quit"))
 	for i, line := range lines {
 		lines[i] = truncate(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func normalizeViewHeight(view string, width, height int) string {
+	lines := strings.Split(view, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	for i, line := range lines {
+		lines[i] = truncate(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderOverlay(base, layer string, width, height int) string {
+	lines := strings.Split(normalizeViewHeight(base, width, height), "\n")
+	layerLines := strings.Split(layer, "\n")
+	layerHeight := len(layerLines)
+	layerWidth := 0
+	for _, line := range layerLines {
+		if lineWidth := lipgloss.Width(line); lineWidth > layerWidth {
+			layerWidth = lineWidth
+		}
+	}
+	top := (height - layerHeight) / 2
+	if top < 0 {
+		top = 0
+	}
+	left := (width - layerWidth) / 2
+	if left < 0 {
+		left = 0
+	}
+	for i, line := range layerLines {
+		row := top + i
+		if row < 0 || row >= len(lines) {
+			continue
+		}
+		right := width - left - lipgloss.Width(line)
+		if right < 0 {
+			right = 0
+		}
+		lines[row] = strings.Repeat(" ", left) + line + strings.Repeat(" ", right)
 	}
 	return strings.Join(lines, "\n")
 }

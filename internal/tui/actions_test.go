@@ -110,6 +110,80 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 	}
 }
 
+func TestActiveUnlinkManagedOnlyAsksForLocationsNotCopy(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "autofix", "Autofix.")
+	agentsRoot := cfg.MustActiveRoot("global", "agents")
+	claudeRoot := cfg.MustActiveRoot("global", "claude")
+	if err := os.MkdirAll(agentsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(agentsRoot, "autofix")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(claudeRoot, "autofix")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("unlink modal is nil")
+	}
+	view := m.modal.View(120, 35, m)
+	for _, want := range []string{"Unlink usages: autofix", "~Ag", "~Cl", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unlink locations modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Migrate to repo") || strings.Contains(view, "Delete active copies") {
+		t.Fatalf("managed-only unlink asked to copy/delete active directories:\n%s", view)
+	}
+}
+
+func TestActiveUnlinkManagedGroupRemovesEachSelectedLocation(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "autofix", "Autofix.")
+	agentsPath := filepath.Join(cfg.MustActiveRoot("global", "agents"), "autofix")
+	claudePath := filepath.Join(cfg.MustActiveRoot("global", "claude"), "autofix")
+	if err := os.MkdirAll(filepath.Dir(agentsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, agentsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, claudePath); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if _, err := os.Lstat(agentsPath); !os.IsNotExist(err) {
+		t.Fatalf("agents link still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("claude link still exists or unexpected error: %v", err)
+	}
+	if m.modal == nil || strings.Contains(m.modal.View(120, 35, m), "active skill not found") {
+		t.Fatalf("unexpected unlink result modal: %#v", m.modal)
+	}
+}
+
 func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

@@ -71,6 +71,24 @@ func TestSelectionClearsOnViewSwitch(t *testing.T) {
 	}
 }
 
+func TestClearSelectionKeyClearsCurrentSelection(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
+	m := New(cfg)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	if len(m.selected) == 0 {
+		t.Fatal("selection was not set")
+	}
+
+	updated, _ = m.Update(keyRunes("c"))
+	m = mustModel(t, updated)
+	if len(m.selected) != 0 {
+		t.Fatalf("selected = %#v, want cleared", m.selected)
+	}
+}
+
 func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Alpha.")

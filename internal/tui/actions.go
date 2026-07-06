@@ -73,6 +73,10 @@ func (m *Model) openUnlinkModal() {
 		m.modal = newResultModal("Unlink active skills", []string{"No active skills selected."})
 		return
 	}
+	if allActiveTargetsAlreadyArchived(targets) {
+		m.modal = repoUsageModal{name: activeUnlinkTitle(targets), targets: activeUsageTargets(targets), selected: selectedIndexes(len(targets))}
+		return
+	}
 	lines := []string{"Managed links"}
 	for _, target := range targets {
 		if target.Status == actions.StatusManaged {
@@ -116,8 +120,10 @@ func (m Model) selectedActiveSkills(action string) []actions.ActiveSkill {
 					continue
 				}
 				key := skill.Path
-				if resolved, err := filepath.EvalSymlinks(skill.Path); err == nil {
-					key = resolved
+				if action == "migrate" {
+					if resolved, err := filepath.EvalSymlinks(skill.Path); err == nil {
+						key = resolved
+					}
 				}
 				if seen[key] {
 					continue
@@ -128,6 +134,44 @@ func (m Model) selectedActiveSkills(action string) []actions.ActiveSkill {
 		}
 	}
 	return skills
+}
+
+func allActiveTargetsAlreadyArchived(targets []actions.ActiveSkill) bool {
+	for _, target := range targets {
+		if target.Status == actions.StatusUnmanaged {
+			return false
+		}
+	}
+	return true
+}
+
+func activeUsageTargets(targets []actions.ActiveSkill) []repoUsageTarget {
+	usageTargets := make([]repoUsageTarget, 0, len(targets))
+	for _, target := range targets {
+		usageTargets = append(usageTargets, repoUsageTarget{
+			Name:   filepath.Base(target.Path),
+			Scope:  target.Root.Scope,
+			Target: target.Root.Target,
+			Chip:   rootChip(target.Root.Scope, target.Root.Target),
+			Path:   target.Path,
+		})
+	}
+	return usageTargets
+}
+
+func selectedIndexes(count int) map[int]bool {
+	selected := map[int]bool{}
+	for i := 0; i < count; i++ {
+		selected[i] = true
+	}
+	return selected
+}
+
+func activeUnlinkTitle(targets []actions.ActiveSkill) string {
+	if len(targets) == 0 {
+		return "selected skills"
+	}
+	return targets[0].Name
 }
 
 func (m *Model) applyUnlinkTargets(targets []actions.ActiveSkill, deleteUnmanaged bool) {
@@ -379,9 +423,6 @@ func (r repoUsageModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		r.selected[r.index] = !r.selected[r.index]
 		m.modal = r
 	case "enter":
-		m.applyRepoUsageUnlink(r)
-	}
-	if msg.Type == tea.KeyEnter {
 		m.applyRepoUsageUnlink(r)
 	}
 	return false, nil

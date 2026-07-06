@@ -52,6 +52,9 @@ func TestModalRendersOverShellWithoutRemovingFooter(t *testing.T) {
 	if !strings.Contains(view, "^R refresh") {
 		t.Fatalf("view missing footer shortcuts:\n%s", view)
 	}
+	if got := strings.Count(view, "\n") + 1; got != m.height {
+		t.Fatalf("view height = %d, want %d:\n%s", got, m.height, view)
+	}
 }
 
 func TestEnterOpensActiveDetailModal(t *testing.T) {

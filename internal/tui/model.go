@@ -113,6 +113,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursor(1)
 	case " ":
 		m.toggleSelection()
+	case "c":
+		m.selected = map[string]bool{}
+		m.status = "selection cleared"
 	case "/":
 		if m.view == ViewActive || m.view == ViewRepo {
 			m.filter.Active = true

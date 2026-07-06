@@ -157,6 +157,22 @@ func TestRowsScrollToKeepCursorVisible(t *testing.T) {
 	}
 }
 
+func TestViewHeightDoesNotExceedWindowHeight(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	for i := 0; i < 12; i++ {
+		makeSkill(t, cfg.ArchiveSkillsRoot(), fmt.Sprintf("skill-%02d", i), "Repo.")
+	}
+	m := New(cfg)
+	m.width = 100
+	m.height = 14
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+
+	if got := strings.Count(m.View(), "\n") + 1; got != m.height {
+		t.Fatalf("view height = %d, want %d:\n%s", got, m.height, m.View())
+	}
+}
+
 func TestFooterShortcutsStayVisibleWithStatusAndModal(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)
@@ -169,7 +185,7 @@ func TestFooterShortcutsStayVisibleWithStatusAndModal(t *testing.T) {
 	if !strings.Contains(view, "installed opentui-react") {
 		t.Fatalf("view missing status:\n%s", view)
 	}
-	if !strings.Contains(view, "enter details  / filter  p preview  m migrate  u unlink  ^R refresh") {
+	if !strings.Contains(view, "enter details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
 		t.Fatalf("view missing footer shortcuts:\n%s", view)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 type confirmModal struct {
@@ -27,12 +29,24 @@ func (c confirmModal) Title() string {
 }
 
 func (c confirmModal) View(width, height int, m Model) string {
-	buttons := "[ Apply ]   Cancel"
+	apply := "[ Apply ]"
+	cancel := "Cancel"
 	if c.choice == 1 {
-		buttons = "Apply   [ Cancel ]"
+		apply = "Apply"
+		cancel = "[ Cancel ]"
+	}
+	if c.choice == 0 {
+		apply = selectedBg.Render(apply)
+	} else {
+		cancel = selectedBg.Render(cancel)
 	}
 	body := append([]string{accentStyle.Render(c.title), ""}, c.lines...)
-	body = append(body, "", buttons, mutedStyle.Render("left/right choose   enter apply   y/n select   esc cancel"))
+	body = append(body, "", apply+"   "+cancel, mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
+		{ASCII: "enter", Unicode: "↵", Label: "apply"},
+		{ASCII: "y/n", Label: "select"},
+		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+	})))
 	return modalStyle(width, height).Render(strings.Join(body, "\n"))
 }
 

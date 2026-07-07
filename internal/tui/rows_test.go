@@ -11,6 +11,9 @@ import (
 	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestActiveGroupRowsShowRootChipsAliasesAndCount(t *testing.T) {
@@ -69,10 +72,13 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 
 	rows := renderActiveRows(m, 100)
 	got := strings.Join(rows, "\n")
-	for _, want := range []string{"› □", "zen-of-go", ".Ag", "~Cl", "◆ unmanaged", "×2"} {
+	for _, want := range []string{"› □", "zen-of-go", ".Ag", "~Cl", "◆ unmanaged", "×2", "Go style."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("row missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "2 linked locations") {
+		t.Fatalf("row should show description instead of location placeholder:\n%s", got)
 	}
 }
 
@@ -90,10 +96,55 @@ func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 	}
 
 	got := strings.Join(renderRepoRows(m, 100), "\n")
-	for _, want := range []string{"› ■", "zen-of-go", "Go style guide", ".Ag", "~Cl"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("repo row missing %q:\n%s", want, got)
-		}
+	if colorAvailableForTest() && (!selectedBackgroundConfigured() || !cursorBackgroundConfigured()) {
+		t.Fatal("row background styles are not configured")
+	}
+	if colorAvailableForTest() && !rowBackgroundsAreDistinct() {
+		t.Fatal("cursor and selected row background styles must be different")
+	}
+	if colorAvailableForTest() && !rootBadgeBackgroundsConfigured() {
+		t.Fatal("root badge background styles are not configured")
+	}
+	plain := strings.TrimRight(ansi.Strip(got), " ")
+	want := "› ■ zen-of-go .Ag ~Cl Go style guide"
+	if plain != want {
+		t.Fatalf("repo row = %q, want %q", plain, want)
+	}
+}
+
+func TestHighlightedRepoRowPreservesRootPills(t *testing.T) {
+	m := Model{
+		symbols:  symbolsFor(Options{}),
+		view:     ViewRepo,
+		cursor:   0,
+		selected: map[string]bool{"repo:zen-of-go": true},
+		repo: []repo.Skill{{
+			Name:        "zen-of-go",
+			Description: "Go style guide",
+		}},
+		repoUsage: map[string][]string{"zen-of-go": {".Ag", "~Cl"}},
+	}
+
+	got := strings.Join(renderRepoRows(m, 100), "\n")
+	if colorAvailableForTest() && !strings.Contains(got, "") {
+		t.Fatalf("highlighted row lost root pill edge glyphs:\n%q", got)
+	}
+	if colorAvailableForTest() && !rootBadgeBackgroundsConfigured() {
+		t.Fatal("root badge background styles are not configured")
+	}
+}
+
+func TestRenderPillUsesRoundedCapsuleShape(t *testing.T) {
+	symbols := symbolsFor(Options{})
+	got := plain(tuiui.Pill(symbols.BadgeLeft, symbols.BadgeRight, tuiui.PillProps{
+		Color:      projectChip.GetBackground(),
+		Background: selectedBg.GetBackground(),
+		Text:       ".Ag",
+		TextColor:  lipgloss.Color("230"),
+	}))
+	want := ".Ag"
+	if got != want {
+		t.Fatalf("pill = %q, want %q", got, want)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 )
@@ -32,6 +34,35 @@ func mustModel(t *testing.T, updated tea.Model) Model {
 		t.Fatalf("updated model type = %T, want tui.Model", updated)
 	}
 	return m
+}
+
+func plain(value string) string {
+	return ansi.Strip(value)
+}
+
+func selectedBackgroundConfigured() bool {
+	_, noColor := selectedBg.GetBackground().(lipgloss.NoColor)
+	return !noColor
+}
+
+func cursorBackgroundConfigured() bool {
+	_, noColor := cursorBg.GetBackground().(lipgloss.NoColor)
+	return !noColor
+}
+
+func rowBackgroundsAreDistinct() bool {
+	return cursorBg.GetBackground() != selectedBg.GetBackground()
+}
+
+func rootBadgeBackgroundsConfigured() bool {
+	_, projectNoColor := projectChip.GetBackground().(lipgloss.NoColor)
+	_, globalNoColor := globalChip.GetBackground().(lipgloss.NoColor)
+	return !projectNoColor && !globalNoColor
+}
+
+func colorAvailableForTest() bool {
+	_, disabled := os.LookupEnv("NO_COLOR")
+	return !disabled
 }
 
 func keyRunes(value string) tea.KeyMsg {
@@ -121,7 +152,7 @@ func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 
-	view := m.View()
+	view := plain(m.View())
 	if strings.Contains(view, "◆") || strings.Contains(view, "□") || strings.Contains(view, "■") {
 		t.Fatalf("view contains unicode symbols in ASCII mode:\n%s", view)
 	}
@@ -148,7 +179,7 @@ func TestRowsScrollToKeepCursorVisible(t *testing.T) {
 		m = mustModel(t, updated)
 	}
 
-	view := m.View()
+	view := plain(m.View())
 	if !strings.Contains(view, "› □ skill-09") {
 		t.Fatalf("view does not show selected last row:\n%s", view)
 	}
@@ -181,11 +212,11 @@ func TestFooterShortcutsStayVisibleWithStatusAndModal(t *testing.T) {
 	m.status = "installed opentui-react"
 	m.modal = newResultModal("Install Results", []string{"installed opentui-react"})
 
-	view := m.View()
+	view := plain(m.View())
 	if !strings.Contains(view, "installed opentui-react") {
 		t.Fatalf("view missing status:\n%s", view)
 	}
-	if !strings.Contains(view, "enter details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
+	if !strings.Contains(view, "↵ details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
 		t.Fatalf("view missing footer shortcuts:\n%s", view)
 	}
 }

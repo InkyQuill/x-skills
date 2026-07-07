@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 type previewModal struct {
@@ -47,7 +49,12 @@ func (p previewModal) View(width, height int, m Model) string {
 		strings.Repeat("-", 60),
 		bodyText,
 		"",
-		mutedStyle.Render("up/down scroll   r raw/rendered   esc close   q close"),
+		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+			{ASCII: "r", Label: "raw/rendered"},
+			{ASCII: "esc", Unicode: "Esc", Label: "close"},
+			{ASCII: "q", Label: "close"},
+		})),
 	}
 	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
 }

@@ -28,8 +28,8 @@ func TestActiveMigrateSameSHAArchivesRelinkWithoutConflict(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 
-	if m.modal == nil || !strings.Contains(m.modal.View(100, 30, m), "Migration Results") {
-		t.Fatalf("expected result modal, got %#v", m.modal)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after successful migrate", m.modal)
 	}
 	resolved, err := filepath.EvalSymlinks(active)
 	if err != nil {
@@ -103,7 +103,7 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 		t.Fatal("unlink modal is nil")
 	}
 	view := m.modal.View(110, 35, m)
-	for _, want := range []string{"Unlink usages:", "■ .Ag", "Unlink selected"} {
+	for _, want := range []string{"Unlink usages:", "■ .Ag", "Unlink selected"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("unlink modal missing %q:\n%s", want, view)
 		}
@@ -179,8 +179,11 @@ func TestActiveUnlinkManagedGroupRemovesEachSelectedLocation(t *testing.T) {
 	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
 		t.Fatalf("claude link still exists or unexpected error: %v", err)
 	}
-	if m.modal == nil || strings.Contains(m.modal.View(120, 35, m), "active skill not found") {
-		t.Fatalf("unexpected unlink result modal: %#v", m.modal)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after successful managed unlink", m.modal)
+	}
+	if m.status != "unlinked 2 locations" {
+		t.Fatalf("status = %q, want unlinked 2 locations", m.status)
 	}
 }
 
@@ -235,8 +238,11 @@ func TestActiveUnlinkUnmanagedAliasChoosesLocationThenArchivesSelectedLink(t *te
 	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
 		t.Fatalf("claude link still exists or unexpected error: %v", err)
 	}
-	if m.modal == nil || strings.Contains(m.modal.View(120, 35, m), "active skill not found") {
-		t.Fatalf("unexpected unlink result modal: %#v", m.modal)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after successful unlink", m.modal)
+	}
+	if m.status == "" {
+		t.Fatal("status is empty after successful unlink")
 	}
 }
 
@@ -266,6 +272,44 @@ func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	}
 }
 
+func TestRepoLinkModalShowsFocusedFieldAndSelectedChoices(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+
+	raw := m.modal.View(100, 30, m)
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("selected choice background style is not configured")
+	}
+	view := plain(raw)
+	if !strings.Contains(view, "› scope   ● project    ○ global") {
+		t.Fatalf("link modal missing focused scope row and selected scope:\n%s", view)
+	}
+	if !strings.Contains(view, "  target  ● .Ag        ○ .Cl        ○ .Cd") {
+		t.Fatalf("link modal missing selected target:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = mustModel(t, updated)
+	raw = m.modal.View(100, 30, m)
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("selected choice background style is not configured after tab")
+	}
+	view = plain(raw)
+	if !strings.Contains(view, "  scope   ● project    ○ global") {
+		t.Fatalf("link modal should keep selected scope after tab:\n%s", view)
+	}
+	if !strings.Contains(view, "› target  ● .Ag        ○ .Cl        ○ .Cd") {
+		t.Fatalf("link modal missing focused target row after tab:\n%s", view)
+	}
+}
+
 func TestRepoLinkModalCanChangeDestination(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -288,7 +332,7 @@ func TestRepoLinkModalCanChangeDestination(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = mustModel(t, updated)
+	mustModel(t, updated)
 
 	if _, err := os.Lstat(filepath.Join(cfg.GlobalCodexRoot, "zen-of-go")); err != nil {
 		t.Fatalf("global codex link was not created: %v", err)
@@ -320,8 +364,12 @@ func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("u"))
 	m = mustModel(t, updated)
-	view := m.modal.View(110, 35, m)
-	for _, want := range []string{"Unlink usages: zen-of-go", "■ .Ag", "■ ~Cl", "Unlink selected"} {
+	raw := m.modal.View(110, 35, m)
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("usage chooser selected row background style is not configured")
+	}
+	view := plain(raw)
+	for _, want := range []string{"Unlink usages: zen-of-go", "■ .Ag", "■ ~Cl", "Unlink selected"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("usage chooser missing %q:\n%s", want, view)
 		}

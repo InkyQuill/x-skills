@@ -18,20 +18,24 @@ func newRepoCommand(rootOptions *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			writeRepo(cmd.OutOrStdout(), skills)
-			return nil
+			return writeRepo(cmd.OutOrStdout(), skills)
 		},
 	}
 
 	return cmd
 }
 
-func writeRepo(out io.Writer, skills []repo.Skill) {
+func writeRepo(out io.Writer, skills []repo.Skill) error {
 	for _, skill := range skills {
 		if skill.Description == "" {
-			fmt.Fprintln(out, skill.Name)
+			if _, err := fmt.Fprintln(out, skill.Name); err != nil {
+				return err
+			}
 			continue
 		}
-		fmt.Fprintf(out, "%s  %s\n", skill.Name, skill.Description)
+		if _, err := fmt.Fprintf(out, "%s  %s\n", skill.Name, skill.Description); err != nil {
+			return err
+		}
 	}
+	return nil
 }

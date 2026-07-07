@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 func (m Model) View() string {
@@ -45,10 +47,6 @@ func renderHeader(m Model, width int) string {
 	}
 	title := titleStyle.Render(m.symbols.ProductMark+" x-skills") + "  " + strings.Join(tabs, " ")
 	return truncate(title, width)
-}
-
-func renderRows(m Model, width, maxRows int) string {
-	return renderListPanel(m, width, maxRows)
 }
 
 func renderBody(m Model, width, height int) string {
@@ -109,7 +107,7 @@ func renderInspector(m Model, width, height int) string {
 		skills := m.visibleRepoSkills()
 		if m.cursor >= 0 && m.cursor < len(skills) {
 			skill := skills[m.cursor]
-			lines = append(lines, "◇ "+skill.Name, "description", skill.Description, "usages", "  "+strings.Join(m.repoUsage[skill.Name], " "))
+			lines = append(lines, "◇ "+skill.Name, "description", skill.Description, "usages", "  "+renderRootChips(m.symbols, m.repoUsage[skill.Name], lipgloss.NoColor{}))
 		}
 	case ViewDoctor:
 		if m.cursor >= 0 && m.cursor < len(m.issues) {
@@ -147,14 +145,23 @@ func renderActiveRows(m Model, width int) []string {
 	var rows []string
 	for i, group := range m.visibleActiveGroups() {
 		prefix := rowPrefix(m, i, group.ID)
-		chips := chipStyle.Render(strings.Join(group.Chips, " "))
 		status := renderStatusChip(m, group.Status)
 		count := ""
 		if len(group.Members) > 1 {
 			count = " " + mutedStyle.Render(fmt.Sprintf("%s%d", m.symbols.CountPrefix, len(group.Members)))
 		}
-		text := fmt.Sprintf("%s %s %s %s%s  %s", prefix, group.Name, chips, status, count, activeDetail(group))
-		rows = append(rows, truncate(text, width-6))
+		rows = append(rows, selectableRow(
+			[]rowSegment{
+				{text: fmt.Sprintf("%s %s ", prefix, group.Name)},
+				{render: func(background lipgloss.TerminalColor) string {
+					return renderRootChips(m.symbols, group.Chips, background)
+				}},
+				{text: fmt.Sprintf(" %s%s  %s", status, count, activeDetail(group))},
+			},
+			i == m.cursor,
+			m.selected[group.ID],
+			width-6,
+		))
 	}
 	return rows
 }
@@ -164,9 +171,18 @@ func renderRepoRows(m Model, width int) []string {
 	for i, skill := range m.visibleRepoSkills() {
 		id := repoID(skill.Name)
 		prefix := rowPrefix(m, i, id)
-		usages := strings.Join(m.repoUsage[skill.Name], " ")
-		text := fmt.Sprintf("%s %s %s %s", prefix, skill.Name, mutedStyle.Render(skill.Description), chipStyle.Render(usages))
-		rows = append(rows, truncate(text, width-6))
+		rows = append(rows, selectableRow(
+			[]rowSegment{
+				{text: fmt.Sprintf("%s %s ", prefix, skill.Name)},
+				{render: func(background lipgloss.TerminalColor) string {
+					return renderRootChips(m.symbols, m.repoUsage[skill.Name], background)
+				}},
+				{text: " " + mutedStyle.Render(skill.Description)},
+			},
+			i == m.cursor,
+			m.selected[id],
+			width-6,
+		))
 	}
 	return rows
 }
@@ -176,10 +192,101 @@ func renderDoctorRows(m Model, width int) []string {
 	for i, issue := range m.issues {
 		id := issueID(issue)
 		prefix := rowPrefix(m, i, id)
-		text := fmt.Sprintf("%s %s %s %s  %s %s", prefix, dangerStyle.Render(m.symbols.Broken), issue.Kind, chipStyle.Render(issue.Location), issue.Name, issue.Reason)
-		rows = append(rows, truncate(text, width-6))
+		rows = append(rows, selectableRow(
+			[]rowSegment{
+				{text: fmt.Sprintf("%s %s %s ", prefix, dangerStyle.Render(m.symbols.Broken), issue.Kind)},
+				{render: func(background lipgloss.TerminalColor) string {
+					return renderRootChip(m.symbols, issue.Location, background)
+				}},
+				{text: fmt.Sprintf("  %s %s", issue.Name, issue.Reason)},
+			},
+			i == m.cursor,
+			m.selected[id],
+			width-6,
+		))
 	}
 	return rows
+}
+
+func renderRootChips(symbols symbols, chips []string, background lipgloss.TerminalColor) string {
+	rendered := make([]string, 0, len(chips))
+	for _, chip := range chips {
+		rendered = append(rendered, renderRootChip(symbols, chip, background))
+	}
+	return strings.Join(rendered, " ")
+}
+
+func renderRootChip(symbols symbols, chip string, background lipgloss.TerminalColor) string {
+	if strings.HasPrefix(chip, "~") {
+		return tuiui.Pill(symbols.BadgeLeft, symbols.BadgeRight, tuiui.PillProps{
+			Color:      globalChip.GetBackground(),
+			Background: background,
+			Text:       chip,
+			TextColor:  lipgloss.Color("230"),
+		})
+	}
+	return tuiui.Pill(symbols.BadgeLeft, symbols.BadgeRight, tuiui.PillProps{
+		Color:      projectChip.GetBackground(),
+		Background: background,
+		Text:       chip,
+		TextColor:  lipgloss.Color("230"),
+	})
+}
+
+type rowSegment struct {
+	text   string
+	render func(background lipgloss.TerminalColor) string
+}
+
+func selectableRow(segments []rowSegment, focused bool, selected bool, width int) string {
+	if !focused && !selected {
+		return truncate(joinRowSegments(segments, lipgloss.NoColor{}), width)
+	}
+
+	rowStyle := selectedBg
+	if focused {
+		rowStyle = cursorBg
+	}
+	background := rowStyle.GetBackground()
+
+	var rendered strings.Builder
+	remaining := width
+	for _, segment := range segments {
+		if remaining <= 0 {
+			break
+		}
+		text := segment.text
+		if segment.render != nil {
+			text = segment.render(background)
+		} else {
+			text = ansi.Strip(text)
+		}
+		if lipgloss.Width(text) > remaining {
+			text = truncate(text, remaining)
+		}
+		if segment.render != nil {
+			rendered.WriteString(text)
+		} else {
+			rendered.WriteString(rowStyle.Render(text))
+		}
+		remaining -= lipgloss.Width(text)
+	}
+	if remaining > 0 {
+		rendered.WriteString(rowStyle.Render(strings.Repeat(" ", remaining)))
+	}
+	return rendered.String()
+}
+
+func joinRowSegments(segments []rowSegment, background lipgloss.TerminalColor) string {
+	var row strings.Builder
+	for _, segment := range segments {
+		if segment.render != nil {
+			row.WriteString(segment.render(background))
+			continue
+		}
+		row.WriteString(segment.text)
+	}
+	return row.String()
 }
 
 func rowPrefix(m Model, index int, id string) string {
@@ -198,9 +305,6 @@ func activeDetail(group ActiveGroup) string {
 	if group.Status == actions.StatusBroken {
 		return dangerStyle.Render(group.Reason)
 	}
-	if len(group.Members) > 1 {
-		return mutedStyle.Render(fmt.Sprintf("%d linked locations", len(group.Members)))
-	}
 	return mutedStyle.Render(group.Description)
 }
 
@@ -214,13 +318,56 @@ func renderStatus(m Model, width int) string {
 	}
 	if m.filter.Active {
 		lines = append(lines, accentStyle.Render("/ filter: "+m.filter.Query+"_"))
-		lines = append(lines, mutedStyle.Render("enter accept   esc clear/exit"))
+		lines = append(lines, mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{{ASCII: "enter", Unicode: "↵", Label: "accept"}, {ASCII: "esc", Unicode: "Esc", Label: "clear/exit"}})))
 	}
-	lines = append(lines, mutedStyle.Render("enter details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh  ? help  q quit"))
+	lines = append(lines, mutedStyle.Render(commandPalette(m)))
 	for i, line := range lines {
 		lines[i] = truncate(line, width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func commandPalette(m Model) string {
+	switch m.view {
+	case ViewRepo:
+		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "/", Label: "filter"},
+			{ASCII: "p", Label: "preview"},
+			{ASCII: "l", Label: "link"},
+			{ASCII: "u", Label: "unlink"},
+			{ASCII: "d", Label: "delete"},
+			{ASCII: "c", Label: "clear"},
+			{ASCII: "^R", Label: "refresh"},
+			{ASCII: "?", Label: "help"},
+			{ASCII: "q", Label: "quit"},
+		})
+	case ViewDoctor:
+		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "f", Label: "fix"},
+			{ASCII: "c", Label: "clear"},
+			{ASCII: "^R", Label: "refresh"},
+			{ASCII: "?", Label: "help"},
+			{ASCII: "q", Label: "quit"},
+		})
+	default:
+		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "/", Label: "filter"},
+			{ASCII: "p", Label: "preview"},
+			{ASCII: "m", Label: "migrate"},
+			{ASCII: "u", Label: "unlink"},
+			{ASCII: "c", Label: "clear"},
+			{ASCII: "^R", Label: "refresh"},
+			{ASCII: "?", Label: "help"},
+			{ASCII: "q", Label: "quit"},
+		})
+	}
+}
+
+func renderCommandPalette(ascii bool, commands []tuiui.Shortcut) string {
+	return tuiui.ToolHints(ascii, kbdStyle, commands)
 }
 
 func normalizeViewHeight(view string, width, height int) string {

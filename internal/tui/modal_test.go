@@ -45,7 +45,7 @@ func TestModalRendersOverShellWithoutRemovingFooter(t *testing.T) {
 	m.height = 30
 	m.modal = newResultModal("Migration Results", []string{"2 succeeded"})
 
-	view := m.View()
+	view := plain(m.View())
 	if !strings.Contains(view, "Migration Results") {
 		t.Fatalf("view missing modal:\n%s", view)
 	}
@@ -67,7 +67,7 @@ func TestEnterOpensActiveDetailModal(t *testing.T) {
 	if m.modal == nil {
 		t.Fatal("modal is nil")
 	}
-	view := m.modal.View(100, 30, m)
+	view := plain(m.modal.View(100, 30, m))
 	for _, want := range []string{"Detail: zen-of-go", "Canonical name", "Active members", "Debug"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("detail modal missing %q:\n%s", want, view)
@@ -89,6 +89,29 @@ func TestQuestionMarkOpensHelpModalWithGlobalKeys(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("help modal missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestChoiceAndConfirmModalsHighlightSelectedControls(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+
+	choice := newChoiceModal("Choose", nil, []string{"One", "Two"}, 0, func(*Model, int) {})
+	choiceView := plain(choice.View(100, 30, m))
+	if !strings.Contains(choiceView, "› One") {
+		t.Fatalf("choice modal missing selected option:\n%s", choiceView)
+	}
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("choice modal selected background style is not configured")
+	}
+
+	confirm := newConfirmModal("Confirm", nil, false, func(*Model) {})
+	confirmView := plain(confirm.View(100, 30, m))
+	if !strings.Contains(confirmView, "[ Apply ]") {
+		t.Fatalf("confirm modal missing selected button:\n%s", confirmView)
+	}
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("confirm modal selected background style is not configured")
 	}
 }
 
@@ -127,11 +150,35 @@ func TestConflictModalShowsFileListAndDiff(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.modal = newConflictDiffModal("zen-of-go", diff, func(string) {})
 
-	view := m.modal.View(120, 40, m)
-	for _, want := range []string{"Archive conflict: zen-of-go", "Decision applies to the whole skill directory", "Files", "SKILL.md", "-description: Archived.", "+description: Active.", "k keep archive", "l save active"} {
+	view := plain(m.modal.View(120, 40, m))
+	for _, want := range []string{"Archive conflict: zen-of-go", "Decision applies to the whole skill directory", "Legend:", "Archive", "Incoming active", "Files", "SKILL.md", "Archive   description: Archived.", "Incoming  description: Active.", "k keep archive", "l save active"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("conflict modal missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestConflictModalScrollsDiffBody(t *testing.T) {
+	var lines []string
+	lines = append(lines, "--- archive", "+++ active")
+	for i := 0; i < 40; i++ {
+		lines = append(lines, " line "+string(rune('A'+i%26)))
+	}
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Kind: "changed", Text: strings.Join(lines, "\n")}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.modal = newConflictDiffModal("zen-of-go", diff, func(string) {})
+	m.width = 120
+	m.height = 20
+
+	before := plain(m.modal.View(120, 20, m))
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	after := plain(m.modal.View(120, 20, m))
+	if before == after {
+		t.Fatalf("down key did not scroll diff body:\n%s", after)
+	}
+	if !strings.Contains(after, "lines 2-") {
+		t.Fatalf("scroll position not updated:\n%s", after)
 	}
 }
 

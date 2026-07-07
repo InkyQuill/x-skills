@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 type choiceModal struct {
@@ -30,9 +32,18 @@ func (c choiceModal) View(width, height int, m Model) string {
 		if i == c.index {
 			prefix = m.symbols.Cursor + " "
 		}
-		body = append(body, prefix+choice)
+		line := prefix + choice
+		if i == c.index {
+			line = selectedBg.Render(line)
+		}
+		body = append(body, line)
 	}
-	body = append(body, "", mutedStyle.Render("up/down choose   enter apply   esc cancel   q close"))
+	body = append(body, "", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		{ASCII: "up/down", Unicode: "↑/↓", Label: "choose"},
+		{ASCII: "enter", Unicode: "↵", Label: "apply"},
+		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+		{ASCII: "q", Label: "close"},
+	})))
 	return modalStyle(width, height).Render(strings.Join(body, "\n"))
 }
 

@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 type resultModal struct {
@@ -21,7 +23,11 @@ func (r resultModal) Title() string {
 
 func (r resultModal) View(width, height int, m Model) string {
 	body := append([]string{accentStyle.Render(r.title), ""}, r.lines...)
-	body = append(body, "", mutedStyle.Render("enter close   esc close   q close"))
+	body = append(body, "", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		{ASCII: "enter", Unicode: "↵", Label: "close"},
+		{ASCII: "esc", Unicode: "Esc", Label: "close"},
+		{ASCII: "q", Label: "close"},
+	})))
 	return modalStyle(width, height).Render(strings.Join(body, "\n"))
 }
 

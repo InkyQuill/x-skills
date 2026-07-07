@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 func (m *Model) activeTargets() []actions.ActiveSkill {
@@ -26,7 +28,7 @@ func (m *Model) openMigrateModal() {
 	}
 	lines := []string{"Targets"}
 	for _, target := range targets {
-		lines = append(lines, "  "+filepath.Base(target.Path)+"  "+rootChip(target.Root.Scope, target.Root.Target))
+		lines = append(lines, "  "+filepath.Base(target.Path)+"  "+renderRootChip(m.symbols, rootChip(target.Root.Scope, target.Root.Target), lipgloss.NoColor{}))
 	}
 	lines = append(lines, "", "Plan", "  1. Compare active content with archive", "  2. If identical, relink active copies", "  3. If different, review full-file diff")
 	m.modal = newConfirmModal("Migrate active skills", lines, false, func(current *Model) {
@@ -36,6 +38,7 @@ func (m *Model) openMigrateModal() {
 
 func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution string) {
 	var lines []string
+	var successes []string
 	for _, skill := range targets {
 		result, err := actions.Migrate(m.cfg, actions.MigrateRequest{
 			Name:               filepath.Base(skill.Path),
@@ -60,10 +63,15 @@ func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution st
 			lines = append(lines, "x "+filepath.Base(skill.Path)+"  "+err.Error())
 			continue
 		}
-		lines = append(lines, "✓ "+result.Name+"  "+result.Status)
-		m.status = result.Status + " " + result.Name
+		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
 	}
 	m.reload()
+	if len(lines) == 0 {
+		m.modal = nil
+		m.status = mutationSuccessStatus(successes, "migrated")
+		return
+	}
+	lines = append(successes, lines...)
 	m.modal = newResultModal("Migration Results", lines)
 }
 
@@ -144,26 +152,6 @@ func activeUnlinkTitle(targets []actions.ActiveSkill) string {
 	return targets[0].Name
 }
 
-func (m *Model) applyUnlinkTargets(targets []actions.ActiveSkill, deleteUnmanaged bool) {
-	var lines []string
-	for _, skill := range targets {
-		result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{
-			Name:            filepath.Base(skill.Path),
-			Scope:           skill.Root.Scope,
-			Target:          skill.Root.Target,
-			Confirmed:       true,
-			DeleteUnmanaged: deleteUnmanaged,
-		})
-		if err != nil {
-			lines = append(lines, "x "+filepath.Base(skill.Path)+"  "+err.Error())
-			continue
-		}
-		lines = append(lines, "✓ "+result.Name+"  "+result.Status)
-	}
-	m.reload()
-	m.modal = newResultModal("Unlink Results", lines)
-}
-
 func (m *Model) applyActiveUsageUnlink(r repoUsageModal) {
 	targets := selectedUsageTargets(r)
 	if len(targets) == 0 {
@@ -227,25 +215,13 @@ func (r repoLinkModal) destinationPath(m *Model) string {
 }
 
 func (r repoLinkModal) View(width, height int, m Model) string {
-	projectCursor := " "
-	globalCursor := " "
-	agentsCursor := " "
-	claudeCursor := " "
-	codexCursor := " "
-	if r.field == 0 && r.scope == config.ScopeProject {
-		projectCursor = m.symbols.Cursor
+	scopeCursor := " "
+	targetCursor := " "
+	if r.field == 0 {
+		scopeCursor = m.symbols.Cursor
 	}
-	if r.field == 0 && r.scope == config.ScopeGlobal {
-		globalCursor = m.symbols.Cursor
-	}
-	if r.field == 1 && r.target == config.TargetAgents {
-		agentsCursor = m.symbols.Cursor
-	}
-	if r.field == 1 && r.target == config.TargetClaude {
-		claudeCursor = m.symbols.Cursor
-	}
-	if r.field == 1 && r.target == config.TargetCodex {
-		codexCursor = m.symbols.Cursor
+	if r.field == 1 {
+		targetCursor = m.symbols.Cursor
 	}
 	lines := []string{
 		accentStyle.Render("Link repo skill"),
@@ -253,15 +229,27 @@ func (r repoLinkModal) View(width, height int, m Model) string {
 		"  " + r.name,
 		"",
 		"Destination",
-		"  scope   " + projectCursor + " project    " + globalCursor + " global",
-		"  target  " + agentsCursor + " .Ag        " + claudeCursor + " .Cl        " + codexCursor + " .Cd",
+		"  " + scopeCursor + " scope   " + linkChoice(r.scope == config.ScopeProject, "project") + "    " + linkChoice(r.scope == config.ScopeGlobal, "global"),
+		"  " + targetCursor + " target  " + linkChoice(r.target == config.TargetAgents, ".Ag") + "        " + linkChoice(r.target == config.TargetClaude, ".Cl") + "        " + linkChoice(r.target == config.TargetCodex, ".Cd"),
 		"",
 		"Will create",
 		"  " + r.destination + " -> " + filepath.Join(m.cfg.ArchiveSkillsRoot(), r.name),
 		"",
-		mutedStyle.Render("left/right change option   tab field   enter link   esc cancel"),
+		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "left/right", Unicode: "←/→", Label: "change option"},
+			{ASCII: "tab", Unicode: "⇥", Label: "field"},
+			{ASCII: "enter", Unicode: "↵", Label: "link"},
+			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+		})),
 	}
 	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+}
+
+func linkChoice(selected bool, label string) string {
+	if selected {
+		return selectedBg.Render(selectedStyle.Render("● " + label))
+	}
+	return mutedStyle.Render("○ " + label)
 }
 
 func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
@@ -396,9 +384,22 @@ func (r repoUsageModal) View(width, height int, m Model) string {
 		if r.selected[i] {
 			check = m.symbols.Checked
 		}
-		lines = append(lines, cursor+" "+check+" "+target.Chip+"  "+target.Path)
+		var background lipgloss.TerminalColor = lipgloss.NoColor{}
+		if r.selected[i] {
+			background = selectedBg.GetBackground()
+		}
+		line := cursor + " " + selectedStyle.Render(check) + " " + renderRootChip(m.symbols, target.Chip, background) + "  " + target.Path
+		if r.selected[i] {
+			line = selectedBg.Render(line)
+		}
+		lines = append(lines, line)
 	}
-	lines = append(lines, "", "[ Unlink selected ]   Cancel", mutedStyle.Render("up/down move   space toggle   enter choose   esc cancel"))
+	lines = append(lines, "", "[ Unlink selected ]   Cancel", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		{ASCII: "up/down", Unicode: "↑/↓", Label: "move"},
+		{ASCII: "space", Label: "toggle"},
+		{ASCII: "enter", Unicode: "↵", Label: "choose"},
+		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+	})))
 	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
 }
 
@@ -454,16 +455,38 @@ func usageTargetsContainUnmanaged(targets []repoUsageTarget) bool {
 
 func (m *Model) applyUsageTargets(targets []repoUsageTarget, deleteUnmanaged bool) {
 	var lines []string
+	var successes []string
 	for _, target := range targets {
 		result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{Name: target.Name, Scope: target.Scope, Target: target.Target, Confirmed: true, DeleteUnmanaged: deleteUnmanaged})
 		if err != nil {
 			lines = append(lines, "x "+target.Path+": "+err.Error())
 			continue
 		}
-		lines = append(lines, "✓ "+result.Name+"  "+result.Status)
+		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
 	}
 	m.reload()
+	if len(lines) == 0 {
+		m.modal = nil
+		m.status = unlinkSuccessStatus(successes)
+		return
+	}
+	lines = append(successes, lines...)
 	m.modal = newResultModal("Unlink Results", lines)
+}
+
+func unlinkSuccessStatus(successes []string) string {
+	return mutationSuccessStatus(successes, "unlinked")
+}
+
+func mutationSuccessStatus(successes []string, verb string) string {
+	switch len(successes) {
+	case 0:
+		return "no skills " + verb
+	case 1:
+		return strings.TrimPrefix(successes[0], "✓ ")
+	default:
+		return fmt.Sprintf("%s %d locations", verb, len(successes))
+	}
 }
 
 func (m *Model) openRepoDeleteModal() {

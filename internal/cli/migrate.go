@@ -63,19 +63,6 @@ func addActiveRootFlags(cmd *cobra.Command, opts *activeRootOptions) {
 	cmd.Flags().StringVar(&opts.target, "target", "", "target to use: agents, claude, or codex")
 }
 
-func (o activeRootOptions) validate() error {
-	if o.project == o.global {
-		return fmt.Errorf("choose exactly one of --project or --global")
-	}
-	if o.target == "" {
-		return fmt.Errorf("--target is required")
-	}
-	if !slices.Contains(config.Targets, o.target) {
-		return fmt.Errorf("unknown target %q", o.target)
-	}
-	return nil
-}
-
 func (o activeRootOptions) validateFilter() error {
 	if o.project && o.global {
 		return fmt.Errorf("choose at most one of --project or --global")
@@ -84,13 +71,6 @@ func (o activeRootOptions) validateFilter() error {
 		return fmt.Errorf("unknown target %q", o.target)
 	}
 	return nil
-}
-
-func (o activeRootOptions) scope() string {
-	if o.project {
-		return config.ScopeProject
-	}
-	return config.ScopeGlobal
 }
 
 func (o activeRootOptions) scopeFilter() string {

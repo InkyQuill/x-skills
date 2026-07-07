@@ -158,7 +158,7 @@ func (m *Model) openDetailModal() {
 	case ViewActive:
 		groups := m.visibleActiveGroups()
 		if m.cursor >= 0 && m.cursor < len(groups) {
-			m.modal = activeDetailModal(groups[m.cursor])
+			m.modal = activeDetailModal(groups[m.cursor], m.symbols)
 		}
 	}
 }

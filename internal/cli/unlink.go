@@ -124,7 +124,7 @@ func writeUnlinkSummary(
 	results []actions.MutationResult,
 	failures []mutationFailure,
 ) {
-	fmt.Fprintln(out, "Summary:")
+	_, _ = fmt.Fprintln(out, "Summary:")
 	for _, status := range []string{
 		actions.ResultRemovedActiveLink,
 		actions.ResultRemovedUnmanagedLink,
@@ -138,10 +138,10 @@ func writeUnlinkSummary(
 			}
 		}
 		if len(names) > 0 {
-			fmt.Fprintf(out, "%s: %s\n", status, strings.Join(names, ", "))
+			_, _ = fmt.Fprintf(out, "%s: %s\n", status, strings.Join(names, ", "))
 		}
 	}
 	for _, failure := range failures {
-		fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
+		_, _ = fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
 	}
 }

@@ -287,6 +287,59 @@ func TestApplyArchiveReplaceRestoresBackupWhenFinalRenameFails(t *testing.T) {
 	}
 }
 
+func TestApplyArchiveReplacePreservesBackupWhenRestoreFails(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Existing.")
+	incoming := writeIncomingSkill(t, "svelte-coder", "Incoming.")
+	renameErr := errors.New("rename failed")
+	restoreErr := errors.New("restore failed")
+
+	originalRenamePath := renamePath
+	t.Cleanup(func() {
+		renamePath = originalRenamePath
+	})
+	var backupPath string
+	failedFinalRename := false
+	renamePath = func(oldpath, newpath string) error {
+		if oldpath == archive {
+			backupPath = newpath
+			return originalRenamePath(oldpath, newpath)
+		}
+		if newpath == archive && !failedFinalRename {
+			failedFinalRename = true
+			return renameErr
+		}
+		if oldpath == backupPath && newpath == archive {
+			return restoreErr
+		}
+		return originalRenamePath(oldpath, newpath)
+	}
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    ConflictReplaceArchive,
+	})
+	if err == nil {
+		t.Fatal("expected rename error")
+	}
+	if !strings.Contains(err.Error(), "restore backup") {
+		t.Fatalf("error = %q", err)
+	}
+	if backupPath == "" {
+		t.Fatal("backup path was not captured")
+	}
+	info, err := skills.Read(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing." {
+		t.Fatalf("backup description = %q", info.Description)
+	}
+}
+
 func TestArchiveContentFingerprintFramesFileContents(t *testing.T) {
 	first := t.TempDir()
 	if err := os.WriteFile(filepath.Join(first, "a"), []byte("x"), 0o644); err != nil {
@@ -349,6 +402,26 @@ func TestArchiveContentFingerprintRejectsSymlinks(t *testing.T) {
 		t.Fatal("expected symlink error")
 	}
 	if !strings.Contains(err.Error(), "unsupported file type in archive content: link.txt") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestArchiveContentFingerprintRejectsRootSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err := archiveContentFingerprint(link)
+	if err == nil {
+		t.Fatal("expected root symlink error")
+	}
+	if !strings.Contains(err.Error(), "unsupported file type in archive content: .") {
 		t.Fatalf("error = %q", err)
 	}
 }

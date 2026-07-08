@@ -224,6 +224,7 @@ func installArchiveTemp(req AddRequest, tempPath, archivePath string, existed bo
 
 	if err := renamePath(tempPath, archivePath); err != nil {
 		if restoreErr := renamePath(backupPath, archivePath); restoreErr != nil {
+			backupActive = false
 			return fmt.Errorf("install archive: %w; restore backup: %v", err, restoreErr)
 		}
 		backupActive = false
@@ -250,6 +251,14 @@ func reserveArchiveBackup(cfg config.Config, archiveName string) (string, error)
 }
 
 func archiveContentFingerprint(root string) (string, error) {
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return "", fmt.Errorf("stat archive content root: %w", err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("unsupported file type in archive content: .")
+	}
+
 	var entries []contentFingerprintEntry
 	if err := filepath.WalkDir(root, func(path string, dirEntry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

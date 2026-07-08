@@ -78,8 +78,7 @@ func renderListPanel(m Model, width, maxRows int) string {
 		title = "Doctor issues"
 		rows = renderDoctorRows(m, width)
 	case ViewInstall:
-		title = installPanelTitle(m)
-		rows = renderInstallRows(m, width)
+		return renderInstallPanel(m, width, rowCount)
 	}
 	if len(rows) == 0 {
 		rows = []string{mutedStyle.Render("No items.")}
@@ -239,12 +238,31 @@ func installPanelTitle(m Model) string {
 	return fmt.Sprintf("Install: search %q", query)
 }
 
-func renderInstallRows(m Model, width int) []string {
+func renderInstallPanel(m Model, width, rowCount int) string {
 	rows := []string{accentStyle.Render("/ search: " + m.install.Query + "_")}
-	if len(m.install.Results) == 0 {
-		rows = append(rows, mutedStyle.Render(m.install.Message))
-		return rows
+	resultRowCount := rowCount - len(rows)
+	if resultRowCount > 0 {
+		resultRows := renderInstallRows(m, width)
+		if len(resultRows) == 0 {
+			resultRows = []string{mutedStyle.Render(m.install.Message)}
+		}
+		if len(resultRows) > resultRowCount {
+			start := visibleStart(m.cursor, len(resultRows), resultRowCount)
+			resultRows = resultRows[start : start+resultRowCount]
+		}
+		rows = append(rows, resultRows...)
 	}
+	for len(rows) < rowCount {
+		rows = append(rows, "")
+	}
+	return panelStyle.Width(width - 2).Render(installPanelTitle(m) + "\n" + strings.Join(rows, "\n"))
+}
+
+func renderInstallRows(m Model, width int) []string {
+	if len(m.install.Results) == 0 {
+		return nil
+	}
+	var rows []string
 	for i, result := range m.install.Results {
 		prefix := cursorPrefix(m, i)
 		pill := result.AuditPill

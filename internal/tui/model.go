@@ -160,11 +160,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openRepoLinkModal()
 		}
 	case "m":
-		m.openMigrateModal()
+		if m.view == ViewActive {
+			m.openMigrateModal()
+		}
 	case "u":
 		if m.view == ViewRepo {
 			m.openRepoUnlinkModal()
-		} else {
+		} else if m.view == ViewActive {
 			m.openUnlinkModal()
 		}
 	case "d":

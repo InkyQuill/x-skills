@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/remote"
 )
 
 func TestInstallTabSwitchesAndRendersShell(t *testing.T) {
@@ -34,5 +36,32 @@ func TestInstallHelpShowsRealInstallKeys(t *testing.T) {
 	}
 	if strings.Contains(view, "not yet available") {
 		t.Fatalf("help still says install is unavailable:\n%s", view)
+	}
+}
+
+func TestInstallScrollKeepsFocusedResultAndSearchVisible(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.view = ViewInstall
+	m.width = 80
+	m.height = 10
+	m.install.Query = "skill"
+	for i := range 12 {
+		m.install.Results = append(m.install.Results, installResultView{
+			Result: remote.SearchResult{
+				Name:        fmt.Sprintf("skill-%02d", i),
+				Description: fmt.Sprintf("description-%02d", i),
+				Owner:       "owner",
+				Repo:        "repo",
+			},
+			ArchiveState: "remote",
+		})
+	}
+	m.cursor = len(m.install.Results) - 1
+
+	view := plain(m.View())
+	for _, want := range []string{"/ search:", "skill-11"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("install view missing %q with cursor at last result:\n%s", want, view)
+		}
 	}
 }

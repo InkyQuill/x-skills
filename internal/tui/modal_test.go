@@ -315,6 +315,41 @@ func TestConflictModalPromptsResizeWhenTooSmall(t *testing.T) {
 	}
 }
 
+func TestConflictModalIgnoresResolutionKeysWhenTooSmall(t *testing.T) {
+	calls := []string{}
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Kind: "changed", Text: "-old\n+new"}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 50
+	m.height = 12
+	m.modal = newConflictDiffModal("zen-of-go", diff, func(resolution string) {
+		calls = append(calls, resolution)
+	})
+
+	updated, _ := m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if len(calls) != 0 {
+		t.Fatalf("apply called after k: %v", calls)
+	}
+	if m.modal == nil {
+		t.Fatal("modal closed after k")
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if len(calls) != 0 {
+		t.Fatalf("apply called after l: %v", calls)
+	}
+	if m.modal == nil {
+		t.Fatal("modal closed after l")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("modal did not close after Esc")
+	}
+}
+
 func TestConflictModalScrollsDiffBody(t *testing.T) {
 	var lines []string
 	lines = append(lines, "--- archive", "+++ active")
@@ -343,6 +378,8 @@ func TestConflictModalAppliesKeepArchiveKey(t *testing.T) {
 	called := ""
 	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Kind: "changed", Text: "-old\n+new"}}}
 	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 120
+	m.height = 40
 	m.modal = newConflictDiffModal("zen-of-go", diff, func(resolution string) {
 		called = resolution
 	})

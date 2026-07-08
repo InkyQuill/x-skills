@@ -10,6 +10,11 @@ import (
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
+const (
+	minConflictDiffWidth  = 72
+	minConflictDiffHeight = 18
+)
+
 type conflictDiffModal struct {
 	name          string
 	diff          directoryDiff
@@ -25,6 +30,10 @@ func newConflictDiffModal(name string, diff directoryDiff, apply func(string)) m
 
 func newConflictDiffModalWithIncomingLabel(name string, diff directoryDiff, incomingLabel string, apply func(string)) modal {
 	return conflictDiffModal{name: name, diff: diff, incomingLabel: incomingLabel, apply: apply}
+}
+
+func conflictDiffTooSmall(width, height int) bool {
+	return width < minConflictDiffWidth || height < minConflictDiffHeight
 }
 
 func (c conflictDiffModal) Title() string {
@@ -43,12 +52,12 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 		verticalChrome     = 12
 		minBodyHeight      = 4
 	)
-	if width < 72 || height < 18 {
+	if conflictDiffTooSmall(width, height) {
 		lines := []string{
 			accentStyle.Render("Archive conflict: " + c.name),
 			"",
 			"Terminal too small to review this diff.",
-			"Please resize to at least 72x18.",
+			fmt.Sprintf("Please resize to at least %dx%d.", minConflictDiffWidth, minConflictDiffHeight),
 			"",
 			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
@@ -128,6 +137,9 @@ func fileCursor(m Model, index, selected int) string {
 func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if closeOnEscapeOrQuit(msg) {
 		return true, nil
+	}
+	if conflictDiffTooSmall(m.width, m.height) {
+		return false, nil
 	}
 	switch msg.String() {
 	case "left":

@@ -281,6 +281,93 @@ func TestInstallEnterPreviewsRemoteSkill(t *testing.T) {
 	}
 }
 
+func TestInstallPreviewInitializesAndReusesCheckoutCache(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Description: "Svelte help.", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.install.checkouts == nil {
+		t.Fatal("checkout cache is nil after preview starts")
+	}
+	firstMsg := cmd().(installPreviewMsg)
+	updated, _ = m.Update(firstMsg)
+	m = mustModel(t, updated)
+	m.modal = nil
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	secondMsg := cmd().(installPreviewMsg)
+	if secondMsg.path != firstMsg.path {
+		t.Fatalf("preview checkout path = %q, want reused path %q", secondMsg.path, firstMsg.path)
+	}
+}
+
+func TestInstallPreviewMissingSourceRepository(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "no-source", Description: "Missing source."},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installPreviewMsg)
+	if msg.err == nil {
+		t.Fatal("preview error is nil")
+	}
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.status != "missing source repository for no-source" {
+		t.Fatalf("status = %q", m.status)
+	}
+	if m.modal != nil {
+		t.Fatal("modal opened for missing source")
+	}
+}
+
+func TestInstallPreviewIgnoresStaleAndNonInstallMessages(t *testing.T) {
+	skillDir := filepath.Join(t.TempDir(), "skill")
+	writeTUITestRemoteSkill(t, filepath.Dir(skillDir), filepath.Base(skillDir), "skill", "Skill help.")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.previewToken = 2
+	m.status = "before"
+
+	updated, _ := m.Update(installPreviewMsg{token: 1, name: "skill", path: skillDir})
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("stale preview opened modal")
+	}
+	if m.status != "before" {
+		t.Fatalf("status changed for stale preview: %q", m.status)
+	}
+
+	m.setView(ViewActive)
+	updated, _ = m.Update(installPreviewMsg{token: 2, name: "skill", path: skillDir})
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("non-install preview opened modal")
+	}
+	if m.status != "before" {
+		t.Fatalf("status changed outside install view: %q", m.status)
+	}
+}
+
 func TestInstallInputCtrlCQuits(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

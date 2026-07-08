@@ -95,6 +95,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyInstallSearchResult(msg)
 		return m, nil
 	case installPreviewMsg:
+		if msg.token != m.install.previewToken || m.view != ViewInstall {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			return m, nil

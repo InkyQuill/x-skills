@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
@@ -30,6 +31,7 @@ type installState struct {
 	Message      string
 	InputMode    installInputMode
 	searchToken  int
+	previewToken int
 	searchClient remote.SearchClient
 	checkouts    *remote.CheckoutCache
 	testCloneURL string
@@ -43,9 +45,10 @@ type installSearchResultMsg struct {
 }
 
 type installPreviewMsg struct {
-	name string
-	path string
-	err  error
+	token int
+	name  string
+	path  string
+	err   error
 }
 
 type installResultView struct {
@@ -53,6 +56,8 @@ type installResultView struct {
 	ArchiveState string
 	AuditPill    string
 }
+
+const installPreviewTimeout = 60 * time.Second
 
 func newInstallState() installState {
 	return installState{
@@ -128,38 +133,55 @@ func (m Model) selectedInstallResult() (installResultView, bool) {
 	return m.install.Results[m.cursor], true
 }
 
-func (m Model) previewInstallResult() tea.Cmd {
+func (m *Model) previewInstallResult() tea.Cmd {
 	row, ok := m.selectedInstallResult()
 	if !ok {
 		return nil
 	}
-	checkouts := m.install.checkouts
-	if checkouts == nil {
-		checkouts = remote.NewCheckoutCache(filepath.Join(os.TempDir(), "x-skills-tui-checkouts"))
+	m.install.previewToken++
+	token := m.install.previewToken
+	checkouts := m.ensureInstallCheckoutCache()
+	source, err := m.gitSourceForInstall(row.Result)
+	if err != nil {
+		return func() tea.Msg {
+			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
+		}
 	}
-	source := m.gitSourceForInstall(row.Result)
 	return func() tea.Msg {
-		checkout, err := checkouts.Checkout(context.Background(), source)
+		ctx, cancel := context.WithTimeout(context.Background(), installPreviewTimeout)
+		defer cancel()
+
+		checkout, err := checkouts.Checkout(ctx, source)
 		if err != nil {
-			return installPreviewMsg{name: row.Result.Name, err: err}
+			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
 		}
 		found, err := checkout.FindSkill(row.Result.Name, row.Result.Path)
 		if err != nil {
-			return installPreviewMsg{name: row.Result.Name, err: err}
+			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
 		}
-		return installPreviewMsg{name: row.Result.Name, path: found.SkillDir}
+		return installPreviewMsg{token: token, name: row.Result.Name, path: found.SkillDir}
 	}
 }
 
-func (m Model) gitSourceForInstall(result remote.SearchResult) remote.GitSource {
+func (m *Model) ensureInstallCheckoutCache() *remote.CheckoutCache {
+	if m.install.checkouts == nil {
+		m.install.checkouts = remote.NewCheckoutCache(filepath.Join(os.TempDir(), "x-skills-tui-checkouts"))
+	}
+	return m.install.checkouts
+}
+
+func (m Model) gitSourceForInstall(result remote.SearchResult) (remote.GitSource, error) {
 	if m.install.testCloneURL != "" {
-		return remote.GitSource{CloneURL: m.install.testCloneURL}
+		return remote.GitSource{CloneURL: m.install.testCloneURL}, nil
+	}
+	if result.Owner == "" || result.Repo == "" {
+		return remote.GitSource{}, fmt.Errorf("missing source repository for %s", result.Name)
 	}
 	return remote.GitSource{
 		Owner:    result.Owner,
 		Repo:     result.Repo,
 		CloneURL: "https://github.com/" + result.Owner + "/" + result.Repo + ".git",
-	}
+	}, nil
 }
 
 func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {

@@ -3,10 +3,11 @@ package tui
 import tea "github.com/charmbracelet/bubbletea"
 
 const (
-	keyActive = "A"
-	keyRepo   = "R"
-	keyDoctor = "D"
-	keyHelp   = "?"
+	keyActive  = "A"
+	keyRepo    = "R"
+	keyDoctor  = "D"
+	keyInstall = "I"
+	keyHelp    = "?"
 )
 
 func isRefreshKey(msg tea.KeyMsg) bool {

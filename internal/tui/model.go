@@ -15,9 +15,10 @@ import (
 type ViewName string
 
 const (
-	ViewActive ViewName = "active"
-	ViewRepo   ViewName = "repo"
-	ViewDoctor ViewName = "doctor"
+	ViewActive  ViewName = "active"
+	ViewRepo    ViewName = "repo"
+	ViewDoctor  ViewName = "doctor"
+	ViewInstall ViewName = "install"
 )
 
 type Model struct {
@@ -35,6 +36,7 @@ type Model struct {
 	active    []ActiveGroup
 	repo      []repo.Skill
 	issues    []doctor.Issue
+	install   installState
 	repoUsage map[string][]string
 
 	modal  modal
@@ -62,11 +64,13 @@ func New(cfg config.Config, opts ...Options) Model {
 		symbols: symbolsFor(options),
 		view:    ViewActive,
 		selected: map[ViewName]map[string]bool{
-			ViewActive: {},
-			ViewRepo:   {},
-			ViewDoctor: {},
+			ViewActive:  {},
+			ViewRepo:    {},
+			ViewDoctor:  {},
+			ViewInstall: {},
 		},
-		filter: newFilterState(),
+		filter:  newFilterState(),
+		install: newInstallState(),
 	}
 	m.reload()
 	return m
@@ -126,6 +130,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setView(ViewRepo)
 	case keyDoctor:
 		m.setView(ViewDoctor)
+	case keyInstall:
+		m.setView(ViewInstall)
 	case "up", "k":
 		m.moveCursor(-1)
 	case "down", "j":
@@ -295,9 +301,10 @@ func (m *Model) setView(view ViewName) {
 	m.view = view
 	m.cursor = 0
 	m.selected = map[ViewName]map[string]bool{
-		ViewActive: {},
-		ViewRepo:   {},
-		ViewDoctor: {},
+		ViewActive:  {},
+		ViewRepo:    {},
+		ViewDoctor:  {},
+		ViewInstall: {},
 	}
 	m.filter = newFilterState()
 }
@@ -395,6 +402,8 @@ func (m *Model) itemCount() int {
 		return len(m.visibleRepoSkills())
 	case ViewDoctor:
 		return len(m.issues)
+	case ViewInstall:
+		return len(m.install.Results)
 	default:
 		return 0
 	}

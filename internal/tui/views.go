@@ -44,6 +44,7 @@ func renderHeader(m Model, width int) string {
 		tabLabel(m.view == ViewActive, "A", "Active"),
 		tabLabel(m.view == ViewRepo, "R", "Repo"),
 		tabLabel(m.view == ViewDoctor, "D", "Doctor"),
+		tabLabel(m.view == ViewInstall, "I", "Install"),
 	}
 	title := titleStyle.Render(m.symbols.ProductMark+" x-skills") + "  " + strings.Join(tabs, " ")
 	return truncate(title, width)
@@ -76,6 +77,9 @@ func renderListPanel(m Model, width, maxRows int) string {
 	case ViewDoctor:
 		title = "Doctor issues"
 		rows = renderDoctorRows(m, width)
+	case ViewInstall:
+		title = installPanelTitle(m)
+		rows = renderInstallRows(m, width)
 	}
 	if len(rows) == 0 {
 		rows = []string{mutedStyle.Render("No items.")}
@@ -116,6 +120,20 @@ func renderInspector(m Model, width, height int) string {
 		if m.cursor >= 0 && m.cursor < len(m.issues) {
 			issue := m.issues[m.cursor]
 			lines = append(lines, "◇ "+issue.Kind, "path", issue.Path, "reason", issue.Reason, "fix", issue.SafeFix)
+		}
+	case ViewInstall:
+		if m.cursor >= 0 && m.cursor < len(m.install.Results) {
+			result := m.install.Results[m.cursor]
+			lines = append(lines,
+				"◇ "+result.Result.Name,
+				result.Result.Source(),
+				"skill", "  "+result.Result.Name,
+				"installs", fmt.Sprintf("  %d", result.Result.Installs),
+				"status", "  "+result.ArchiveState,
+			)
+			if result.AuditPill != "" {
+				lines = append(lines, "audit", "  "+result.AuditPill)
+			}
 		}
 	}
 	if len(lines) > contentHeight {
@@ -206,6 +224,36 @@ func renderDoctorRows(m Model, width int) []string {
 			false,
 			width-6,
 		))
+	}
+	return rows
+}
+
+func installPanelTitle(m Model) string {
+	query := m.install.Query
+	if query == "" {
+		return "Install: search"
+	}
+	if m.install.Owner != "" {
+		return fmt.Sprintf("Install: search %q  owner: %s", query, m.install.Owner)
+	}
+	return fmt.Sprintf("Install: search %q", query)
+}
+
+func renderInstallRows(m Model, width int) []string {
+	rows := []string{accentStyle.Render("/ search: " + m.install.Query + "_")}
+	if len(m.install.Results) == 0 {
+		rows = append(rows, mutedStyle.Render(m.install.Message))
+		return rows
+	}
+	for i, result := range m.install.Results {
+		prefix := cursorPrefix(m, i)
+		pill := result.AuditPill
+		if pill != "" {
+			pill = " " + pill
+		}
+		rows = append(rows, selectableRow([]rowSegment{
+			{text: fmt.Sprintf("%s %s  %s  %s%s  %s", prefix, result.Result.Name, result.Result.Source(), result.ArchiveState, pill, result.Result.Description)},
+		}, i == m.cursor, false, width-6))
 	}
 	return rows
 }
@@ -356,6 +404,17 @@ func commandPalette(m Model) string {
 		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "details"},
 			{ASCII: "f", Label: "fix"},
+			{ASCII: "^R", Label: "refresh"},
+			{ASCII: "?", Label: "help"},
+			{ASCII: "q", Label: "quit"},
+		})
+	case ViewInstall:
+		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "enter", Unicode: "↵", Label: "preview"},
+			{ASCII: "/", Label: "search"},
+			{ASCII: "o", Label: "owner"},
+			{ASCII: "i", Label: "install & use"},
+			{ASCII: "a", Label: "archive only"},
 			{ASCII: "^R", Label: "refresh"},
 			{ASCII: "?", Label: "help"},
 			{ASCII: "q", Label: "quit"},

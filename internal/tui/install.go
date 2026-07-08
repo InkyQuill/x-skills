@@ -253,6 +253,14 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 		m.install.Message = m.status
 		return nil
 	}
+	if row.ArchiveState == remote.ArchiveStateNameConflict {
+		m.openInstallNameConflictModal(row)
+		return nil
+	}
+	if row.ArchiveState == remote.ArchiveStateUpdateAvailable {
+		m.openInstallUpdateDiff(row)
+		return nil
+	}
 	cmd := m.archiveInstallRow(row)
 	if cmd == nil {
 		return nil
@@ -263,11 +271,10 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 }
 
 func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
-	if row.ArchiveState == remote.ArchiveStateNameConflict {
-		m.status = "archive conflict for " + row.Result.Name
-		m.install.Message = m.status
-		return nil
-	}
+	return m.archiveInstallRowWithConflict(row, row.Result.Name, remote.ConflictArchiveOnly)
+}
+
+func (m *Model) archiveInstallRowWithConflict(row installResultView, archiveName, conflict string) tea.Cmd {
 	m.install.previewToken++
 	m.install.archiveToken++
 	token := m.install.archiveToken
@@ -276,7 +283,7 @@ func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
 		return func() tea.Msg {
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
+			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
 		}
 	}
 	cfg := m.cfg
@@ -286,61 +293,216 @@ func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
 
 		checkout, err := checkouts.Checkout(ctx, source)
 		if err != nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
+			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
 		}
 		found, err := checkout.FindSkillContext(ctx, row.Result.Name, row.Result.Path)
 		if err != nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
+			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
 		}
-		plan, err := remote.PlanArchive(cfg, found.SkillDir, row.Result.Name, found.Metadata)
+		plan, err := remote.PlanArchive(cfg, found.SkillDir, archiveName, found.Metadata)
 		if err != nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
+			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
 		}
-		switch plan.State {
-		case remote.ArchiveStateNotArchived:
-		case remote.ArchiveStateArchived:
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: plan.State}
-		case remote.ArchiveStateNameConflict:
-			return installArchiveMsg{
-				token:        token,
-				name:         row.Result.Name,
-				identity:     identity,
-				archiveState: plan.State,
-				err:          fmt.Errorf("archive conflict for %s", row.Result.Name),
-			}
-		case remote.ArchiveStateUpdateAvailable:
-			return installArchiveMsg{
-				token:        token,
-				name:         row.Result.Name,
-				identity:     identity,
-				archiveState: plan.State,
-				err:          fmt.Errorf("update available for %s", row.Result.Name),
-			}
-		default:
-			return installArchiveMsg{
-				token:        token,
-				name:         row.Result.Name,
-				identity:     identity,
-				archiveState: plan.State,
-				err:          fmt.Errorf("unknown archive state %q for %s", plan.State, row.Result.Name),
+		if conflict == remote.ConflictArchiveOnly {
+			switch plan.State {
+			case remote.ArchiveStateNotArchived:
+			case remote.ArchiveStateArchived:
+				return installArchiveMsg{token: token, name: archiveName, identity: identity, archiveState: plan.State}
+			case remote.ArchiveStateNameConflict:
+				return installArchiveMsg{
+					token:        token,
+					name:         archiveName,
+					identity:     identity,
+					archiveState: plan.State,
+					err:          fmt.Errorf("archive conflict for %s", archiveName),
+				}
+			case remote.ArchiveStateUpdateAvailable:
+				return installArchiveMsg{
+					token:        token,
+					name:         archiveName,
+					identity:     identity,
+					archiveState: plan.State,
+					err:          fmt.Errorf("update available for %s", archiveName),
+				}
+			default:
+				return installArchiveMsg{
+					token:        token,
+					name:         archiveName,
+					identity:     identity,
+					archiveState: plan.State,
+					err:          fmt.Errorf("unknown archive state %q for %s", plan.State, archiveName),
+				}
 			}
 		}
 		_, err = remote.ApplyArchive(remote.AddRequest{
 			Config:      cfg,
 			IncomingDir: found.SkillDir,
-			ArchiveName: row.Result.Name,
+			ArchiveName: archiveName,
 			Metadata:    found.Metadata,
-			Conflict:    remote.ConflictArchiveOnly,
+			Conflict:    conflict,
 		})
 		if err != nil {
-			plan, planErr := remote.PlanArchive(cfg, found.SkillDir, row.Result.Name, found.Metadata)
+			plan, planErr := remote.PlanArchive(cfg, found.SkillDir, archiveName, found.Metadata)
 			if planErr == nil {
-				return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: plan.State, err: err}
+				return installArchiveMsg{token: token, name: archiveName, identity: identity, archiveState: plan.State, err: err}
 			}
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
+			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
 		}
-		return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateArchived}
+		return installArchiveMsg{token: token, name: archiveName, identity: identity, archiveState: remote.ArchiveStateArchived}
 	}
+}
+
+func (m *Model) openInstallNameConflictModal(row installResultView) {
+	m.modal = newChoiceModal(
+		"Name conflict: "+row.Result.Name,
+		[]string{
+			"Archive already contains a skill with this name from a different source.",
+			"Choose how to archive the incoming remote skill.",
+		},
+		[]string{"Replace archive", "Rename existing archive", "Rename incoming archive", "Cancel"},
+		0,
+		func(current *Model, choice int) {
+			current.applyInstallNameConflictChoice(row, choice)
+		},
+	)
+}
+
+func (m *Model) applyInstallNameConflictChoice(row installResultView, choice int) {
+	switch choice {
+	case 0:
+		m.modal = nil
+		m.applyInstallArchiveWithConflict(row, row.Result.Name, remote.ConflictReplaceArchive)
+	case 1:
+		m.modal = newInstallRenameModal(row, true)
+	case 2:
+		m.modal = newInstallRenameModal(row, false)
+	default:
+		m.modal = nil
+		m.status = "cancelled install " + row.Result.Name
+		m.install.Message = m.status
+	}
+}
+
+func newInstallRenameModal(row installResultView, renameExisting bool) modal {
+	title := "Rename incoming archive"
+	suggestion := row.Result.Name + "-remote"
+	if renameExisting {
+		title = "Rename existing archive"
+		suggestion = row.Result.Name + "-local"
+	}
+	return newTextModal(title, "Archive name", suggestion, func(m *Model, name string) {
+		if name == "" {
+			m.status = "archive name is required"
+			m.install.Message = m.status
+			return
+		}
+		if renameExisting {
+			if m.renameExistingArchiveThenInstall(row, name) {
+				m.modal = nil
+			}
+			return
+		}
+		if m.applyInstallArchiveWithConflict(row, name, remote.ConflictRenameIncoming) {
+			m.modal = nil
+		}
+	})
+}
+
+func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName string) bool {
+	oldPath, err := repo.SkillPath(m.cfg, row.Result.Name)
+	if err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return false
+	}
+	newPath, err := repo.SkillPath(m.cfg, newName)
+	if err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return false
+	}
+	if repo.HasSkill(m.cfg, newName) {
+		m.status = "archive name already exists: " + newName
+		m.install.Message = m.status
+		return false
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return false
+	}
+	return m.applyInstallArchiveWithConflict(row, row.Result.Name, remote.ConflictReplaceArchive)
+}
+
+func (m *Model) openInstallUpdateDiff(row installResultView) {
+	checkouts := m.ensureInstallCheckoutCache()
+	source, err := m.gitSourceForInstall(row.Result)
+	if err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+	defer cancel()
+
+	checkout, err := checkouts.Checkout(ctx, source)
+	if err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return
+	}
+	found, err := checkout.FindSkillContext(ctx, row.Result.Name, row.Result.Path)
+	if err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return
+	}
+	archivePath, err := repo.SkillPath(m.cfg, row.Result.Name)
+	if err != nil {
+		m.status = err.Error()
+		m.install.Message = m.status
+		return
+	}
+	diff, err := buildDirectoryDiff(found.SkillDir, archivePath)
+	if err != nil {
+		m.status = "failed to build conflict diff: " + err.Error()
+		m.install.Message = m.status
+		return
+	}
+	m.modal = newConflictDiffModalWithModelApply(row.Result.Name, diff, "Incoming remote", func(current *Model, chosen string) {
+		if chosen == actions.ConflictResolutionUseActive {
+			current.applyInstallArchiveWithConflict(row, row.Result.Name, remote.ConflictReplaceArchive)
+			return
+		}
+		current.status = "kept archive " + row.Result.Name
+		current.install.Message = current.status
+	})
+}
+
+func (m *Model) applyInstallArchiveWithConflict(row installResultView, archiveName, conflict string) bool {
+	cmd := m.archiveInstallRowWithConflict(row, archiveName, conflict)
+	if cmd == nil {
+		return false
+	}
+	msg, ok := cmd().(installArchiveMsg)
+	if !ok {
+		m.status = "archive command returned unexpected message"
+		m.install.Message = m.status
+		return false
+	}
+	if msg.err != nil {
+		m.reload()
+		m.refreshInstallArchiveStates()
+		m.updateInstallArchiveState(msg.identity, msg.archiveState)
+		m.status = msg.err.Error()
+		m.install.Message = m.status
+		return false
+	}
+	m.reload()
+	m.refreshInstallArchiveStates()
+	m.status = "archived " + msg.name
+	m.install.Message = m.status
+	return true
 }
 
 func (m *Model) installAndUse(row installResultView, destinations []installDestination) tea.Cmd {

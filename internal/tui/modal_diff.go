@@ -21,7 +21,7 @@ type conflictDiffModal struct {
 	selected      int
 	scroll        int
 	incomingLabel string
-	apply         func(string)
+	apply         func(*Model, string)
 }
 
 func newConflictDiffModal(name string, diff directoryDiff, apply func(string)) modal {
@@ -29,6 +29,12 @@ func newConflictDiffModal(name string, diff directoryDiff, apply func(string)) m
 }
 
 func newConflictDiffModalWithIncomingLabel(name string, diff directoryDiff, incomingLabel string, apply func(string)) modal {
+	return newConflictDiffModalWithModelApply(name, diff, incomingLabel, func(_ *Model, resolution string) {
+		apply(resolution)
+	})
+}
+
+func newConflictDiffModalWithModelApply(name string, diff directoryDiff, incomingLabel string, apply func(*Model, string)) modal {
 	return conflictDiffModal{name: name, diff: diff, incomingLabel: incomingLabel, apply: apply}
 }
 
@@ -172,11 +178,13 @@ func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		}
 		m.modal = c
 	case "k":
-		c.apply(actions.ConflictResolutionKeepArchive)
-		return true, nil
+		m.modal = nil
+		c.apply(m, actions.ConflictResolutionKeepArchive)
+		return false, nil
 	case "l":
-		c.apply(actions.ConflictResolutionUseActive)
-		return true, nil
+		m.modal = nil
+		c.apply(m, actions.ConflictResolutionUseActive)
+		return false, nil
 	}
 	return false, nil
 }

@@ -1354,7 +1354,38 @@ func TestInstallAndUseKeyNoOpsOutsideInstallOrWithoutSelection(t *testing.T) {
 	}
 }
 
-func TestInstallArchiveOnlyRejectsNameConflictWithoutReplacingArchive(t *testing.T) {
+func TestInstallArchiveOnlyNameConflictShowsChoice(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Local archived.")
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:  "svelte-coder",
+			Owner: "vercel-labs",
+			Repo:  "skills",
+			Path:  "skills/svelte-coder",
+		},
+		ArchiveState: remote.ArchiveStateNameConflict,
+	}}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil for conflict choice", cmd)
+	}
+	if m.modal == nil {
+		t.Fatal("conflict modal is nil")
+	}
+	view := plain(m.modal.View(120, 35, m))
+	for _, want := range []string{"Name conflict: svelte-coder", "Replace archive", "Rename existing archive", "Rename incoming archive", "Cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("name conflict modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestInstallArchiveOnlyNameConflictReplaceArchive(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
 	gitTUITestCommit(t, repoDir, "initial")
@@ -1386,9 +1417,14 @@ func TestInstallArchiveOnlyRejectsNameConflictWithoutReplacingArchive(t *testing
 	updated, cmd := m.Update(keyRunes("a"))
 	m = mustModel(t, updated)
 	if cmd != nil {
-		t.Fatalf("cmd = %#v, want nil for archive conflict", cmd)
+		t.Fatalf("cmd = %#v, want nil for archive conflict modal", cmd)
 	}
-	if m.status != "archive conflict for svelte-coder" {
+	if m.modal == nil {
+		t.Fatal("conflict modal is nil")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.status != "archived svelte-coder" {
 		t.Fatalf("status = %q", m.status)
 	}
 
@@ -1396,8 +1432,8 @@ func TestInstallArchiveOnlyRejectsNameConflictWithoutReplacingArchive(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Description != "Existing help." {
-		t.Fatalf("description = %q, want existing archive unchanged", info.Description)
+	if info.Description != "Incoming help." {
+		t.Fatalf("description = %q, want incoming archive", info.Description)
 	}
 	meta, ok, err := remote.ReadSourceMetadata(archivePath)
 	if err != nil {
@@ -1406,8 +1442,190 @@ func TestInstallArchiveOnlyRejectsNameConflictWithoutReplacingArchive(t *testing
 	if !ok {
 		t.Fatal("source metadata missing")
 	}
-	if meta.Owner != "someone-else" {
-		t.Fatalf("metadata = %#v, want existing source metadata unchanged", meta)
+	if meta.SourceType != remote.SourceTypeGit || meta.CloneURL != repoDir {
+		t.Fatalf("metadata = %#v, want incoming source metadata", meta)
+	}
+}
+
+func TestInstallArchiveOnlyNameConflictRenameExisting(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNameConflict,
+	}}
+
+	updated, _ := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "svelte-coder-local") {
+		t.Fatalf("rename existing modal missing suggestion:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.status != "archived svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	localInfo, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder-local"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localInfo.Description != "Existing help." {
+		t.Fatalf("local description = %q", localInfo.Description)
+	}
+	incomingInfo, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incomingInfo.Description != "Incoming help." {
+		t.Fatalf("incoming description = %q", incomingInfo.Description)
+	}
+}
+
+func TestInstallArchiveOnlyNameConflictRenameIncoming(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNameConflict,
+	}}
+
+	updated, _ := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "svelte-coder-remote") {
+		t.Fatalf("rename incoming modal missing suggestion:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.status != "archived svelte-coder-remote" {
+		t.Fatalf("status = %q", m.status)
+	}
+	existingInfo, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if existingInfo.Description != "Existing help." {
+		t.Fatalf("existing description = %q", existingInfo.Description)
+	}
+	incomingInfo, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder-remote"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incomingInfo.Description != "Incoming help." {
+		t.Fatalf("incoming description = %q", incomingInfo.Description)
+	}
+}
+
+func TestInstallArchiveOnlyNameConflictCancelEmptyAndDuplicate(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder-remote", "Duplicate help.")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNameConflict,
+	}}
+
+	updated, _ := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	for range 3 {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.status != "cancelled install svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+
+	updated, _ = m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	for range 2 {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	text, ok := m.modal.(textModal)
+	if !ok {
+		t.Fatalf("modal = %T, want textModal", m.modal)
+	}
+	text.input.SetValue("")
+	m.modal = text
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.status != "archive name is required" {
+		t.Fatalf("empty status = %q", m.status)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder-remote")); err != nil {
+		t.Fatal(err)
+	}
+
+	text, ok = m.modal.(textModal)
+	if !ok {
+		t.Fatalf("modal after empty = %T, want textModal", m.modal)
+	}
+	text.input.SetValue("svelte-coder-remote")
+	m.modal = text
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if !strings.Contains(m.status, "archive destination already exists") {
+		t.Fatalf("duplicate status = %q", m.status)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder-remote"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Duplicate help." {
+		t.Fatalf("duplicate archive changed: %q", info.Description)
 	}
 }
 
@@ -1615,6 +1833,129 @@ func TestInstallArchiveOnlyResultOutsideInstallReloadsStateAndKeepsView(t *testi
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstallSameSourceUpdateOpensIncomingRemoteDiff(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:  "svelte-coder",
+			Owner: "vercel-labs",
+			Repo:  "skills",
+			Path:  "skills/svelte-coder",
+		},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil for update diff", cmd)
+	}
+	if m.modal == nil {
+		t.Fatal("diff modal is nil")
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, "Incoming remote") || !strings.Contains(view, "Archive conflict: svelte-coder") {
+		t.Fatalf("update diff missing remote labels:\n%s", view)
+	}
+}
+
+func TestInstallSameSourceUpdateAcceptIncomingReplacesArchive(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, _ := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.status != "archived svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "New." {
+		t.Fatalf("description = %q, want incoming", info.Description)
+	}
+	if m.modal != nil {
+		t.Fatal("modal remained open after accepting incoming")
+	}
+}
+
+func TestInstallSameSourceUpdateKeepArchiveLeavesArchive(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, _ := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if m.status != "kept archive svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Old." {
+		t.Fatalf("description = %q, want archive kept", info.Description)
+	}
+	if m.modal != nil {
+		t.Fatal("modal remained open after keeping archive")
 	}
 }
 

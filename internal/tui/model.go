@@ -107,6 +107,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case installArchiveMsg:
 		m.applyInstallArchiveResult(msg)
 		return m, nil
+	case installUseMsg:
+		m.applyInstallUseResult(msg)
+		return m, nil
 	default:
 		return m, nil
 	}
@@ -187,6 +190,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		if m.view == ViewInstall {
 			return m, m.archiveInstallResult()
+		}
+	case "i":
+		if m.view == ViewInstall {
+			if row, ok := m.selectedInstallResult(); ok {
+				m.modal = newInstallDestinationModal(row)
+			}
 		}
 	case keyHelp:
 		m.modal = newHelpModal()

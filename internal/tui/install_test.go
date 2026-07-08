@@ -648,6 +648,177 @@ func TestInstallArchiveOnlyArchivesRemoteSkillAndStaysOnInstall(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("destination modal is nil")
+	}
+	view := plain(m.modal.View(120, 30, m))
+	if !strings.Contains(view, "Install and use svelte-coder") || !strings.Contains(view, "[x] .Ag") {
+		t.Fatalf("destination modal missing default project agents:\n%s", view)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != archive {
+		t.Fatalf("resolved = %q, want %q", resolved, archive)
+	}
+	if m.modal != nil {
+		t.Fatal("modal is still open after install and use")
+	}
+	if m.status != "installed svelte-coder to .Ag" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallDestinationChecklistNavigationAndToggle(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+
+	view := plain(m.modal.View(120, 30, m))
+	if !strings.Contains(view, "[x] .Ag") || !strings.Contains(view, "[x] .Cl") {
+		t.Fatalf("checklist did not keep default and toggle second destination:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+
+	view = plain(m.modal.View(120, 30, m))
+	if !strings.Contains(view, "[ ] .Ag") || !strings.Contains(view, "[x] .Cl") {
+		t.Fatalf("checklist did not move up and toggle default destination:\n%s", view)
+	}
+}
+
+func TestInstallAndUseRequiresDestination(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil with no destination selected", cmd)
+	}
+	if m.modal == nil {
+		t.Fatal("modal closed with no destination selected")
+	}
+	if m.status != "select at least one destination" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallAndUseLinkErrorKeepsModalAndShowsStatus(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder", "Existing active.")
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.modal == nil {
+		t.Fatal("modal closed after link error")
+	}
+	if !strings.Contains(m.status, "destination exists") {
+		t.Fatalf("status = %q, want link error", m.status)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallAndUseKeyNoOpsOutsideInstallOrWithoutSelection(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd outside install = %#v, want nil", cmd)
+	}
+	if m.modal != nil {
+		t.Fatal("modal opened outside install view")
+	}
+
+	m.setView(ViewInstall)
+	updated, cmd = m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd without selected result = %#v, want nil", cmd)
+	}
+	if m.modal != nil {
+		t.Fatal("modal opened without selected result")
+	}
+}
+
 func TestInstallArchiveOnlyRejectsNameConflictWithoutReplacingArchive(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")

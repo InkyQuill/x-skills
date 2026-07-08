@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	tea "github.com/charmbracelet/bubbletea"
@@ -57,6 +59,12 @@ type installArchiveMsg struct {
 	name         string
 	identity     installArchiveIdentity
 	archiveState string
+	err          error
+}
+
+type installUseMsg struct {
+	name         string
+	destinations []installDestination
 	err          error
 }
 
@@ -198,6 +206,10 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	return m.archiveInstallRow(row)
+}
+
+func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
 	if row.ArchiveState == remote.ArchiveStateNameConflict {
 		m.status = "archive conflict for " + row.Result.Name
 		m.install.Message = m.status
@@ -278,6 +290,124 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	}
 }
 
+func (m *Model) installAndUse(row installResultView, destinations []installDestination) tea.Cmd {
+	if len(destinations) == 0 {
+		m.status = "select at least one destination"
+		m.install.Message = m.status
+		return nil
+	}
+	archiveCmd := m.archiveInstallRow(row)
+	if archiveCmd == nil {
+		return nil
+	}
+	cfg := m.cfg
+	return func() tea.Msg {
+		archiveMsg := archiveCmd().(installArchiveMsg)
+		if archiveMsg.err != nil {
+			return installUseMsg{name: row.Result.Name, destinations: destinations, err: archiveMsg.err}
+		}
+		for _, dest := range destinations {
+			_, err := actions.Link(cfg, actions.LinkRequest{Name: row.Result.Name, Scope: dest.Scope, Target: dest.Target})
+			if err != nil {
+				return installUseMsg{name: row.Result.Name, destinations: destinations, err: err}
+			}
+		}
+		return installUseMsg{name: row.Result.Name, destinations: destinations}
+	}
+}
+
+type installDestination struct {
+	Scope   string
+	Target  string
+	Label   string
+	Checked bool
+}
+
+type installDestinationModal struct {
+	name         string
+	row          installResultView
+	destinations []installDestination
+	cursor       int
+}
+
+func newInstallDestinationModal(row installResultView) modal {
+	return installDestinationModal{name: row.Result.Name, row: row, destinations: []installDestination{
+		{Scope: config.ScopeProject, Target: config.TargetAgents, Label: ".Ag", Checked: true},
+		{Scope: config.ScopeProject, Target: config.TargetClaude, Label: ".Cl"},
+		{Scope: config.ScopeProject, Target: config.TargetCodex, Label: ".Cd"},
+		{Scope: config.ScopeGlobal, Target: config.TargetAgents, Label: "~Ag"},
+		{Scope: config.ScopeGlobal, Target: config.TargetClaude, Label: "~Cl"},
+		{Scope: config.ScopeGlobal, Target: config.TargetCodex, Label: "~Cd"},
+	}}
+}
+
+func (d installDestinationModal) Title() string {
+	return "Install and use " + d.name
+}
+
+func (d installDestinationModal) View(width, height int, m Model) string {
+	lines := []string{accentStyle.Render(d.Title()), ""}
+	for i, dest := range d.destinations {
+		cursor := " "
+		if i == d.cursor {
+			cursor = m.symbols.Cursor
+		}
+		check := "[ ]"
+		if dest.Checked {
+			check = "[x]"
+		}
+		row := "  " + cursor + " " + check + " " + dest.Label
+		if i == d.cursor {
+			row = selectedBg.Render(row)
+		}
+		lines = append(lines, row)
+	}
+	lines = append(lines, "", mutedStyle.Render("up/down move  space toggle  enter install  esc cancel"))
+	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+}
+
+func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		return true, nil
+	case "up", "k":
+		if len(d.destinations) > 0 {
+			d.cursor = (d.cursor + len(d.destinations) - 1) % len(d.destinations)
+		}
+		m.modal = d
+	case "down", "j":
+		if len(d.destinations) > 0 {
+			d.cursor = (d.cursor + 1) % len(d.destinations)
+		}
+		m.modal = d
+	case " ":
+		if d.cursor >= 0 && d.cursor < len(d.destinations) {
+			d.destinations[d.cursor].Checked = !d.destinations[d.cursor].Checked
+		}
+		m.modal = d
+	case "enter":
+		destinations := d.checked()
+		if len(destinations) == 0 {
+			m.status = "select at least one destination"
+			m.install.Message = m.status
+			m.modal = d
+			return false, nil
+		}
+		return false, m.installAndUse(d.row, destinations)
+	}
+	return false, nil
+}
+
+func (d installDestinationModal) checked() []installDestination {
+	destinations := make([]installDestination, 0, len(d.destinations))
+	for _, dest := range d.destinations {
+		if dest.Checked {
+			destinations = append(destinations, dest)
+		}
+	}
+	return destinations
+}
+
 func (m *Model) ensureInstallCheckoutCache() *remote.CheckoutCache {
 	if m.install.checkouts == nil {
 		m.install.checkouts = remote.NewCheckoutCache(filepath.Join(os.TempDir(), "x-skills-tui-checkouts"))
@@ -345,6 +475,29 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 	m.reload()
 	m.refreshInstallArchiveStates()
 	m.status = "archived " + msg.name
+}
+
+func (m *Model) applyInstallUseResult(msg installUseMsg) {
+	if msg.err != nil {
+		m.reload()
+		m.refreshInstallArchiveStates()
+		m.status = msg.err.Error()
+		m.install.Message = m.status
+		return
+	}
+	m.reload()
+	m.refreshInstallArchiveStates()
+	m.modal = nil
+	m.status = "installed " + msg.name + " to " + installDestinationLabels(msg.destinations)
+	m.install.Message = m.status
+}
+
+func installDestinationLabels(destinations []installDestination) string {
+	labels := make([]string, 0, len(destinations))
+	for _, dest := range destinations {
+		labels = append(labels, dest.Label)
+	}
+	return strings.Join(labels, ", ")
 }
 
 func (m *Model) refreshInstallArchiveStates() {

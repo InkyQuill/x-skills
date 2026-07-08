@@ -76,11 +76,7 @@ func hashEntry(hash hashWriter, root string, entry entry) error {
 		defer func() {
 			_ = file.Close()
 		}()
-		info, err := file.Stat()
-		if err != nil {
-			return fmt.Errorf("stat file %q: %w", entry.path, err)
-		}
-		writeHashPrefix(hash, "file", entry.path, info.Size())
+		writeHashFilePrefix(hash, "file", entry.path)
 		if _, err := io.Copy(hash, file); err != nil {
 			return fmt.Errorf("hash file %q: %w", entry.path, err)
 		}
@@ -94,6 +90,6 @@ func writeHash(hash hashWriter, kind, path, value string) {
 	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00%s\x00", kind, path, len(value), value)
 }
 
-func writeHashPrefix(hash hashWriter, kind, path string, size int64) {
-	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00", kind, path, size)
+func writeHashFilePrefix(hash hashWriter, kind, path string) {
+	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00", kind, path)
 }

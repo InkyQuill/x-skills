@@ -17,6 +17,8 @@ type Skill struct {
 	Description string
 }
 
+var readSkill = skills.Read
+
 func List(cfg config.Config) ([]Skill, error) {
 	root := cfg.ArchiveSkillsRoot()
 	entries, err := os.ReadDir(root)
@@ -34,7 +36,7 @@ func List(cfg config.Config) ([]Skill, error) {
 			continue
 		}
 
-		info, err := skills.Read(path)
+		info, err := readSkill(path)
 		if err != nil {
 			continue
 		}

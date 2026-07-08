@@ -26,20 +26,24 @@ func newUnlinkCommand(rootOptions *options) *cobra.Command {
 				return err
 			}
 
-			results, failures := unlinkNamesWithOptions(cmd, rootOptions, args, opts)
-			if len(results) == 0 && len(failures) == 0 {
+			results, failures, skipped := unlinkNamesWithOptions(cmd, rootOptions, args, opts)
+			if len(results) == 0 && len(failures) == 0 && len(skipped) == 0 {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 				return nil
 			}
-			if len(args) == 1 && len(failures) == 0 {
+			if len(args) == 1 && len(failures) == 0 && len(skipped) == 0 {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", results[0].Status, results[0].Name)
+				return nil
+			}
+			if len(args) == 1 && len(skipped) == 1 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 				return nil
 			}
 			if len(args) == 1 && len(failures) == 1 {
 				return failures[0].err
 			}
 
-			writeUnlinkSummary(cmd.OutOrStdout(), results, failures)
+			writeUnlinkSummary(cmd.OutOrStdout(), results, failures, skipped)
 			if len(failures) > 0 {
 				return fmt.Errorf("unlink failed for %d skill(s)", len(failures))
 			}
@@ -60,10 +64,11 @@ func unlinkNamesWithOptions(
 	rootOptions *options,
 	names []string,
 	opts unlinkOptions,
-) ([]actions.MutationResult, []mutationFailure) {
+) ([]actions.MutationResult, []mutationFailure, []mutationSkipped) {
 	cfg := rootOptions.config()
 	var results []actions.MutationResult
 	var failures []mutationFailure
+	var skipped []mutationSkipped
 	for _, name := range names {
 		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "unlink", opts.activeRootOptions)
 		if err != nil {
@@ -71,6 +76,7 @@ func unlinkNamesWithOptions(
 			continue
 		}
 		if rootOptions.no {
+			skipped = append(skipped, mutationSkipped{name: name, reason: "cancelled"})
 			continue
 		}
 
@@ -101,6 +107,7 @@ func unlinkNamesWithOptions(
 			}
 		}
 		if !confirmed {
+			skipped = append(skipped, mutationSkipped{name: name, reason: "cancelled"})
 			continue
 		}
 		result, err := actions.Unlink(cfg, actions.UnlinkRequest{
@@ -116,13 +123,14 @@ func unlinkNamesWithOptions(
 		}
 		results = append(results, result)
 	}
-	return results, failures
+	return results, failures, skipped
 }
 
 func writeUnlinkSummary(
 	out io.Writer,
 	results []actions.MutationResult,
 	failures []mutationFailure,
+	skipped []mutationSkipped,
 ) {
 	_, _ = fmt.Fprintln(out, "Summary:")
 	for _, status := range []string{
@@ -143,5 +151,12 @@ func writeUnlinkSummary(
 	}
 	for _, failure := range failures {
 		_, _ = fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
+	}
+	if len(skipped) > 0 {
+		names := make([]string, 0, len(skipped))
+		for _, item := range skipped {
+			names = append(names, item.name)
+		}
+		_, _ = fmt.Fprintf(out, "skipped: %s\n", strings.Join(names, ", "))
 	}
 }

@@ -22,6 +22,11 @@ type mutationFailure struct {
 	err  error
 }
 
+type mutationSkipped struct {
+	name   string
+	reason string
+}
+
 func newMigrateCommand(rootOptions *options) *cobra.Command {
 	var opts activeRootOptions
 	cmd := &cobra.Command{
@@ -33,20 +38,24 @@ func newMigrateCommand(rootOptions *options) *cobra.Command {
 				return err
 			}
 
-			results, failures := migrateNames(cmd, rootOptions, args, opts)
-			if len(results) == 0 && len(failures) == 0 {
+			results, failures, skipped := migrateNames(cmd, rootOptions, args, opts)
+			if len(results) == 0 && len(failures) == 0 && len(skipped) == 0 {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 				return nil
 			}
-			if len(args) == 1 && len(failures) == 0 {
+			if len(args) == 1 && len(failures) == 0 && len(skipped) == 0 {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", results[0].Status, results[0].Name)
+				return nil
+			}
+			if len(args) == 1 && len(skipped) == 1 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cancelled")
 				return nil
 			}
 			if len(args) == 1 && len(failures) == 1 {
 				return failures[0].err
 			}
 
-			writeMutationSummary(cmd.OutOrStdout(), "migrated", results, failures)
+			writeMutationSummary(cmd.OutOrStdout(), "migrated", results, failures, skipped)
 			if len(failures) > 0 {
 				return fmt.Errorf("migrate failed for %d skill(s)", len(failures))
 			}
@@ -89,10 +98,11 @@ func migrateNames(
 	rootOptions *options,
 	names []string,
 	opts activeRootOptions,
-) ([]actions.MutationResult, []mutationFailure) {
+) ([]actions.MutationResult, []mutationFailure, []mutationSkipped) {
 	cfg := rootOptions.config()
 	var results []actions.MutationResult
 	var failures []mutationFailure
+	var skipped []mutationSkipped
 	for _, name := range names {
 		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "migrate", opts)
 		if err != nil {
@@ -110,6 +120,7 @@ func migrateNames(
 			continue
 		}
 		if !ok {
+			skipped = append(skipped, mutationSkipped{name: name, reason: "cancelled"})
 			continue
 		}
 		result, err := actions.Migrate(cfg, actions.MigrateRequest{
@@ -124,7 +135,7 @@ func migrateNames(
 		}
 		results = append(results, result)
 	}
-	return results, failures
+	return results, failures, skipped
 }
 
 func writeMutationSummary(
@@ -132,6 +143,7 @@ func writeMutationSummary(
 	successLabel string,
 	results []actions.MutationResult,
 	failures []mutationFailure,
+	skipped []mutationSkipped,
 ) {
 	_, _ = fmt.Fprintln(out, "Summary:")
 	if len(results) > 0 {
@@ -143,5 +155,12 @@ func writeMutationSummary(
 	}
 	for _, failure := range failures {
 		_, _ = fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
+	}
+	if len(skipped) > 0 {
+		names := make([]string, 0, len(skipped))
+		for _, item := range skipped {
+			names = append(names, item.name)
+		}
+		_, _ = fmt.Fprintf(out, "skipped: %s\n", strings.Join(names, ", "))
 	}
 }

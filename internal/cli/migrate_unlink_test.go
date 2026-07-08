@@ -92,6 +92,29 @@ func TestMigratePromptsForAmbiguousActiveSkillAndConfirmation(t *testing.T) {
 	}
 }
 
+func TestBatchMigrateSummaryIncludesSkippedConfirmations(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	first := makeSkill(t, filepath.Join(project, ".codex", "skills"), "first-skill", "First.")
+	second := makeSkill(t, filepath.Join(project, ".agents", "skills"), "second-skill", "Second.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "first-skill", "second-skill"}, strings.NewReader("y\nn\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "migrated: first-skill") || !strings.Contains(output, "skipped: second-skill") {
+		t.Fatalf("summary missing migrated or skipped item:\n%s", output)
+	}
+	if _, err := filepath.EvalSymlinks(first); err != nil {
+		t.Fatalf("first skill should be migrated and relinked: %v", err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("second skill should remain active: %v", err)
+	}
+}
+
 func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -129,6 +152,29 @@ func TestUnlinkUnmanagedPromptsForArchiveOrDelete(t *testing.T) {
 	archived := filepath.Join(home, ".x-skills", "skills", "local-only")
 	if _, err := os.Stat(archived); err != nil {
 		t.Fatalf("archived skill missing: %v", err)
+	}
+}
+
+func TestBatchUnlinkSummaryIncludesSkippedConfirmations(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	first := makeSkill(t, filepath.Join(project, ".codex", "skills"), "first-skill", "First.")
+	second := makeSkill(t, filepath.Join(project, ".agents", "skills"), "second-skill", "Second.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "first-skill", "second-skill", "--delete-unmanaged"}, strings.NewReader("y\nn\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "removed unmanaged: first-skill") || !strings.Contains(output, "skipped: second-skill") {
+		t.Fatalf("summary missing removed or skipped item:\n%s", output)
+	}
+	if _, err := os.Lstat(first); !os.IsNotExist(err) {
+		t.Fatalf("first skill still exists or unexpected err: %v", err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("second skill should remain active: %v", err)
 	}
 }
 

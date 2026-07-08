@@ -27,21 +27,32 @@ func (c conflictDiffModal) Title() string {
 }
 
 func (c conflictDiffModal) View(width, height int, m Model) string {
-	innerWidth := width - 12
-	if innerWidth > 84 {
-		innerWidth = 84
+	const (
+		horizontalMargin   = 12
+		narrowMargin       = 4
+		maxInnerWidth      = 84
+		minInnerWidth      = 36
+		fileColumnWidth    = 24
+		columnDividerWidth = 3
+		minDiffWidth       = 20
+		verticalChrome     = 12
+		minBodyHeight      = 4
+	)
+	innerWidth := width - horizontalMargin
+	if innerWidth > maxInnerWidth {
+		innerWidth = maxInnerWidth
 	}
-	if innerWidth < 36 {
-		innerWidth = width - 4
+	if innerWidth < minInnerWidth {
+		innerWidth = width - narrowMargin
 	}
-	fileWidth := 24
-	diffWidth := innerWidth - fileWidth - 3
-	if diffWidth < 20 {
-		diffWidth = 20
+	fileWidth := fileColumnWidth
+	diffWidth := innerWidth - fileWidth - columnDividerWidth
+	if diffWidth < minDiffWidth {
+		diffWidth = minDiffWidth
 	}
-	bodyHeight := height - 12
-	if bodyHeight < 4 {
-		bodyHeight = 4
+	bodyHeight := height - verticalChrome
+	if bodyHeight < minBodyHeight {
+		bodyHeight = minBodyHeight
 	}
 	footer := mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 		{ASCII: "left/right", Unicode: "←/→", Label: "file"},
@@ -95,9 +106,10 @@ func fileCursor(m Model, index, selected int) string {
 }
 
 func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
+	if closeOnEscapeOrQuit(msg) {
 		return true, nil
+	}
+	switch msg.String() {
 	case "left":
 		if c.selected > 0 {
 			c.selected--

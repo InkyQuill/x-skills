@@ -1,6 +1,8 @@
 package fingerprint
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +50,24 @@ func TestDirectoryFingerprintIncludesFileContents(t *testing.T) {
 	}
 	if first == second {
 		t.Fatalf("fingerprint did not change: %q", first)
+	}
+}
+
+func TestDirectoryFingerprintStreamsFileWithoutStatSizePrefix(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "skill.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Directory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("file\x00skill.md\x00hello\x00"))
+	want := hex.EncodeToString(hash.Sum(nil))
+	if got != want {
+		t.Fatalf("Directory() = %q, want streamed file hash %q", got, want)
 	}
 }
 

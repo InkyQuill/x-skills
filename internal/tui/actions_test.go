@@ -8,7 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
@@ -408,6 +410,36 @@ func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("delete modal missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestRepoDeleteSkipsArchiveDeletionWhenUnlinkFails(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.active = []ActiveGroup{{
+		Name: "zen-of-go",
+		Members: []actions.ActiveSkill{{
+			Name:   "zen-of-go",
+			Path:   filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go"),
+			Root:   roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents},
+			Status: actions.StatusManaged,
+		}},
+	}}
+
+	m.applyRepoDelete("zen-of-go")
+
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("archive should remain after unlink failure: %v", err)
+	}
+	if m.modal == nil {
+		t.Fatal("delete result modal is nil")
+	}
+	view := plain(m.modal.View(120, 30, m))
+	if !strings.Contains(view, "skipped because unlink failed") {
+		t.Fatalf("delete result missing skip message:\n%s", view)
 	}
 }
 

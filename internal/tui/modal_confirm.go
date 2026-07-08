@@ -9,11 +9,10 @@ import (
 )
 
 type confirmModal struct {
-	title       string
-	lines       []string
-	destructive bool
-	choice      int
-	apply       func(*Model)
+	title  string
+	lines  []string
+	choice int
+	apply  func(*Model)
 }
 
 func newConfirmModal(title string, lines []string, destructive bool, apply func(*Model)) modal {
@@ -21,7 +20,7 @@ func newConfirmModal(title string, lines []string, destructive bool, apply func(
 	if destructive {
 		choice = 1
 	}
-	return confirmModal{title: title, lines: lines, destructive: destructive, choice: choice, apply: apply}
+	return confirmModal{title: title, lines: lines, choice: choice, apply: apply}
 }
 
 func (c confirmModal) Title() string {

@@ -16,6 +16,7 @@ type previewModal struct {
 	path     string
 	raw      string
 	rendered bool
+	scroll   int
 }
 
 func newPreviewModal(title, skillPath string) modal {
@@ -43,11 +44,22 @@ func (p previewModal) View(width, height int, m Model) string {
 	} else {
 		mode = "raw SKILL.md"
 	}
+	bodyHeight := height - 12
+	if bodyHeight < 4 {
+		bodyHeight = 4
+	}
+	bodyLines := strings.Split(bodyText, "\n")
+	p.scroll = clampScroll(p.scroll, len(bodyLines), bodyHeight)
+	end := p.scroll + bodyHeight
+	if end > len(bodyLines) {
+		end = len(bodyLines)
+	}
+	visibleBody := strings.Join(bodyLines[p.scroll:end], "\n")
 	lines := []string{
 		accentStyle.Render(p.title),
 		p.path + "       " + mode,
 		strings.Repeat("-", 60),
-		bodyText,
+		visibleBody,
 		"",
 		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
@@ -65,6 +77,18 @@ func (p previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	}
 	if msg.String() == "r" {
 		p.rendered = !p.rendered
+		p.scroll = 0
+		m.modal = p
+		return false, nil
+	}
+	switch msg.String() {
+	case "down":
+		p.scroll++
+		m.modal = p
+	case "up":
+		if p.scroll > 0 {
+			p.scroll--
+		}
 		m.modal = p
 	}
 	return false, nil

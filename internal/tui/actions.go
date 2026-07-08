@@ -510,11 +510,19 @@ func (m *Model) openRepoDeleteModal() {
 
 func (m *Model) applyRepoDelete(name string) {
 	var lines []string
+	hasUnlinkError := false
 	for _, target := range m.repoUsageTargets(name) {
 		_, err := actions.Unlink(m.cfg, actions.UnlinkRequest{Name: target.Name, Scope: target.Scope, Target: target.Target, Confirmed: true})
 		if err != nil {
+			hasUnlinkError = true
 			lines = append(lines, "x unlink "+target.Path+": "+err.Error())
 		}
+	}
+	if hasUnlinkError {
+		lines = append(lines, "x delete "+name+": skipped because unlink failed")
+		m.reload()
+		m.modal = newResultModal("Delete Results", lines)
+		return
 	}
 	archivePath, err := repo.DeleteSkill(m.cfg, name)
 	if err != nil {

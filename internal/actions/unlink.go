@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
 )
 
 type UnlinkRequest struct {
@@ -72,8 +73,7 @@ func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
 
 func archiveResolvedSymlinkTarget(active, archived, conflictResolution string) error {
 	if _, err := os.Lstat(archived); err == nil {
-		_, err := handleExistingArchive(active, archived, false, conflictResolution)
-		return err
+		return handleExistingSymlinkArchive(active, archived, conflictResolution)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect archive destination %q: %w", archived, err)
 	}
@@ -84,6 +84,41 @@ func archiveResolvedSymlinkTarget(active, archived, conflictResolution string) e
 		return err
 	}
 	return nil
+}
+
+func handleExistingSymlinkArchive(active, archived, conflictResolution string) error {
+	activeFingerprint, err := fingerprint.Directory(active)
+	if err != nil {
+		return fmt.Errorf("fingerprint active skill %q: %w", active, err)
+	}
+	archivedFingerprint, err := fingerprint.Directory(archived)
+	if err != nil {
+		return fmt.Errorf("fingerprint archived skill %q: %w", archived, err)
+	}
+	if activeFingerprint == archivedFingerprint {
+		return nil
+	}
+
+	switch conflictResolution {
+	case ConflictResolutionKeepArchive:
+		return nil
+	case ConflictResolutionUseActive:
+		if err := os.RemoveAll(archived); err != nil {
+			return fmt.Errorf("discard archived skill %q: %w", archived, err)
+		}
+		if err := copySkillDirectory(active, archived); err != nil {
+			return err
+		}
+		return nil
+	case ConflictResolutionAsk:
+		return &ArchiveConflictError{
+			ActivePath:   active,
+			ArchivedPath: archived,
+			Summary:      directoryDiffSummary(active, archived),
+		}
+	default:
+		return fmt.Errorf("unknown conflict resolution %q", conflictResolution)
+	}
 }
 
 func copySkillDirectory(src, dst string) error {

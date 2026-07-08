@@ -1,11 +1,13 @@
 package repo
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
 func TestListRepoSkills(t *testing.T) {
@@ -100,9 +102,18 @@ func TestListRepoSkillsSkipsUnreadableSkillMetadata(t *testing.T) {
 	if err := os.MkdirAll(unreadable, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unreadableSkill := filepath.Join(unreadable, "SKILL.md")
-	if err := os.WriteFile(unreadableSkill, []byte("---\nname: unreadable\n---\n"), 0o000); err != nil {
+	if err := os.WriteFile(filepath.Join(unreadable, "SKILL.md"), []byte("---\nname: unreadable\n---\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	originalReadSkill := readSkill
+	t.Cleanup(func() {
+		readSkill = originalReadSkill
+	})
+	readSkill = func(path string) (skills.Info, error) {
+		if filepath.Base(path) == "unreadable" {
+			return skills.Info{}, fmt.Errorf("simulated unreadable metadata")
+		}
+		return originalReadSkill(path)
 	}
 
 	skills, err := List(cfg)

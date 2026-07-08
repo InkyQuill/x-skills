@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,6 +136,33 @@ func TestPreviewModalTogglesRawAndRendered(t *testing.T) {
 	raw := m.modal.View(100, 30, m)
 	if !strings.Contains(raw, "raw SKILL.md") {
 		t.Fatalf("preview missing raw marker:\n%s", raw)
+	}
+}
+
+func TestPreviewModalScrollsRawContent(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	skill := filepath.Join(cfg.MustActiveRoot("project", "agents"), "long-skill")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: long-skill\n---\n# Title\nline one\nline two\nline three\nline four\nline five\nline six\n"
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("long-skill", skill)
+
+	updated, _ := m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	before := plain(m.modal.View(100, 16, m))
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	after := plain(m.modal.View(100, 16, m))
+	if before == after {
+		t.Fatalf("down key did not scroll preview:\n%s", after)
+	}
+	if strings.Contains(after, "---\nname: long-skill") {
+		t.Fatalf("preview did not advance past first raw lines:\n%s", after)
 	}
 }
 

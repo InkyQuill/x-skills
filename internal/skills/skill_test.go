@@ -70,6 +70,26 @@ func TestReadParsesYamlFrontmatter(t *testing.T) {
 	}
 }
 
+func TestReadParsesCRLFFrontmatterWithoutCarriageReturn(t *testing.T) {
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "crlf-skill")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\r\nname: crlf-skill\r\ndescription: Uses CRLF metadata.\r\n---\r\n# Body\r\n"
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := Read(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Uses CRLF metadata." {
+		t.Fatalf("Description = %q, want CRLF-free value", info.Description)
+	}
+}
+
 func TestReadReturnsEmptyDescriptionWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	skill := filepath.Join(dir, "no-description")

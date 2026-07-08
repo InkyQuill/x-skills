@@ -77,16 +77,16 @@ func frontmatterBlock(content string) (string, bool) {
 	} else {
 		return "", false
 	}
-	for _, marker := range []string{"\n---\r\n", "\n---\n", "\r\n---\r\n", "\r\n---\n"} {
+	for _, marker := range []string{"\r\n---\r\n", "\r\n---\n", "\n---\r\n", "\n---\n"} {
 		if before, _, ok := strings.Cut(afterStart, marker); ok {
 			return before, true
 		}
 	}
-	if strings.HasSuffix(afterStart, "\n---") {
-		return strings.TrimSuffix(afterStart, "\n---"), true
-	}
 	if strings.HasSuffix(afterStart, "\r\n---") {
 		return strings.TrimSuffix(afterStart, "\r\n---"), true
+	}
+	if strings.HasSuffix(afterStart, "\n---") {
+		return strings.TrimSuffix(afterStart, "\n---"), true
 	}
 	return "", false
 }

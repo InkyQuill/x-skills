@@ -245,6 +245,39 @@ func TestUnlinkUnmanagedExternalSymlinkWithoutDeleteArchivesTarget(t *testing.T)
 	}
 }
 
+func TestUnlinkUnmanagedExternalSymlinkPreservesMatchingArchive(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	source := makeSkill(t, filepath.Join(home, "external"), "external-only", "External.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "external-only", "External.")
+	root := cfg.MustActiveRoot("project", "codex")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(root, "external-only")
+	if err := os.Symlink(source, active); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Unlink(cfg, UnlinkRequest{Name: "external-only", Scope: "project", Target: "codex", Confirmed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != ResultMigratedUnlinked {
+		t.Fatalf("Status = %q, want %q", result.Status, ResultMigratedUnlinked)
+	}
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("archive was not preserved: %v", err)
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("active link still exists or unexpected err: %v", err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("external source was touched: %v", err)
+	}
+}
+
 func TestUnlinkUnmanagedSymlinkArchivesResolvedSkillAndRemovesOnlyLink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

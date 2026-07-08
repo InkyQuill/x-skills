@@ -48,9 +48,10 @@ func (c choiceModal) View(width, height int, m Model) string {
 }
 
 func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
+	if closeOnEscapeOrQuit(msg) {
 		return true, nil
+	}
+	switch msg.String() {
 	case "up":
 		if c.index > 0 {
 			c.index--

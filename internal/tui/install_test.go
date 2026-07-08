@@ -813,6 +813,58 @@ func TestInstallArchiveOnlyAsyncConflictRefreshesStaleRowState(t *testing.T) {
 	}
 }
 
+func TestInstallArchiveOnlyAsyncConflictUpdatesOnlyMatchingDuplicateSource(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Archived help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "owner-two",
+		Repo:       "skills-two",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := remote.SearchResult{
+		Name:  "svelte-coder",
+		Owner: "owner-one",
+		Repo:  "skills-one",
+		Path:  "skills/svelte-coder",
+	}
+	second := remote.SearchResult{
+		Name:  "svelte-coder",
+		Owner: "owner-two",
+		Repo:  "skills-two",
+		Path:  "skills/svelte-coder",
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.archiveToken = 1
+	m.install.Results = []installResultView{
+		{Result: first, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: second, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+
+	updated, _ := m.Update(installArchiveMsg{
+		token:        1,
+		name:         "svelte-coder",
+		identity:     installArchiveIdentityFromResult(first),
+		archiveState: remote.ArchiveStateNameConflict,
+		err:          fmt.Errorf("archive conflict for %s", first.Name),
+	})
+	m = mustModel(t, updated)
+
+	if m.status != "archive conflict for svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateNameConflict {
+		t.Fatalf("first archive state = %q, want name conflict", got)
+	}
+	if got := m.install.Results[1].ArchiveState; got != remote.ArchiveStateArchived {
+		t.Fatalf("second archive state = %q, want archived", got)
+	}
+}
+
 func TestInstallArchiveOnlyResultOutsideInstallReloadsStateAndKeepsView(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")

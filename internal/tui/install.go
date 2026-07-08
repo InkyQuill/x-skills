@@ -55,8 +55,16 @@ type installPreviewMsg struct {
 type installArchiveMsg struct {
 	token        int
 	name         string
+	identity     installArchiveIdentity
 	archiveState string
 	err          error
+}
+
+type installArchiveIdentity struct {
+	name  string
+	owner string
+	repo  string
+	path  string
 }
 
 type installResultView struct {
@@ -198,11 +206,12 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	m.install.previewToken++
 	m.install.archiveToken++
 	token := m.install.archiveToken
+	identity := installArchiveIdentityFromResult(row.Result)
 	checkouts := m.ensureInstallCheckoutCache()
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
 		return func() tea.Msg {
-			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
 	}
 	cfg := m.cfg
@@ -212,24 +221,25 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 
 		checkout, err := checkouts.Checkout(ctx, source)
 		if err != nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
 		found, err := checkout.FindSkillContext(ctx, row.Result.Name, row.Result.Path)
 		if err != nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
 		plan, err := remote.PlanArchive(cfg, found.SkillDir, row.Result.Name, found.Metadata)
 		if err != nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
 		switch plan.State {
 		case remote.ArchiveStateNotArchived:
 		case remote.ArchiveStateArchived:
-			return installArchiveMsg{token: token, name: row.Result.Name, archiveState: plan.State}
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: plan.State}
 		case remote.ArchiveStateNameConflict:
 			return installArchiveMsg{
 				token:        token,
 				name:         row.Result.Name,
+				identity:     identity,
 				archiveState: plan.State,
 				err:          fmt.Errorf("archive conflict for %s", row.Result.Name),
 			}
@@ -237,6 +247,7 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 			return installArchiveMsg{
 				token:        token,
 				name:         row.Result.Name,
+				identity:     identity,
 				archiveState: plan.State,
 				err:          fmt.Errorf("update available for %s", row.Result.Name),
 			}
@@ -244,6 +255,7 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 			return installArchiveMsg{
 				token:        token,
 				name:         row.Result.Name,
+				identity:     identity,
 				archiveState: plan.State,
 				err:          fmt.Errorf("unknown archive state %q for %s", plan.State, row.Result.Name),
 			}
@@ -258,11 +270,11 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 		if err != nil {
 			plan, planErr := remote.PlanArchive(cfg, found.SkillDir, row.Result.Name, found.Metadata)
 			if planErr == nil {
-				return installArchiveMsg{token: token, name: row.Result.Name, archiveState: plan.State, err: err}
+				return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: plan.State, err: err}
 			}
-			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
-		return installArchiveMsg{token: token, name: row.Result.Name, archiveState: remote.ArchiveStateArchived}
+		return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateArchived}
 	}
 }
 
@@ -326,7 +338,7 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 	if msg.err != nil {
 		m.reload()
 		m.refreshInstallArchiveStates()
-		m.updateInstallArchiveState(msg.name, msg.archiveState)
+		m.updateInstallArchiveState(msg.identity, msg.archiveState)
 		m.status = msg.err.Error()
 		return
 	}
@@ -341,14 +353,23 @@ func (m *Model) refreshInstallArchiveStates() {
 	}
 }
 
-func (m *Model) updateInstallArchiveState(name, state string) {
+func (m *Model) updateInstallArchiveState(identity installArchiveIdentity, state string) {
 	if state == "" {
 		return
 	}
 	for i := range m.install.Results {
-		if m.install.Results[i].Result.Name == name {
+		if installArchiveIdentityFromResult(m.install.Results[i].Result) == identity {
 			m.install.Results[i].ArchiveState = state
 		}
+	}
+}
+
+func installArchiveIdentityFromResult(result remote.SearchResult) installArchiveIdentity {
+	return installArchiveIdentity{
+		name:  result.Name,
+		owner: result.Owner,
+		repo:  result.Repo,
+		path:  result.Path,
 	}
 }
 

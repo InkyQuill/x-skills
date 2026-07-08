@@ -705,6 +705,67 @@ func TestInstallArchiveOnlyRejectsNameConflictWithoutReplacingArchive(t *testing
 	}
 }
 
+func TestInstallArchiveOnlyRechecksStaleRowNameConflictWithoutReplacingArchive(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:        "svelte-coder",
+			Description: "Incoming help.",
+			Path:        "skills/svelte-coder",
+		},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.status != "archive conflict for svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	info, err := skills.Read(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing help." {
+		t.Fatalf("description = %q, want existing archive unchanged", info.Description)
+	}
+	meta, ok, err := remote.ReadSourceMetadata(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("source metadata missing")
+	}
+	if meta.Owner != "someone-else" || meta.SourceType != remote.SourceTypeGitHub {
+		t.Fatalf("metadata = %#v, want existing source metadata unchanged", meta)
+	}
+}
+
 func TestInstallArchiveOnlyResultOutsideInstallReloadsStateAndKeepsView(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")

@@ -217,6 +217,33 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 		if err != nil {
 			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
 		}
+		plan, err := remote.PlanArchive(cfg, found.SkillDir, row.Result.Name, found.Metadata)
+		if err != nil {
+			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+		}
+		switch plan.State {
+		case remote.ArchiveStateNotArchived:
+		case remote.ArchiveStateArchived:
+			return installArchiveMsg{token: token, name: row.Result.Name}
+		case remote.ArchiveStateNameConflict:
+			return installArchiveMsg{
+				token: token,
+				name:  row.Result.Name,
+				err:   fmt.Errorf("archive conflict for %s", row.Result.Name),
+			}
+		case remote.ArchiveStateUpdateAvailable:
+			return installArchiveMsg{
+				token: token,
+				name:  row.Result.Name,
+				err:   fmt.Errorf("update available for %s", row.Result.Name),
+			}
+		default:
+			return installArchiveMsg{
+				token: token,
+				name:  row.Result.Name,
+				err:   fmt.Errorf("unknown archive state %q for %s", plan.State, row.Result.Name),
+			}
+		}
 		_, err = remote.ApplyArchive(remote.AddRequest{
 			Config:      cfg,
 			IncomingDir: found.SkillDir,

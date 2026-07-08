@@ -21,15 +21,16 @@ const (
 )
 
 type Model struct {
-	cfg      config.Config
-	opts     Options
-	symbols  symbols
-	view     ViewName
-	width    int
-	height   int
-	cursor   int
-	selected map[ViewName]map[string]bool
-	filter   filterState
+	cfg         config.Config
+	opts        Options
+	symbols     symbols
+	view        ViewName
+	width       int
+	height      int
+	cursor      int
+	reloadToken int
+	selected    map[ViewName]map[string]bool
+	filter      filterState
 
 	active    []ActiveGroup
 	repo      []repo.Skill
@@ -39,6 +40,15 @@ type Model struct {
 	modal  modal
 	status string
 	err    error
+}
+
+type reloadResultMsg struct {
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
+	err       error
+	token     int
 }
 
 func New(cfg config.Config, opts ...Options) Model {
@@ -74,6 +84,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case reloadResultMsg:
+		m.applyReloadResult(msg)
+		return m, nil
 	default:
 		return m, nil
 	}
@@ -215,29 +228,63 @@ func resolvedSkillPath(path string) string {
 	return path
 }
 
-func (m *Model) reload() {
-	m.err = nil
-	activeSkills, err := actions.ScanActive(m.cfg, actions.ScanFilter{})
+func loadTUIData(cfg config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
+	var firstErr error
+	activeSkills, err := actions.ScanActive(cfg, actions.ScanFilter{})
 	if err != nil {
-		m.err = err
+		firstErr = err
 	}
-	m.active = groupActiveSkills(activeSkills)
-	m.repoUsage = usageByRepoName(m.active)
+	activeGroups := groupActiveSkills(activeSkills)
+	repoUsage := usageByRepoName(activeGroups)
 
-	repoSkills, err := repo.List(m.cfg)
-	if err != nil && m.err == nil {
-		m.err = err
+	repoSkills, err := repo.List(cfg)
+	if err != nil && firstErr == nil {
+		firstErr = err
 	}
-	m.repo = repoSkills
 
-	issues, err := doctor.Diagnose(m.cfg, doctor.Filter{})
-	if err != nil && m.err == nil {
-		m.err = err
+	issues, err := doctor.Diagnose(cfg, doctor.Filter{})
+	if err != nil && firstErr == nil {
+		firstErr = err
 	}
-	m.issues = issues
-	sort.Slice(m.issues, func(i, j int) bool {
-		return skillNameLess(m.issues[i].Name, m.issues[j].Name)
+	sort.Slice(issues, func(i, j int) bool {
+		return skillNameLess(issues[i].Name, issues[j].Name)
 	})
+
+	return activeGroups, repoSkills, issues, repoUsage, firstErr
+}
+
+func (m *Model) reload() {
+	m.active, m.repo, m.issues, m.repoUsage, m.err = loadTUIData(m.cfg)
+	m.clampCursor()
+}
+
+func (m *Model) reloadCmd() tea.Cmd {
+	m.reloadToken++
+	token := m.reloadToken
+	cfg := m.cfg
+
+	return func() tea.Msg {
+		active, repoSkills, issues, repoUsage, err := loadTUIData(cfg)
+		return reloadResultMsg{
+			active:    active,
+			repo:      repoSkills,
+			issues:    issues,
+			repoUsage: repoUsage,
+			err:       err,
+			token:     token,
+		}
+	}
+}
+
+func (m *Model) applyReloadResult(msg reloadResultMsg) {
+	if msg.token != m.reloadToken {
+		return
+	}
+	m.active = msg.active
+	m.repo = msg.repo
+	m.issues = msg.issues
+	m.repoUsage = msg.repoUsage
+	m.err = msg.err
 	m.clampCursor()
 }
 

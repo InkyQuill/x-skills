@@ -145,6 +145,22 @@ func TestCtrlRRefreshesWithoutTakingRepoKey(t *testing.T) {
 	}
 }
 
+func TestReloadResultIgnoresStaleToken(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reloadToken = 2
+	m.active = []ActiveGroup{{Name: "current"}}
+
+	updated, _ := m.Update(reloadResultMsg{
+		token:  1,
+		active: []ActiveGroup{{Name: "stale"}},
+	})
+	m = mustModel(t, updated)
+	if len(m.active) != 1 || m.active[0].Name != "current" {
+		t.Fatalf("stale reload result applied: %#v", m.active)
+	}
+}
+
 func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")

@@ -842,6 +842,69 @@ func TestInstallAndUseBlocksDestinationModalWhileInFlightAndCompletes(t *testing
 	}
 }
 
+func TestInstallAndUseBlocksArchiveOnlyWhileInFlightAndCompletes(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, installCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if installCmd == nil {
+		t.Fatal("install cmd is nil")
+	}
+	archiveToken := m.install.archiveToken
+
+	updated, archiveCmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if archiveCmd != nil {
+		if _, ok := archiveCmd().(installArchiveMsg); ok {
+			t.Fatal("archive-only command started while install-use was in flight")
+		}
+		t.Fatalf("archive cmd = %#v, want nil", archiveCmd)
+	}
+	if m.status != "install already running" {
+		t.Fatalf("status = %q", m.status)
+	}
+	if m.install.Message != "install already running" {
+		t.Fatalf("message = %q", m.install.Message)
+	}
+	if m.install.archiveToken != archiveToken {
+		t.Fatalf("archive token = %d, want %d", m.install.archiveToken, archiveToken)
+	}
+
+	msg := installCmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.status != "installed svelte-coder to .Ag" {
+		t.Fatalf("status = %q", m.status)
+	}
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != archive {
+		t.Fatalf("resolved = %q, want %q", resolved, archive)
+	}
+}
+
 func TestInstallAndUseStaleCommandDoesNotArchiveOrLink(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")

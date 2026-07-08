@@ -246,6 +246,11 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	if m.install.useInFlight {
+		m.status = "install already running"
+		m.install.Message = m.status
+		return nil
+	}
 	return m.archiveInstallRow(row)
 }
 

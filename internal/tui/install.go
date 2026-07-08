@@ -53,9 +53,10 @@ type installPreviewMsg struct {
 }
 
 type installArchiveMsg struct {
-	token int
-	name  string
-	err   error
+	token        int
+	name         string
+	archiveState string
+	err          error
 }
 
 type installResultView struct {
@@ -224,24 +225,27 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 		switch plan.State {
 		case remote.ArchiveStateNotArchived:
 		case remote.ArchiveStateArchived:
-			return installArchiveMsg{token: token, name: row.Result.Name}
+			return installArchiveMsg{token: token, name: row.Result.Name, archiveState: plan.State}
 		case remote.ArchiveStateNameConflict:
 			return installArchiveMsg{
-				token: token,
-				name:  row.Result.Name,
-				err:   fmt.Errorf("archive conflict for %s", row.Result.Name),
+				token:        token,
+				name:         row.Result.Name,
+				archiveState: plan.State,
+				err:          fmt.Errorf("archive conflict for %s", row.Result.Name),
 			}
 		case remote.ArchiveStateUpdateAvailable:
 			return installArchiveMsg{
-				token: token,
-				name:  row.Result.Name,
-				err:   fmt.Errorf("update available for %s", row.Result.Name),
+				token:        token,
+				name:         row.Result.Name,
+				archiveState: plan.State,
+				err:          fmt.Errorf("update available for %s", row.Result.Name),
 			}
 		default:
 			return installArchiveMsg{
-				token: token,
-				name:  row.Result.Name,
-				err:   fmt.Errorf("unknown archive state %q for %s", plan.State, row.Result.Name),
+				token:        token,
+				name:         row.Result.Name,
+				archiveState: plan.State,
+				err:          fmt.Errorf("unknown archive state %q for %s", plan.State, row.Result.Name),
 			}
 		}
 		_, err = remote.ApplyArchive(remote.AddRequest{
@@ -249,12 +253,16 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 			IncomingDir: found.SkillDir,
 			ArchiveName: row.Result.Name,
 			Metadata:    found.Metadata,
-			Conflict:    remote.ConflictReplaceArchive,
+			Conflict:    remote.ConflictArchiveOnly,
 		})
 		if err != nil {
+			plan, planErr := remote.PlanArchive(cfg, found.SkillDir, row.Result.Name, found.Metadata)
+			if planErr == nil {
+				return installArchiveMsg{token: token, name: row.Result.Name, archiveState: plan.State, err: err}
+			}
 			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
 		}
-		return installArchiveMsg{token: token, name: row.Result.Name}
+		return installArchiveMsg{token: token, name: row.Result.Name, archiveState: remote.ArchiveStateArchived}
 	}
 }
 
@@ -316,6 +324,9 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 		return
 	}
 	if msg.err != nil {
+		m.reload()
+		m.refreshInstallArchiveStates()
+		m.updateInstallArchiveState(msg.name, msg.archiveState)
 		m.status = msg.err.Error()
 		return
 	}
@@ -327,6 +338,17 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 func (m *Model) refreshInstallArchiveStates() {
 	for i := range m.install.Results {
 		m.install.Results[i].ArchiveState = m.installArchiveState(m.install.Results[i].Result)
+	}
+}
+
+func (m *Model) updateInstallArchiveState(name, state string) {
+	if state == "" {
+		return
+	}
+	for i := range m.install.Results {
+		if m.install.Results[i].Result.Name == name {
+			m.install.Results[i].ArchiveState = state
+		}
 	}
 }
 

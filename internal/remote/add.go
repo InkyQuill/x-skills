@@ -21,6 +21,7 @@ const (
 	ArchiveStateUpdateAvailable = "update available"
 	ArchiveStateNameConflict    = "name conflict"
 
+	ConflictArchiveOnly    = "archive-only"
 	ConflictReplaceArchive = "replace-archive"
 	ConflictRenameIncoming = "rename-incoming"
 	ConflictCancel         = "cancel"
@@ -92,6 +93,7 @@ func ApplyArchive(req AddRequest) (AddResult, error) {
 	switch req.Conflict {
 	case ConflictCancel:
 		return AddResult{Name: req.ArchiveName, Status: AddStatusSkipped}, nil
+	case ConflictArchiveOnly:
 	case "", ConflictReplaceArchive, ConflictRenameIncoming:
 	default:
 		return AddResult{}, fmt.Errorf("unknown archive conflict %q", req.Conflict)
@@ -100,6 +102,9 @@ func ApplyArchive(req AddRequest) (AddResult, error) {
 	archivePath, err := archiveSkillPath(req.Config, req.ArchiveName)
 	if err != nil {
 		return AddResult{}, err
+	}
+	if req.Conflict == ConflictArchiveOnly {
+		return applyArchiveOnly(req, archivePath)
 	}
 	existed, err := pathExists(archivePath)
 	if err != nil {
@@ -130,6 +135,68 @@ func ApplyArchive(req AddRequest) (AddResult, error) {
 		status = AddStatusUpdated
 	}
 	return AddResult{Name: req.ArchiveName, Path: archivePath, Status: status}, nil
+}
+
+func applyArchiveOnly(req AddRequest, archivePath string) (AddResult, error) {
+	plan, err := PlanArchive(req.Config, req.IncomingDir, req.ArchiveName, req.Metadata)
+	if err != nil {
+		return AddResult{}, err
+	}
+	switch plan.State {
+	case ArchiveStateNotArchived:
+	case ArchiveStateArchived:
+		return AddResult{Name: req.ArchiveName, Path: archivePath, Status: AddStatusSkipped}, nil
+	case ArchiveStateNameConflict:
+		return AddResult{}, fmt.Errorf("archive conflict for %s", req.ArchiveName)
+	case ArchiveStateUpdateAvailable:
+		return AddResult{}, fmt.Errorf("update available for %s", req.ArchiveName)
+	default:
+		return AddResult{}, fmt.Errorf("unknown archive state %q for %s", plan.State, req.ArchiveName)
+	}
+
+	root := req.Config.ArchiveSkillsRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return AddResult{}, fmt.Errorf("create archive root: %w", err)
+	}
+	if err := os.Mkdir(archivePath, 0o755); err != nil {
+		if os.IsExist(err) {
+			return archiveOnlyConflictError(req)
+		}
+		return AddResult{}, fmt.Errorf("create archive destination: %w", err)
+	}
+	cleanupArchive := true
+	defer func() {
+		if cleanupArchive {
+			_ = os.RemoveAll(archivePath)
+		}
+	}()
+
+	if err := copyDir(req.IncomingDir, archivePath); err != nil {
+		return AddResult{}, err
+	}
+	if err := WriteSourceMetadata(archivePath, req.Metadata); err != nil {
+		return AddResult{}, err
+	}
+
+	cleanupArchive = false
+	return AddResult{Name: req.ArchiveName, Path: archivePath, Status: AddStatusArchived}, nil
+}
+
+func archiveOnlyConflictError(req AddRequest) (AddResult, error) {
+	plan, err := PlanArchive(req.Config, req.IncomingDir, req.ArchiveName, req.Metadata)
+	if err != nil {
+		return AddResult{}, err
+	}
+	switch plan.State {
+	case ArchiveStateArchived:
+		return AddResult{Name: req.ArchiveName, Path: plan.ArchivePath, Status: AddStatusSkipped}, nil
+	case ArchiveStateNameConflict:
+		return AddResult{}, fmt.Errorf("archive conflict for %s", req.ArchiveName)
+	case ArchiveStateUpdateAvailable:
+		return AddResult{}, fmt.Errorf("update available for %s", req.ArchiveName)
+	default:
+		return AddResult{}, fmt.Errorf("archive destination already exists: %s", req.ArchiveName)
+	}
 }
 
 func archiveSkillPath(cfg config.Config, name string) (string, error) {

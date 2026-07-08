@@ -13,7 +13,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
-func TestApplyArchiveOnlyCopiesSkillAndWritesMetadata(t *testing.T) {
+func TestApplyArchiveOnlyGuardCopiesSkillAndWritesMetadata(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	incoming := writeIncomingSkill(t, "svelte-coder", "Svelte help.")
 	meta := SourceMetadata{
@@ -31,7 +31,7 @@ func TestApplyArchiveOnlyCopiesSkillAndWritesMetadata(t *testing.T) {
 		IncomingDir: incoming,
 		ArchiveName: "svelte-coder",
 		Metadata:    meta,
-		Conflict:    ConflictReplaceArchive,
+		Conflict:    ConflictArchiveOnly,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +48,92 @@ func TestApplyArchiveOnlyCopiesSkillAndWritesMetadata(t *testing.T) {
 	}
 	if _, ok, err := ReadSourceMetadata(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil || !ok {
 		t.Fatalf("source metadata missing: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestApplyArchiveOnlyGuardRejectsNameConflictWithoutReplacingArchive(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Existing help.")
+	if err := WriteSourceMetadata(archive, SourceMetadata{
+		SourceType: SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	incoming := writeIncomingSkill(t, "svelte-coder", "Incoming help.")
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata: SourceMetadata{
+			SourceType: SourceTypeGitHub,
+			Owner:      "vercel-labs",
+			Repo:       "skills",
+			SkillPath:  "skills/svelte-coder",
+		},
+		Conflict: ConflictArchiveOnly,
+	})
+	if err == nil {
+		t.Fatal("expected archive conflict error")
+	}
+	if !strings.Contains(err.Error(), "archive conflict for svelte-coder") {
+		t.Fatalf("error = %q", err)
+	}
+	info, err := skills.Read(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing help." {
+		t.Fatalf("description = %q, want existing archive unchanged", info.Description)
+	}
+	meta, ok, err := ReadSourceMetadata(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("source metadata missing")
+	}
+	if meta.Owner != "someone-else" {
+		t.Fatalf("metadata = %#v, want existing source metadata unchanged", meta)
+	}
+}
+
+func TestApplyArchiveOnlyGuardRejectsUpdateAvailableWithoutReplacingArchive(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Existing help.")
+	meta := SourceMetadata{
+		SourceType: SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}
+	if err := WriteSourceMetadata(archive, meta); err != nil {
+		t.Fatal(err)
+	}
+	incoming := writeIncomingSkill(t, "svelte-coder", "Incoming help.")
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    meta,
+		Conflict:    ConflictArchiveOnly,
+	})
+	if err == nil {
+		t.Fatal("expected update available error")
+	}
+	if !strings.Contains(err.Error(), "update available for svelte-coder") {
+		t.Fatalf("error = %q", err)
+	}
+	info, err := skills.Read(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing help." {
+		t.Fatalf("description = %q, want existing archive unchanged", info.Description)
 	}
 }
 

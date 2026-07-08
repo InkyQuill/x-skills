@@ -298,11 +298,7 @@ func hashContentFingerprintEntry(hash io.Writer, root string, entry contentFinge
 	mode := entry.info.Type()
 	switch {
 	case mode&os.ModeSymlink != 0:
-		target, err := os.Readlink(filepath.Join(root, filepath.FromSlash(entry.path)))
-		if err != nil {
-			return fmt.Errorf("read symlink %q: %w", entry.path, err)
-		}
-		writeContentFingerprint(hash, "symlink", entry.path, target)
+		return fmt.Errorf("unsupported file type in archive content: %s", entry.path)
 	case entry.info.IsDir():
 		writeContentFingerprint(hash, "dir", entry.path, "")
 	default:

@@ -334,6 +334,25 @@ func TestArchiveContentFingerprintRejectsSpecialFiles(t *testing.T) {
 	}
 }
 
+func TestArchiveContentFingerprintRejectsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("target"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "link.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err := archiveContentFingerprint(dir)
+	if err == nil {
+		t.Fatal("expected symlink error")
+	}
+	if !strings.Contains(err.Error(), "unsupported file type in archive content: link.txt") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func writeIncomingSkill(t *testing.T, name, desc string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -30,6 +32,7 @@ type installState struct {
 	searchToken  int
 	searchClient remote.SearchClient
 	checkouts    *remote.CheckoutCache
+	testCloneURL string
 }
 
 type installSearchResultMsg struct {
@@ -37,6 +40,12 @@ type installSearchResultMsg struct {
 	query   string
 	results []remote.SearchResult
 	err     error
+}
+
+type installPreviewMsg struct {
+	name string
+	path string
+	err  error
 }
 
 type installResultView struct {
@@ -110,6 +119,47 @@ func trimLastRune(value string) string {
 		return ""
 	}
 	return string(runes[:len(runes)-1])
+}
+
+func (m Model) selectedInstallResult() (installResultView, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.install.Results) {
+		return installResultView{}, false
+	}
+	return m.install.Results[m.cursor], true
+}
+
+func (m Model) previewInstallResult() tea.Cmd {
+	row, ok := m.selectedInstallResult()
+	if !ok {
+		return nil
+	}
+	checkouts := m.install.checkouts
+	if checkouts == nil {
+		checkouts = remote.NewCheckoutCache(filepath.Join(os.TempDir(), "x-skills-tui-checkouts"))
+	}
+	source := m.gitSourceForInstall(row.Result)
+	return func() tea.Msg {
+		checkout, err := checkouts.Checkout(context.Background(), source)
+		if err != nil {
+			return installPreviewMsg{name: row.Result.Name, err: err}
+		}
+		found, err := checkout.FindSkill(row.Result.Name, row.Result.Path)
+		if err != nil {
+			return installPreviewMsg{name: row.Result.Name, err: err}
+		}
+		return installPreviewMsg{name: row.Result.Name, path: found.SkillDir}
+	}
+}
+
+func (m Model) gitSourceForInstall(result remote.SearchResult) remote.GitSource {
+	if m.install.testCloneURL != "" {
+		return remote.GitSource{CloneURL: m.install.testCloneURL}
+	}
+	return remote.GitSource{
+		Owner:    result.Owner,
+		Repo:     result.Repo,
+		CloneURL: "https://github.com/" + result.Owner + "/" + result.Repo + ".git",
+	}
 }
 
 func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {

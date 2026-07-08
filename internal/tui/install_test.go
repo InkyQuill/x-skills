@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -250,6 +253,34 @@ func TestInstallSearchZeroResultsUpdatesMessage(t *testing.T) {
 	}
 }
 
+func TestInstallEnterPreviewsRemoteSkill(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Description: "Svelte help.", Owner: "", Repo: "", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	msg := cmd().(installPreviewMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("preview modal is nil")
+	}
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "Preview: svelte-coder") || !strings.Contains(view, "Svelte help.") {
+		t.Fatalf("preview missing remote content:\n%s", view)
+	}
+}
+
 func TestInstallInputCtrlCQuits(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)
@@ -273,4 +304,41 @@ func testSearchServer(t *testing.T, results []remote.SearchResult) string {
 	}))
 	t.Cleanup(server.Close)
 	return server.URL
+}
+
+func makeTUITestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runTUITestGit(t, dir, "init")
+	runTUITestGit(t, dir, "config", "user.email", "test@example.com")
+	runTUITestGit(t, dir, "config", "user.name", "Test")
+	return dir
+}
+
+func writeTUITestRemoteSkill(t *testing.T, root, rel, name, desc string) {
+	t.Helper()
+	dir := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := "---\nname: " + name + "\ndescription: " + desc + "\n---\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func gitTUITestCommit(t *testing.T, repo, msg string) {
+	t.Helper()
+	runTUITestGit(t, repo, "add", ".")
+	runTUITestGit(t, repo, "commit", "-m", msg)
+}
+
+func runTUITestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
 }

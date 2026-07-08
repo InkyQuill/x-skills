@@ -93,6 +93,9 @@ type installArchiveMsg struct {
 type installUseMsg struct {
 	token        int
 	name         string
+	row          installResultView
+	identity     installArchiveIdentity
+	archiveState string
 	destinations []installDestination
 	stale        bool
 	err          error
@@ -577,6 +580,16 @@ func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) {
 		if chosen == actions.ConflictResolutionUseActive {
 			return current.applyInstallArchiveWithConflict(row, row.Result.Name, remote.ConflictReplaceArchive)
 		}
+		if pending := current.install.pendingUse; pending != nil && installArchiveIdentityFromResult(pending.row.Result) == installArchiveIdentityFromResult(row.Result) {
+			row := pending.row
+			row.ArchiveState = remote.ArchiveStateArchived
+			current.install.pendingUse = nil
+			current.install.bumpUseToken()
+			current.modal = newInstallDestinationModalUsingExistingArchive(row)
+			current.status = "kept archive " + row.Result.Name + "; choose destinations"
+			current.install.Message = current.status
+			return nil
+		}
 		current.status = "kept archive " + row.Result.Name
 		current.install.Message = current.status
 		current.install.pendingUse = nil
@@ -602,7 +615,7 @@ func (m *Model) applyInstallArchiveWithConflict(row installResultView, archiveNa
 	return cmd
 }
 
-func (m *Model) installAndUse(row installResultView, destinations []installDestination) tea.Cmd {
+func (m *Model) installAndUse(row installResultView, destinations []installDestination, useExistingArchive bool) tea.Cmd {
 	if len(destinations) == 0 {
 		m.status = "select at least one destination"
 		m.install.Message = m.status
@@ -624,9 +637,12 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		return nil
 	}
 	token := m.install.bumpUseToken()
-	archiveCmd := m.archiveInstallRow(row)
-	if archiveCmd == nil {
-		return nil
+	var archiveCmd tea.Cmd
+	if !useExistingArchive {
+		archiveCmd = m.archiveInstallRow(row)
+		if archiveCmd == nil {
+			return nil
+		}
 	}
 	m.install.useInFlight = true
 	m.install.useInFlightToken = token
@@ -636,9 +652,19 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		if !useGeneration.isCurrent(token) {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
-		archiveMsg := archiveCmd().(installArchiveMsg)
-		if archiveMsg.err != nil {
-			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: archiveMsg.err}
+		if archiveCmd != nil {
+			archiveMsg := archiveCmd().(installArchiveMsg)
+			if archiveMsg.err != nil {
+				return installUseMsg{
+					token:        token,
+					name:         row.Result.Name,
+					row:          row,
+					identity:     archiveMsg.identity,
+					archiveState: archiveMsg.archiveState,
+					destinations: destinations,
+					err:          archiveMsg.err,
+				}
+			}
 		}
 		if !useGeneration.isCurrent(token) {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
@@ -722,14 +748,23 @@ type installDestination struct {
 }
 
 type installDestinationModal struct {
-	name         string
-	row          installResultView
-	destinations []installDestination
-	cursor       int
+	name               string
+	row                installResultView
+	destinations       []installDestination
+	cursor             int
+	useExistingArchive bool
 }
 
 func newInstallDestinationModal(row installResultView) modal {
-	return installDestinationModal{name: row.Result.Name, row: row, destinations: []installDestination{
+	return newInstallDestinationModalWithArchiveMode(row, false)
+}
+
+func newInstallDestinationModalUsingExistingArchive(row installResultView) modal {
+	return newInstallDestinationModalWithArchiveMode(row, true)
+}
+
+func newInstallDestinationModalWithArchiveMode(row installResultView, useExistingArchive bool) modal {
+	return installDestinationModal{name: row.Result.Name, row: row, useExistingArchive: useExistingArchive, destinations: []installDestination{
 		{Scope: config.ScopeProject, Target: config.TargetAgents, Label: ".Ag", Checked: true},
 		{Scope: config.ScopeProject, Target: config.TargetClaude, Label: ".Cl"},
 		{Scope: config.ScopeProject, Target: config.TargetCodex, Label: ".Cd"},
@@ -814,7 +849,7 @@ func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd
 		}
 		m.status = "installing " + d.name + "..."
 		m.install.Message = m.status
-		return true, m.installAndUse(d.row, destinations)
+		return true, m.installAndUse(d.row, destinations, d.useExistingArchive)
 	}
 	return false, nil
 }
@@ -924,29 +959,74 @@ func (m Model) pendingInstallUseMatches(identity installArchiveIdentity) bool {
 	return m.install.pendingUse != nil && installArchiveIdentityFromResult(m.install.pendingUse.row.Result) == identity
 }
 
-func (m *Model) applyInstallUseResult(msg installUseMsg) {
+func (m *Model) clearPendingInstallUseOnModalClose(closed modal) {
+	if m.install.pendingUse == nil || !installModalClosesPendingUse(closed) {
+		return
+	}
+	m.install.pendingUse = nil
+}
+
+func installModalClosesPendingUse(closed modal) bool {
+	switch modal := closed.(type) {
+	case choiceModal:
+		return strings.HasPrefix(modal.title, "Name conflict: ")
+	case conflictDiffModal:
+		return modal.incomingLabel == "Incoming remote"
+	case textModal:
+		return modal.title == "Rename existing archive" || modal.title == "Rename incoming archive"
+	default:
+		return false
+	}
+}
+
+func (m *Model) applyInstallUseResult(msg installUseMsg) tea.Cmd {
 	if msg.token != 0 && msg.token == m.install.useInFlightToken {
 		m.install.useInFlight = false
 		m.install.useInFlightToken = 0
 	}
 	if msg.token == 0 || msg.token != m.install.useToken {
-		return
+		return nil
 	}
 	if msg.stale {
-		return
+		return nil
 	}
 	if msg.err != nil {
 		m.reload()
 		m.refreshInstallArchiveStates()
+		m.updateInstallArchiveState(msg.identity, msg.archiveState)
 		m.status = msg.err.Error()
 		m.install.Message = m.status
-		return
+		return m.openInstallUseArchiveResolution(msg)
 	}
 	m.reload()
 	m.refreshInstallArchiveStates()
 	m.modal = nil
 	m.status = "installed " + msg.name + " to " + installDestinationLabels(msg.destinations)
 	m.install.Message = m.status
+	return nil
+}
+
+func (m *Model) openInstallUseArchiveResolution(msg installUseMsg) tea.Cmd {
+	switch msg.archiveState {
+	case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
+	default:
+		return nil
+	}
+	row := msg.row
+	if row.Result.Name == "" {
+		return nil
+	}
+	row.ArchiveState = msg.archiveState
+	m.install.pendingUse = &pendingInstallUseIntent{row: row}
+	switch msg.archiveState {
+	case remote.ArchiveStateNameConflict:
+		m.openInstallNameConflictModal(row)
+		return nil
+	case remote.ArchiveStateUpdateAvailable:
+		return m.openInstallUpdateDiff(row)
+	default:
+		return nil
+	}
 }
 
 func installDestinationLabels(destinations []installDestination) string {

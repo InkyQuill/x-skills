@@ -111,8 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyInstallArchiveResult(msg)
 		return m, nil
 	case installUseMsg:
-		m.applyInstallUseResult(msg)
-		return m, nil
+		return m, m.applyInstallUseResult(msg)
 	default:
 		return m, nil
 	}
@@ -124,8 +123,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.modal != nil {
+		closedModal := m.modal
 		close, cmd := m.modal.Update(msg, &m)
 		if close {
+			m.clearPendingInstallUseOnModalClose(closedModal)
 			m.modal = nil
 		}
 		return m, cmd

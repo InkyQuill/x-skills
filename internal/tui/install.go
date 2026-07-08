@@ -68,6 +68,8 @@ func (m *Model) startInstallSearch() tea.Cmd {
 	if len([]rune(strings.TrimSpace(m.install.Query))) < 2 {
 		m.install.Searching = false
 		m.install.Message = "type at least 2 characters"
+		m.install.Results = nil
+		m.status = m.install.Message
 		return nil
 	}
 	m.install.Searching = true

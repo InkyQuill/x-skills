@@ -184,6 +184,47 @@ func TestInstallSearchShortQueryInvalidatesPendingResult(t *testing.T) {
 	}
 }
 
+func TestInstallSearchShortQueryClearsPreviousResults(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 100
+	m.height = 30
+	m.install.searchToken = 1
+
+	updated, _ := m.Update(installSearchResultMsg{
+		token: 1,
+		query: "svelte",
+		results: []remote.SearchResult{
+			{Name: "svelte-coder", Description: "Svelte help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder", Installs: 812},
+		},
+	})
+	m = mustModel(t, updated)
+	if len(m.install.Results) != 1 {
+		t.Fatalf("results after success = %#v", m.install.Results)
+	}
+
+	m.install.InputMode = installInputQuery
+	m.install.Query = "x"
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("short query command = %#v, want nil", cmd)
+	}
+	if len(m.install.Results) != 0 {
+		t.Fatalf("results after short query = %#v", m.install.Results)
+	}
+	if m.status != "type at least 2 characters" {
+		t.Fatalf("status = %q", m.status)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "type at least 2 characters") {
+		t.Fatalf("install view missing short-query message:\n%s", view)
+	}
+	if strings.Contains(view, "svelte-coder") {
+		t.Fatalf("install view shows stale result after short query:\n%s", view)
+	}
+}
+
 func TestInstallSearchZeroResultsUpdatesMessage(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.install.searchClient = remote.NewSearchClient(testSearchServer(t, nil), http.DefaultClient)

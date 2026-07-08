@@ -702,6 +702,45 @@ func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseIgnoresStaleSuccess(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{
+		{
+			Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+			ArchiveState: remote.ArchiveStateArchived,
+		},
+		{
+			Result:       remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"},
+			ArchiveState: remote.ArchiveStateArchived,
+		},
+	}
+	m.install.useToken = 2
+	m.modal = newInstallDestinationModal(m.install.Results[1])
+	m.status = "new install pending"
+	m.install.Message = "new install pending"
+
+	updated, _ := m.Update(installUseMsg{
+		token: 1,
+		name:  "svelte-coder",
+		destinations: []installDestination{
+			{Scope: config.ScopeProject, Target: config.TargetAgents, Label: ".Ag"},
+		},
+	})
+	m = mustModel(t, updated)
+
+	if m.modal == nil {
+		t.Fatal("stale install-use success closed newer modal")
+	}
+	if m.status != "new install pending" {
+		t.Fatalf("status = %q, want newer status preserved", m.status)
+	}
+	if m.install.Message != "new install pending" {
+		t.Fatalf("message = %q, want newer message preserved", m.install.Message)
+	}
+}
+
 func TestInstallDestinationChecklistNavigationAndToggle(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)
@@ -791,6 +830,48 @@ func TestInstallAndUseLinkErrorKeepsModalAndShowsStatus(t *testing.T) {
 	}
 	if !strings.Contains(m.status, "destination exists") {
 		t.Fatalf("status = %q, want link error", m.status)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallAndUsePreflightsAllDestinationsBeforeLinking(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "svelte-coder", "Existing active.")
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf(".Ag link was created before .Cl preflight failure: %v", err)
+	}
+	if !strings.Contains(m.status, "destination exists") || !strings.Contains(m.status, ".claude") {
+		t.Fatalf("status = %q, want existing .Cl destination", m.status)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
 		t.Fatal(err)

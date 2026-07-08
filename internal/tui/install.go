@@ -35,6 +35,7 @@ type installState struct {
 	searchToken  int
 	previewToken int
 	archiveToken int
+	useToken     int
 	searchClient remote.SearchClient
 	checkouts    *remote.CheckoutCache
 	testCloneURL string
@@ -63,6 +64,7 @@ type installArchiveMsg struct {
 }
 
 type installUseMsg struct {
+	token        int
 	name         string
 	destinations []installDestination
 	err          error
@@ -296,6 +298,8 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		m.install.Message = m.status
 		return nil
 	}
+	m.install.useToken++
+	token := m.install.useToken
 	archiveCmd := m.archiveInstallRow(row)
 	if archiveCmd == nil {
 		return nil
@@ -304,16 +308,35 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	return func() tea.Msg {
 		archiveMsg := archiveCmd().(installArchiveMsg)
 		if archiveMsg.err != nil {
-			return installUseMsg{name: row.Result.Name, destinations: destinations, err: archiveMsg.err}
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: archiveMsg.err}
+		}
+		if err := preflightInstallUseDestinations(cfg, row.Result.Name, destinations); err != nil {
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 		}
 		for _, dest := range destinations {
 			_, err := actions.Link(cfg, actions.LinkRequest{Name: row.Result.Name, Scope: dest.Scope, Target: dest.Target})
 			if err != nil {
-				return installUseMsg{name: row.Result.Name, destinations: destinations, err: err}
+				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 			}
 		}
-		return installUseMsg{name: row.Result.Name, destinations: destinations}
+		return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
 	}
+}
+
+func preflightInstallUseDestinations(cfg config.Config, name string, destinations []installDestination) error {
+	for _, dest := range destinations {
+		root, err := cfg.ActiveRoot(dest.Scope, dest.Target)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(root, name)
+		if _, err := os.Lstat(destination); err == nil {
+			return fmt.Errorf("destination exists: %s", destination)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect destination %q: %w", destination, err)
+		}
+	}
+	return nil
 }
 
 type installDestination struct {
@@ -478,6 +501,9 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 }
 
 func (m *Model) applyInstallUseResult(msg installUseMsg) {
+	if msg.token == 0 || msg.token != m.install.useToken {
+		return
+	}
 	if msg.err != nil {
 		m.reload()
 		m.refreshInstallArchiveStates()

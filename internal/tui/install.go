@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -88,6 +89,8 @@ const (
 	installPreviewTimeout = 60 * time.Second
 	installArchiveTimeout = 60 * time.Second
 )
+
+var installUseLink = actions.Link
 
 func newInstallState() installState {
 	return installState{
@@ -313,14 +316,44 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		if err := preflightInstallUseDestinations(cfg, row.Result.Name, destinations); err != nil {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 		}
+		createdPaths := make([]string, 0, len(destinations))
 		for _, dest := range destinations {
-			_, err := actions.Link(cfg, actions.LinkRequest{Name: row.Result.Name, Scope: dest.Scope, Target: dest.Target})
+			result, err := installUseLink(cfg, actions.LinkRequest{Name: row.Result.Name, Scope: dest.Scope, Target: dest.Target})
 			if err != nil {
+				if rollbackErr := rollbackInstallUseLinks(createdPaths); rollbackErr != nil {
+					err = errors.Join(err, fmt.Errorf("rollback partial install-use links: %w", rollbackErr))
+				}
 				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
+			}
+			if result.Path != "" {
+				createdPaths = append(createdPaths, result.Path)
 			}
 		}
 		return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
 	}
+}
+
+func rollbackInstallUseLinks(paths []string) error {
+	var errs []error
+	for i := len(paths) - 1; i >= 0; i-- {
+		path := paths[i]
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("inspect rollback path %q: %w", path, err))
+			continue
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			errs = append(errs, fmt.Errorf("rollback path is not a symlink: %s", path))
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			errs = append(errs, fmt.Errorf("remove rollback path %q: %w", path, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func preflightInstallUseDestinations(cfg config.Config, name string, destinations []installDestination) error {
@@ -422,7 +455,9 @@ func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd
 			m.modal = d
 			return false, nil
 		}
-		return false, m.installAndUse(d.row, destinations)
+		m.status = "installing " + d.name + "..."
+		m.install.Message = m.status
+		return true, m.installAndUse(d.row, destinations)
 	}
 	return false, nil
 }

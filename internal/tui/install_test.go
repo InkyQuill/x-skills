@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/skills"
@@ -702,6 +703,48 @@ func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseEnterClosesDestinationModalBeforeCommand(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	if m.modal != nil {
+		t.Fatal("destination modal remained active after submit")
+	}
+
+	updated, duplicateCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if duplicateCmd != nil {
+		if _, ok := duplicateCmd().(installUseMsg); ok {
+			t.Fatal("duplicate enter submitted install-use again")
+		}
+	}
+
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.status != "installed svelte-coder to .Ag" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
 func TestInstallAndUseIgnoresStaleSuccess(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)
@@ -853,7 +896,7 @@ func TestInstallAndUseRequiresDestination(t *testing.T) {
 	}
 }
 
-func TestInstallAndUseLinkErrorKeepsModalAndShowsStatus(t *testing.T) {
+func TestInstallAndUseLinkErrorClosesModalAndShowsStatus(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
 	gitTUITestCommit(t, repoDir, "initial")
@@ -880,14 +923,72 @@ func TestInstallAndUseLinkErrorKeepsModalAndShowsStatus(t *testing.T) {
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
-	if m.modal == nil {
-		t.Fatal("modal closed after link error")
+	if m.modal != nil {
+		t.Fatal("modal reopened after link error")
 	}
 	if !strings.Contains(m.status, "destination exists") {
 		t.Fatalf("status = %q, want link error", m.status)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstallAndUseRollsBackPartialLinksAfterLateFailure(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+
+	originalLink := installUseLink
+	calls := 0
+	installUseLink = func(cfg config.Config, req actions.LinkRequest) (actions.MutationResult, error) {
+		calls++
+		if calls == 2 {
+			return actions.MutationResult{}, errors.New("late link failure")
+		}
+		return originalLink(cfg, req)
+	}
+	t.Cleanup(func() {
+		installUseLink = originalLink
+	})
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if calls != 2 {
+		t.Fatalf("link calls = %d, want 2", calls)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf(".Ag link remains after rollback: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf(".Cl link exists after failed link: %v", err)
+	}
+	if m.status != "late link failure" {
+		t.Fatalf("status = %q", m.status)
 	}
 }
 

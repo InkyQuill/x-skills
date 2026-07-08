@@ -395,6 +395,42 @@ func TestInstallPreviewIgnoresResultAfterLeavingAndReturning(t *testing.T) {
 	}
 }
 
+func TestInstallPreviewIgnoresResultAfterNewSearch(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.searchClient = remote.NewSearchClient(testSearchServer(t, []remote.SearchResult{
+		{Name: "react-coder", Description: "React help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/react-coder"},
+	}), http.DefaultClient)
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Description: "Svelte help.", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	m.install.InputMode = installInputQuery
+	m.install.Query = "react"
+	updated, searchCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	searchMsg := searchCmd().(installSearchResultMsg)
+	updated, _ = m.Update(searchMsg)
+	m = mustModel(t, updated)
+
+	previewMsg := previewCmd().(installPreviewMsg)
+	updated, _ = m.Update(previewMsg)
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("preview modal opened after new search")
+	}
+}
+
 func TestInstallInputCtrlCQuits(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

@@ -57,7 +57,10 @@ type installResultView struct {
 	AuditPill    string
 }
 
-const installPreviewTimeout = 60 * time.Second
+const (
+	installSearchTimeout  = 30 * time.Second
+	installPreviewTimeout = 60 * time.Second
+)
 
 func newInstallState() installState {
 	return installState{
@@ -72,13 +75,17 @@ func (m Model) runInstallSearch() tea.Cmd {
 	owner := m.install.Owner
 	client := m.install.searchClient
 	return func() tea.Msg {
-		results, err := client.Search(context.Background(), remote.SearchRequest{Query: query, Owner: owner, Limit: remote.DefaultSearchLimit})
+		ctx, cancel := context.WithTimeout(context.Background(), installSearchTimeout)
+		defer cancel()
+
+		results, err := client.Search(ctx, remote.SearchRequest{Query: query, Owner: owner, Limit: remote.DefaultSearchLimit})
 		return installSearchResultMsg{token: token, query: query, results: results, err: err}
 	}
 }
 
 func (m *Model) startInstallSearch() tea.Cmd {
 	m.install.searchToken++
+	m.install.previewToken++
 	if len([]rune(strings.TrimSpace(m.install.Query))) < 2 {
 		m.install.Searching = false
 		m.install.Message = "type at least 2 characters"

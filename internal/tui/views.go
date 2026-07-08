@@ -102,6 +102,9 @@ func renderInspector(m Model, width, height int) string {
 		if m.cursor >= 0 && m.cursor < len(groups) {
 			group := groups[m.cursor]
 			lines = append(lines, "◇ "+group.Name, "aliases", "  "+strings.Join(group.Aliases, ", "), "repo", "  "+group.Status)
+			if group.Status == actions.StatusBroken && group.Reason != "" {
+				lines = append(lines, "reason", "  "+group.Reason)
+			}
 		}
 	case ViewRepo:
 		skills := m.visibleRepoSkills()

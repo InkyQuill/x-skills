@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
 )
@@ -20,6 +21,28 @@ func TestWideShellRendersListInspectorStatusAndFooter(t *testing.T) {
 	for _, want := range []string{"A:Active", "R:Repo", "D:Doctor", "Active skills", "Inspector", "zen-of-go", "relinked zen-of-go", "^R refresh"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("wide shell missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestActiveInspectorShowsBrokenReason(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.width = 120
+	m.height = 30
+	m.active = []ActiveGroup{
+		{
+			ID:     "active:broken-skill",
+			Name:   "broken-skill",
+			Status: actions.StatusBroken,
+			Reason: "symlink target missing",
+		},
+	}
+
+	view := plain(m.View())
+	for _, want := range []string{"Inspector", "broken-skill", "reason", "symlink target missing"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("active inspector missing %q:\n%s", want, view)
 		}
 	}
 }

@@ -97,7 +97,7 @@ Top-level views use one global uppercase tab schema:
 - `A`: Active
 - `R`: Repo
 - `D`: Doctor
-- `I`: Install, reserved for the planned Install view
+- `I`: Install, specced separately in the Install And Repo Updates design
 
 Lowercase action keys remain view-specific. Refresh is global `ctrl+r` so `R`
 can consistently mean Repo navigation.
@@ -430,10 +430,11 @@ Main shell:
 | `A` | switch Active | switch Active | switch Active |
 | `R` | switch Repo | switch Repo | switch Repo |
 | `D` | switch Doctor | switch Doctor | switch Doctor |
-| `I` | reserved for Install | reserved for Install | reserved for Install |
+| `I` | switch Install (see Install And Repo Updates design) | switch Install | switch Install |
 | `enter` | details | details | details |
 | `/` | filter | filter | no filter in parity |
 | `space` | toggle selection | toggle selection | no selection in parity |
+| `c` | clear selection | clear selection | none |
 | `p` | preview | preview | none |
 | `m` | migrate | none | none |
 | `u` | unlink | unlink usages | none |

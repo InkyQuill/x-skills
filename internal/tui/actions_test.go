@@ -95,9 +95,13 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 	}
 
 	m := New(cfg)
-	m.selected = map[string]bool{}
+	m.selected = map[ViewName]map[string]bool{
+		ViewActive: {},
+		ViewRepo:   {},
+		ViewDoctor: {},
+	}
 	for _, group := range m.active {
-		m.selected[group.ID] = true
+		m.selected[ViewActive][group.ID] = true
 	}
 	updated, _ := m.Update(keyRunes("u"))
 	m = mustModel(t, updated)
@@ -348,6 +352,39 @@ func TestRepoLinkModalCanChangeDestination(t *testing.T) {
 	}
 }
 
+func TestRepoLinkUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "  target-skill") || strings.Contains(view, "  alpha-skill") {
+		t.Fatalf("link modal should target selected repo row, not cursor:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "target-skill")); err != nil {
+		t.Fatalf("selected repo skill was not linked: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "alpha-skill")); !os.IsNotExist(err) {
+		t.Fatalf("cursor repo skill should not be linked, err=%v", err)
+	}
+}
+
 func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -394,6 +431,51 @@ func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
 	}
 }
 
+func TestRepoUnlinkUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	alphaArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alphaUsage := filepath.Join(root, "alpha-skill")
+	targetUsage := filepath.Join(root, "target-skill")
+	if err := os.Symlink(alphaArchive, alphaUsage); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetArchive, targetUsage); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	if !strings.Contains(view, "Unlink usages: target-skill") || strings.Contains(view, "alpha-skill") {
+		t.Fatalf("unlink modal should target selected repo row, not cursor:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(targetUsage); !os.IsNotExist(err) {
+		t.Fatalf("selected repo usage still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(alphaUsage); err != nil {
+		t.Fatalf("cursor repo usage should remain: %v", err)
+	}
+}
+
 func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -417,6 +499,128 @@ func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("delete modal missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestRepoDeleteUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	alphaArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	if !strings.Contains(view, "Delete archive: target-skill") || strings.Contains(view, "Delete archive: alpha-skill") {
+		t.Fatalf("delete modal should target selected repo row, not cursor:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Stat(targetArchive); !os.IsNotExist(err) {
+		t.Fatalf("selected repo archive still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Stat(alphaArchive); err != nil {
+		t.Fatalf("cursor repo archive should remain: %v", err)
+	}
+}
+
+func TestRepoDeleteMultiSelectedNoVisibleUsagesUsesPluralDirectCopy(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	for _, want := range []string{
+		"Delete archives: 2 selected repo skills",
+		"Selected archives",
+		"alpha-skill",
+		"target-skill",
+		"No visible usages in the current working set.",
+		"Delete archives",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("batch delete modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "This archive is used in the current working set.") {
+		t.Fatalf("batch delete without usages should not show usage warning:\n%s", view)
+	}
+	if strings.Contains(view, "Unlink visible usages, then delete") {
+		t.Fatalf("batch delete without usages should use direct delete action:\n%s", view)
+	}
+}
+
+func TestRepoDeleteMultiSelectedMixedVisibleUsagesPluralizesWarning(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetArchive, filepath.Join(root, "target-skill")); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	for _, want := range []string{
+		"Delete archives: 2 selected repo skills",
+		"Selected archives",
+		"alpha-skill",
+		"target-skill",
+		"One or more selected archives are used in the current working set.",
+		"Visible usages",
+		"Unlink visible usages, then delete archives",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("mixed batch delete modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "This archive is used in the current working set.") {
+		t.Fatalf("mixed batch delete should use plural usage warning:\n%s", view)
 	}
 }
 

@@ -177,27 +177,46 @@ func (m *Model) applyActiveUsageUnlink(r repoUsageModal) {
 }
 
 type repoLinkModal struct {
-	name        string
+	names       []string
 	scope       string
 	target      string
 	field       int
 	destination string
 }
 
-func (m *Model) currentRepoSkillName() (string, bool) {
-	skills := m.visibleRepoSkills()
-	if m.view != ViewRepo || m.cursor < 0 || m.cursor >= len(skills) {
-		return "", false
+func (m Model) selectedRepoSkillNames() []string {
+	if m.view != ViewRepo {
+		return nil
 	}
-	return skills[m.cursor].Name, true
+	names := make([]string, 0)
+	for _, id := range m.selectedIDsForView() {
+		if name, ok := strings.CutPrefix(id, "repo:"); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func repoSelectionLabel(label string, count int) string {
+	if count == 1 {
+		return label
+	}
+	return label + "s"
+}
+
+func repoSelectionTitle(names []string) string {
+	if len(names) == 1 {
+		return names[0]
+	}
+	return fmt.Sprintf("%d selected repo skills", len(names))
 }
 
 func (m *Model) openRepoLinkModal() {
-	name, ok := m.currentRepoSkillName()
-	if !ok {
+	names := m.selectedRepoSkillNames()
+	if len(names) == 0 {
 		return
 	}
-	linkModal := repoLinkModal{name: name, scope: config.ScopeProject, target: config.TargetAgents}
+	linkModal := repoLinkModal{names: names, scope: config.ScopeProject, target: config.TargetAgents}
 	linkModal.destination = linkModal.destinationPath(m)
 	m.modal = linkModal
 }
@@ -207,11 +226,14 @@ func (r repoLinkModal) Title() string {
 }
 
 func (r repoLinkModal) destinationPath(m *Model) string {
+	if len(r.names) != 1 {
+		return ""
+	}
 	root, err := m.cfg.ActiveRoot(r.scope, r.target)
 	if err != nil {
 		return err.Error()
 	}
-	return filepath.Join(root, r.name)
+	return filepath.Join(root, r.names[0])
 }
 
 func (r repoLinkModal) View(width, height int, m Model) string {
@@ -225,15 +247,21 @@ func (r repoLinkModal) View(width, height int, m Model) string {
 	}
 	lines := []string{
 		accentStyle.Render("Link repo skill"),
-		"Skill",
-		"  " + r.name,
+		repoSelectionLabel("Skill", len(r.names)),
+	}
+	for _, name := range r.names {
+		lines = append(lines, "  "+name)
+	}
+	lines = append(lines,
 		"",
 		"Destination",
-		"  " + scopeCursor + " scope   " + linkChoice(r.scope == config.ScopeProject, "project") + "    " + linkChoice(r.scope == config.ScopeGlobal, "global"),
-		"  " + targetCursor + " target  " + linkChoice(r.target == config.TargetAgents, ".Ag") + "        " + linkChoice(r.target == config.TargetClaude, ".Cl") + "        " + linkChoice(r.target == config.TargetCodex, ".Cd"),
+		"  "+scopeCursor+" scope   "+linkChoice(r.scope == config.ScopeProject, "project")+"    "+linkChoice(r.scope == config.ScopeGlobal, "global"),
+		"  "+targetCursor+" target  "+linkChoice(r.target == config.TargetAgents, ".Ag")+"        "+linkChoice(r.target == config.TargetClaude, ".Cl")+"        "+linkChoice(r.target == config.TargetCodex, ".Cd"),
 		"",
 		"Will create",
-		"  " + r.destination + " -> " + filepath.Join(m.cfg.ArchiveSkillsRoot(), r.name),
+	)
+	lines = append(lines, r.linkPreviewLines(m)...)
+	lines = append(lines,
 		"",
 		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "left/right", Unicode: "←/→", Label: "change option"},
@@ -241,8 +269,20 @@ func (r repoLinkModal) View(width, height int, m Model) string {
 			{ASCII: "enter", Unicode: "↵", Label: "link"},
 			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
 		})),
-	}
+	)
 	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+}
+
+func (r repoLinkModal) linkPreviewLines(m Model) []string {
+	root, err := m.cfg.ActiveRoot(r.scope, r.target)
+	if err != nil {
+		return []string{"  " + err.Error()}
+	}
+	lines := make([]string, 0, len(r.names))
+	for _, name := range r.names {
+		lines = append(lines, "  "+filepath.Join(root, name)+" -> "+filepath.Join(m.cfg.ArchiveSkillsRoot(), name))
+	}
+	return lines
 }
 
 func linkChoice(selected bool, label string) string {
@@ -275,13 +315,19 @@ func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 
 func (r repoLinkModal) apply(m *Model) {
-	result, err := actions.Link(m.cfg, actions.LinkRequest{Name: r.name, Scope: r.scope, Target: r.target})
-	if err != nil {
-		m.modal = newResultModal("Link Results", []string{"x " + err.Error()})
-		return
+	var lines []string
+	var successes []string
+	for _, name := range r.names {
+		result, err := actions.Link(m.cfg, actions.LinkRequest{Name: name, Scope: r.scope, Target: r.target})
+		if err != nil {
+			lines = append(lines, "x "+name+": "+err.Error())
+			continue
+		}
+		successes = append(successes, "✓ "+result.Name+" linked")
 	}
 	m.reload()
-	m.modal = newResultModal("Link Results", []string{"✓ " + result.Name + " linked"})
+	lines = append(successes, lines...)
+	m.modal = newResultModal("Link Results", lines)
 }
 
 func (r *repoLinkModal) move(direction string) {
@@ -327,27 +373,31 @@ type repoUsageModal struct {
 }
 
 func (m *Model) openRepoUnlinkModal() {
-	name, ok := m.currentRepoSkillName()
-	if !ok {
+	names := m.selectedRepoSkillNames()
+	if len(names) == 0 {
 		return
 	}
-	targets := m.repoUsageTargets(name)
+	targets := m.repoUsageTargets(names...)
 	if len(targets) == 0 {
-		m.modal = newResultModal("Unlink Results", []string{"No current usages for " + name + "."})
+		m.modal = newResultModal("Unlink Results", []string{"No current usages for " + repoSelectionTitle(names) + "."})
 		return
 	}
 	selected := map[int]bool{}
 	for i := range targets {
 		selected[i] = true
 	}
-	m.modal = repoUsageModal{name: name, targets: targets, selected: selected}
+	m.modal = repoUsageModal{name: repoSelectionTitle(names), targets: targets, selected: selected}
 }
 
-func (m Model) repoUsageTargets(name string) []repoUsageTarget {
+func (m Model) repoUsageTargets(names ...string) []repoUsageTarget {
+	selected := map[string]bool{}
+	for _, name := range names {
+		selected[name] = true
+	}
 	var targets []repoUsageTarget
 	for _, group := range m.active {
 		for _, member := range group.Members {
-			if member.Name == name && member.Status == actions.StatusManaged {
+			if selected[member.Name] && member.Status == actions.StatusManaged {
 				targets = append(targets, repoUsageTarget{
 					Name:   filepath.Base(member.Path),
 					Scope:  member.Root.Scope,
@@ -487,25 +537,80 @@ func mutationSuccessStatus(successes []string, verb string) string {
 }
 
 func (m *Model) openRepoDeleteModal() {
-	name, ok := m.currentRepoSkillName()
-	if !ok {
+	names := m.selectedRepoSkillNames()
+	if len(names) == 0 {
 		return
 	}
-	lines := []string{"This archive is used in the current working set.", "", "Visible usages"}
-	for _, target := range m.repoUsageTargets(name) {
-		lines = append(lines, "  "+target.Chip+"  "+target.Path)
+	usageTargets := m.repoUsageTargets(names...)
+	lines := repoDeleteIntroLines(names, len(usageTargets) > 0)
+	if len(usageTargets) > 0 {
+		lines = append(lines, "", "Visible usages")
+		for _, target := range usageTargets {
+			lines = append(lines, "  "+target.Chip+"  "+target.Path)
+		}
+		lines = append(lines, "", "Scope limit", "  Only current project roots and global roots are known. Other projects may need x-skills doctor afterwards.")
 	}
-	lines = append(lines, "", "Scope limit", "  Only current project roots and global roots are known. Other projects may need x-skills doctor afterwards.")
-	m.modal = newChoiceModal("Delete archive: "+name, lines, []string{"Cancel", "Unlink visible usages, then delete archive"}, 0, func(current *Model, choice int) {
+	m.modal = newChoiceModal(repoDeleteTitle(names), lines, []string{"Cancel", repoDeleteActionLabel(names, len(usageTargets) > 0)}, 0, func(current *Model, choice int) {
 		if choice == 0 {
 			current.modal = nil
 			return
 		}
-		current.applyRepoDelete(name)
+		current.applyRepoDeleteNames(names)
 	})
 }
 
+func repoDeleteTitle(names []string) string {
+	if len(names) == 1 {
+		return "Delete archive: " + names[0]
+	}
+	return "Delete archives: " + repoSelectionTitle(names)
+}
+
+func repoDeleteIntroLines(names []string, hasVisibleUsages bool) []string {
+	lines := []string{}
+	if len(names) > 1 {
+		lines = append(lines, "Selected archives")
+		for _, name := range names {
+			lines = append(lines, "  "+name)
+		}
+		lines = append(lines, "")
+	}
+	switch {
+	case hasVisibleUsages && len(names) == 1:
+		lines = append(lines, "This archive is used in the current working set.")
+	case hasVisibleUsages:
+		lines = append(lines, "One or more selected archives are used in the current working set.")
+	default:
+		lines = append(lines, "No visible usages in the current working set.")
+	}
+	return lines
+}
+
+func repoDeleteActionLabel(names []string, hasVisibleUsages bool) string {
+	noun := "archive"
+	if len(names) > 1 {
+		noun = "archives"
+	}
+	if !hasVisibleUsages {
+		return "Delete " + noun
+	}
+	return "Unlink visible usages, then delete " + noun
+}
+
 func (m *Model) applyRepoDelete(name string) {
+	m.applyRepoDeleteNames([]string{name})
+}
+
+func (m *Model) applyRepoDeleteNames(names []string) {
+	var lines []string
+	for _, name := range names {
+		lines = append(lines, m.applySingleRepoDelete(name)...)
+	}
+	m.reload()
+	m.modal = newResultModal("Delete Results", lines)
+}
+
+func (m *Model) applySingleRepoDelete(name string) []string {
 	var lines []string
 	hasUnlinkError := false
 	for _, target := range m.repoUsageTargets(name) {
@@ -517,9 +622,7 @@ func (m *Model) applyRepoDelete(name string) {
 	}
 	if hasUnlinkError {
 		lines = append(lines, "x delete "+name+": skipped because unlink failed")
-		m.reload()
-		m.modal = newResultModal("Delete Results", lines)
-		return
+		return lines
 	}
 	archivePath, err := repo.DeleteSkill(m.cfg, name)
 	if err != nil {
@@ -531,8 +634,7 @@ func (m *Model) applyRepoDelete(name string) {
 	} else {
 		lines = append(lines, "✓ deleted "+name)
 	}
-	m.reload()
-	m.modal = newResultModal("Delete Results", lines)
+	return lines
 }
 
 func (m *Model) openDoctorFixModal() {

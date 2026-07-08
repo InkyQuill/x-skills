@@ -57,9 +57,13 @@ func TestActiveGroupRowsShowRootChipsAliasesAndCount(t *testing.T) {
 
 func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 	m := Model{
-		symbols:  symbolsFor(Options{}),
-		view:     ViewActive,
-		selected: map[string]bool{},
+		symbols: symbolsFor(Options{}),
+		view:    ViewActive,
+		selected: map[ViewName]map[string]bool{
+			ViewActive: {},
+			ViewRepo:   {},
+			ViewDoctor: {},
+		},
 		active: []ActiveGroup{{
 			ID:          "active:one",
 			Name:        "zen-of-go",
@@ -84,10 +88,14 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 
 func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 	m := Model{
-		symbols:  symbolsFor(Options{}),
-		view:     ViewRepo,
-		cursor:   0,
-		selected: map[string]bool{"repo:zen-of-go": true},
+		symbols: symbolsFor(Options{}),
+		view:    ViewRepo,
+		cursor:  0,
+		selected: map[ViewName]map[string]bool{
+			ViewActive: {},
+			ViewRepo:   {"repo:zen-of-go": true},
+			ViewDoctor: {},
+		},
 		repo: []repo.Skill{{
 			Name:        "zen-of-go",
 			Description: "Go style guide",
@@ -114,10 +122,14 @@ func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 
 func TestHighlightedRepoRowPreservesRootPills(t *testing.T) {
 	m := Model{
-		symbols:  symbolsFor(Options{}),
-		view:     ViewRepo,
-		cursor:   0,
-		selected: map[string]bool{"repo:zen-of-go": true},
+		symbols: symbolsFor(Options{}),
+		view:    ViewRepo,
+		cursor:  0,
+		selected: map[ViewName]map[string]bool{
+			ViewActive: {},
+			ViewRepo:   {"repo:zen-of-go": true},
+			ViewDoctor: {},
+		},
 		repo: []repo.Skill{{
 			Name:        "zen-of-go",
 			Description: "Go style guide",
@@ -150,9 +162,13 @@ func TestRenderPillUsesRoundedCapsuleShape(t *testing.T) {
 
 func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
 	m := Model{
-		symbols:  symbolsFor(Options{}),
-		view:     ViewDoctor,
-		selected: map[string]bool{},
+		symbols: symbolsFor(Options{}),
+		view:    ViewDoctor,
+		selected: map[ViewName]map[string]bool{
+			ViewActive: {},
+			ViewRepo:   {},
+			ViewDoctor: {},
+		},
 		issues: []doctor.Issue{{
 			Kind:     doctor.KindBrokenSymlink,
 			Name:     "zen-of-go",

@@ -28,7 +28,7 @@ type Model struct {
 	width    int
 	height   int
 	cursor   int
-	selected map[string]bool
+	selected map[ViewName]map[string]bool
 	filter   filterState
 
 	active    []ActiveGroup
@@ -47,11 +47,15 @@ func New(cfg config.Config, opts ...Options) Model {
 		options = opts[0]
 	}
 	m := Model{
-		cfg:      cfg,
-		opts:     options,
-		symbols:  symbolsFor(options),
-		view:     ViewActive,
-		selected: map[string]bool{},
+		cfg:     cfg,
+		opts:    options,
+		symbols: symbolsFor(options),
+		view:    ViewActive,
+		selected: map[ViewName]map[string]bool{
+			ViewActive: {},
+			ViewRepo:   {},
+			ViewDoctor: {},
+		},
 	}
 	m.reload()
 	return m
@@ -116,7 +120,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleSelection()
 	case "c":
 		if m.view == ViewActive || m.view == ViewRepo {
-			m.selected = map[string]bool{}
+			m.selected[m.view] = map[string]bool{}
 			m.status = "selection cleared"
 		}
 	case "/":
@@ -241,7 +245,11 @@ func (m *Model) setView(view ViewName) {
 	}
 	m.view = view
 	m.cursor = 0
-	m.selected = map[string]bool{}
+	m.selected = map[ViewName]map[string]bool{
+		ViewActive: {},
+		ViewRepo:   {},
+		ViewDoctor: {},
+	}
 	m.filter = filterState{}
 }
 
@@ -268,7 +276,10 @@ func (m *Model) toggleSelection() {
 	if !ok {
 		return
 	}
-	m.selected[id] = !m.selected[id]
+	if m.selected[m.view] == nil {
+		m.selected[m.view] = map[string]bool{}
+	}
+	m.selected[m.view][id] = !m.selected[m.view][id]
 }
 
 func (m *Model) selectedIDsForView() []string {
@@ -276,14 +287,14 @@ func (m *Model) selectedIDsForView() []string {
 	switch m.view {
 	case ViewActive:
 		for _, group := range m.visibleActiveGroups() {
-			if m.selected[group.ID] {
+			if m.selected[ViewActive][group.ID] {
 				ids = append(ids, group.ID)
 			}
 		}
 	case ViewRepo:
 		for _, skill := range m.visibleRepoSkills() {
 			id := repoID(skill.Name)
-			if m.selected[id] {
+			if m.selected[ViewRepo][id] {
 				ids = append(ids, id)
 			}
 		}

@@ -25,7 +25,7 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "A", Label: "switch to Active view"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "R", Label: "switch to Repo view"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "D", Label: "switch to Doctor view"}),
-		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "I", Label: "reserved for Install view"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "I", Label: "Install (design in progress, not yet available)"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "enter", Unicode: "↵", Label: "view row details"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "/", Label: "enter local filter mode"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "space", Label: "toggle Active/Repo row selection"}),

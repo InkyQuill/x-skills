@@ -63,12 +63,12 @@ func TestSelectionClearsOnViewSwitch(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = mustModel(t, updated)
-	if len(m.selected) == 0 {
+	if len(m.selected[ViewActive]) == 0 {
 		t.Fatal("selection was not set")
 	}
 	updated, _ = m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
-	if len(m.selected) != 0 {
+	if len(m.selected[ViewActive]) != 0 || len(m.selected[ViewRepo]) != 0 || len(m.selected[ViewDoctor]) != 0 {
 		t.Fatalf("selected = %#v, want cleared", m.selected)
 	}
 }
@@ -80,13 +80,13 @@ func TestClearSelectionKeyClearsCurrentSelection(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = mustModel(t, updated)
-	if len(m.selected) == 0 {
+	if len(m.selected[ViewActive]) == 0 {
 		t.Fatal("selection was not set")
 	}
 
 	updated, _ = m.Update(keyRunes("c"))
 	m = mustModel(t, updated)
-	if len(m.selected) != 0 {
+	if len(m.selected[ViewActive]) != 0 {
 		t.Fatalf("selected = %#v, want cleared", m.selected)
 	}
 }
@@ -106,7 +106,7 @@ func TestDoctorSpaceDoesNotToggleSelection(t *testing.T) {
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = mustModel(t, updated)
-	if len(m.selected) != 0 {
+	if len(m.selected[ViewDoctor]) != 0 {
 		t.Fatalf("doctor selection = %#v, want empty", m.selected)
 	}
 	view := plain(m.View())
@@ -191,7 +191,7 @@ func TestFilterCursorAndActionsUseFilteredRepoRows(t *testing.T) {
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = mustModel(t, updated)
-	if !m.selected[repoID("target-skill")] {
+	if !m.selected[ViewRepo][repoID("target-skill")] {
 		t.Fatalf("selected = %#v, want target-skill selected", m.selected)
 	}
 }

@@ -162,7 +162,7 @@ func renderActiveRows(m Model, width int) []string {
 				{text: fmt.Sprintf(" %s%s  %s", status, count, activeDetail(group))},
 			},
 			i == m.cursor,
-			m.selected[group.ID],
+			m.selected[ViewActive][group.ID],
 			width-6,
 		))
 	}
@@ -183,7 +183,7 @@ func renderRepoRows(m Model, width int) []string {
 				{text: " " + mutedStyle.Render(skill.Description)},
 			},
 			i == m.cursor,
-			m.selected[id],
+			m.selected[ViewRepo][id],
 			width-6,
 		))
 	}
@@ -297,7 +297,7 @@ func rowPrefix(m Model, index int, id string) string {
 		cursor = m.symbols.Cursor
 	}
 	selected := m.symbols.Unchecked
-	if m.selected[id] {
+	if m.selected[m.view][id] {
 		selected = m.symbols.Checked
 	}
 	return cursorStyle.Render(cursor) + " " + selectedStyle.Render(selected)

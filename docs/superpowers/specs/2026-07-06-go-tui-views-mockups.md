@@ -314,10 +314,10 @@ Preview uses Glamour-rendered Markdown by default. `r` toggles raw/rendered.
 │   A        switch to Active view                                     │
 │   R        switch to Repo view                                       │
 │   D        switch to Doctor view                                     │
-│   I        reserved for Install view                                 │
+│   I        Install (design in progress, not yet available)           │
 │   enter    view row details                                          │
 │   /        enter local filter mode                                   │
-│   space    toggle row selection                                      │
+│   space    toggle Active/Repo row selection                          │
 │   p        preview SKILL.md                                          │
 │   m        migrate active skill                                      │
 │   u        unlink active skill                                       │

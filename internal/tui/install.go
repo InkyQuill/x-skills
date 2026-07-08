@@ -904,11 +904,11 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 	}
 	m.install.Results = make([]installResultView, 0, len(msg.results))
 	for _, result := range msg.results {
-		audit := m.install.Audit[result.Source()+"@"+result.Name]
+		audit := m.install.Audit[installAuditKey(result)]
 		m.install.Results = append(m.install.Results, installResultView{
 			Result:       result,
 			ArchiveState: m.installArchiveState(result),
-			AuditPill:    audit.Pill(),
+			AuditPill:    installAuditPill(audit, m.opts),
 		})
 	}
 	count := len(msg.results)
@@ -1078,6 +1078,27 @@ func installArchiveIdentityFromResult(result remote.SearchResult) installArchive
 		repo:  result.Repo,
 		path:  result.Path,
 	}
+}
+
+func installAuditKey(result remote.SearchResult) string {
+	identity := installArchiveIdentityFromResult(result)
+	return identity.owner + "/" + identity.repo + "@" + identity.path + "@" + identity.name
+}
+
+func installAuditPill(audit remote.AuditSummary, opts Options) string {
+	if !audit.Available {
+		return ""
+	}
+	if opts.ASCII {
+		if audit.Critical > 0 {
+			return "!! risky"
+		}
+		if audit.Alerts > 0 {
+			return "! warn"
+		}
+		return "OK safe"
+	}
+	return audit.Pill()
 }
 
 func (m Model) installArchiveState(result remote.SearchResult) string {

@@ -116,7 +116,8 @@ func TestInstallSearchResultRendersAuditPillFromCache(t *testing.T) {
 	m.width = 120
 	m.height = 30
 	m.install.searchToken = 1
-	m.install.Audit["vercel-labs/skills@svelte-coder"] = remote.AuditSummary{Available: true, Alerts: 1}
+	m.install.Audit[installAuditKey(remote.SearchResult{Name: "svelte-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder"})] = remote.AuditSummary{Available: true, Alerts: 1}
+	m.install.Audit[installAuditKey(remote.SearchResult{Name: "svelte-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/other-svelte-coder"})] = remote.AuditSummary{Available: true, Critical: 1}
 
 	updated, _ := m.Update(installSearchResultMsg{
 		token: 1,
@@ -140,6 +141,34 @@ func TestInstallSearchResultRendersAuditPillFromCache(t *testing.T) {
 	}
 	if strings.Contains(view, "✓ safe") || strings.Contains(view, "‼ risky") {
 		t.Fatalf("install view rendered unexpected audit pill:\n%s", view)
+	}
+}
+
+func TestInstallSearchResultRendersAuditPillInASCIIMode(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{ASCII: true})
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 30
+	m.install.searchToken = 1
+	result := remote.SearchResult{Name: "svelte-coder", Description: "Svelte help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder"}
+	m.install.Audit[installAuditKey(result)] = remote.AuditSummary{Available: true, Critical: 1}
+
+	updated, _ := m.Update(installSearchResultMsg{
+		token:   1,
+		query:   "coder",
+		results: []remote.SearchResult{result},
+	})
+	m = mustModel(t, updated)
+
+	if got := m.install.Results[0].AuditPill; got != "!! risky" {
+		t.Fatalf("AuditPill = %q, want %q", got, "!! risky")
+	}
+	view := plain(m.View())
+	if strings.Contains(view, "✓") || strings.Contains(view, "⚠") || strings.Contains(view, "‼") {
+		t.Fatalf("install view rendered unicode audit pill in ASCII mode:\n%s", view)
+	}
+	if !strings.Contains(view, "!! risky") {
+		t.Fatalf("install view missing ASCII audit pill:\n%s", view)
 	}
 }
 

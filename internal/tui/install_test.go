@@ -2058,6 +2058,61 @@ func TestInstallAndUseUpdateStaleDiffClearsPendingUse(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseUpdateRepeatedRequestKeepsNewestPendingUse(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, firstCmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if firstCmd == nil {
+		t.Fatal("first install-use update diff cmd is nil")
+	}
+	updated, secondCmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if secondCmd == nil {
+		t.Fatal("second install-use update diff cmd is nil")
+	}
+
+	firstMsg := firstCmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(firstMsg)
+	m = mustModel(t, updated)
+	if m.install.pendingUse == nil {
+		t.Fatal("newest pending install-use was cleared by stale update diff")
+	}
+
+	secondMsg := secondCmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(secondMsg)
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("keep archive cmd = %#v, want nil", cmd)
+	}
+	if m.modal == nil {
+		t.Fatal("destination modal is nil after keeping archive from newest update diff")
+	}
+	if _, ok := m.modal.(installDestinationModal); !ok {
+		t.Fatalf("modal = %T, want installDestinationModal", m.modal)
+	}
+}
+
 func TestInstallAndUseUpdateDiffErrorClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")

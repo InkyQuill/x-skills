@@ -109,7 +109,8 @@ type installArchiveIdentity struct {
 }
 
 type pendingInstallUseIntent struct {
-	row installResultView
+	row         installResultView
+	updateToken int
 }
 
 type installResultView struct {
@@ -568,11 +569,11 @@ func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
 
 func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) {
 	if msg.token != m.install.previewToken || m.view != ViewInstall {
-		m.clearPendingInstallUseForIdentity(installArchiveIdentityFromResult(msg.row.Result))
+		m.clearPendingInstallUseForUpdateDiff(msg.row, msg.token)
 		return
 	}
 	if msg.err != nil {
-		m.clearPendingInstallUseForIdentity(installArchiveIdentityFromResult(msg.row.Result))
+		m.clearPendingInstallUseForUpdateDiff(msg.row, msg.token)
 		m.status = msg.err.Error()
 		m.install.Message = m.status
 		return
@@ -788,8 +789,9 @@ func (m *Model) openInstallDestinationModal(row installResultView) tea.Cmd {
 		m.openInstallNameConflictModal(row)
 		return nil
 	case remote.ArchiveStateUpdateAvailable:
-		m.install.pendingUse = &pendingInstallUseIntent{row: row}
-		return m.openInstallUpdateDiff(row)
+		cmd := m.openInstallUpdateDiff(row)
+		m.install.pendingUse = &pendingInstallUseIntent{row: row, updateToken: m.install.previewToken}
+		return cmd
 	}
 	m.install.bumpUseToken()
 	m.modal = newInstallDestinationModal(row)
@@ -961,8 +963,9 @@ func (m Model) pendingInstallUseMatches(identity installArchiveIdentity) bool {
 	return m.install.pendingUse != nil && installArchiveIdentityFromResult(m.install.pendingUse.row.Result) == identity
 }
 
-func (m *Model) clearPendingInstallUseForIdentity(identity installArchiveIdentity) {
-	if m.pendingInstallUseMatches(identity) {
+func (m *Model) clearPendingInstallUseForUpdateDiff(row installResultView, token int) {
+	identity := installArchiveIdentityFromResult(row.Result)
+	if m.pendingInstallUseMatches(identity) && m.install.pendingUse.updateToken == token {
 		m.install.pendingUse = nil
 	}
 }
@@ -1025,13 +1028,15 @@ func (m *Model) openInstallUseArchiveResolution(msg installUseMsg) tea.Cmd {
 		return nil
 	}
 	row.ArchiveState = msg.archiveState
-	m.install.pendingUse = &pendingInstallUseIntent{row: row}
 	switch msg.archiveState {
 	case remote.ArchiveStateNameConflict:
+		m.install.pendingUse = &pendingInstallUseIntent{row: row}
 		m.openInstallNameConflictModal(row)
 		return nil
 	case remote.ArchiveStateUpdateAvailable:
-		return m.openInstallUpdateDiff(row)
+		cmd := m.openInstallUpdateDiff(row)
+		m.install.pendingUse = &pendingInstallUseIntent{row: row, updateToken: m.install.previewToken}
+		return cmd
 	default:
 		return nil
 	}

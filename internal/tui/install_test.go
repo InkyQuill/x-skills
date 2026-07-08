@@ -110,6 +110,39 @@ func TestInstallSearchRunsAfterEnterAndKeepsResults(t *testing.T) {
 	}
 }
 
+func TestInstallSearchResultRendersAuditPillFromCache(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 30
+	m.install.searchToken = 1
+	m.install.Audit["vercel-labs/skills@svelte-coder"] = remote.AuditSummary{Available: true, Alerts: 1}
+
+	updated, _ := m.Update(installSearchResultMsg{
+		token: 1,
+		query: "coder",
+		results: []remote.SearchResult{
+			{Name: "svelte-coder", Description: "Svelte help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder", Installs: 812},
+			{Name: "react-coder", Description: "React help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/react-coder", Installs: 120},
+		},
+	})
+	m = mustModel(t, updated)
+
+	if got := m.install.Results[0].AuditPill; got != "⚠ warn" {
+		t.Fatalf("first AuditPill = %q, want %q", got, "⚠ warn")
+	}
+	if got := m.install.Results[1].AuditPill; got != "" {
+		t.Fatalf("second AuditPill = %q, want empty", got)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "⚠ warn") {
+		t.Fatalf("install view missing audit pill:\n%s", view)
+	}
+	if strings.Contains(view, "✓ safe") || strings.Contains(view, "‼ risky") {
+		t.Fatalf("install view rendered unexpected audit pill:\n%s", view)
+	}
+}
+
 func TestInstallSearchErrorClearsPreviousResults(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

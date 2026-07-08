@@ -32,6 +32,7 @@ type installState struct {
 	Owner                string
 	Searching            bool
 	Results              []installResultView
+	Audit                map[string]remote.AuditSummary
 	Message              string
 	InputMode            installInputMode
 	searchToken          int
@@ -133,6 +134,7 @@ var (
 func newInstallState() installState {
 	return installState{
 		Message:       "type at least 2 characters",
+		Audit:         map[string]remote.AuditSummary{},
 		useGeneration: &installUseGeneration{},
 		searchClient:  remote.NewSearchClient(remote.DefaultSearchEndpoint, http.DefaultClient),
 	}
@@ -902,9 +904,11 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 	}
 	m.install.Results = make([]installResultView, 0, len(msg.results))
 	for _, result := range msg.results {
+		audit := m.install.Audit[result.Source()+"@"+result.Name]
 		m.install.Results = append(m.install.Results, installResultView{
 			Result:       result,
 			ArchiveState: m.installArchiveState(result),
+			AuditPill:    audit.Pill(),
 		})
 	}
 	count := len(msg.results)

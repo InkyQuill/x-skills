@@ -364,6 +364,11 @@ func newInstallDestinationModal(row installResultView) modal {
 	}}
 }
 
+func (m *Model) openInstallDestinationModal(row installResultView) {
+	m.install.useToken++
+	m.modal = newInstallDestinationModal(row)
+}
+
 func (d installDestinationModal) Title() string {
 	return "Install and use " + d.name
 }
@@ -392,6 +397,7 @@ func (d installDestinationModal) View(width, height int, m Model) string {
 func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
+		m.install.useToken++
 		return true, nil
 	case "up", "k":
 		if len(d.destinations) > 0 {

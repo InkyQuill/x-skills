@@ -741,6 +741,61 @@ func TestInstallAndUseIgnoresStaleSuccess(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseIgnoresSuccessAfterDestinationModalReopened(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{
+			Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+		{
+			Result:       remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"},
+			ArchiveState: remote.ArchiveStateArchived,
+		},
+	}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	oldMsg := cmd().(installUseMsg)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("modal still open after cancel")
+	}
+	m.cursor = 1
+	updated, _ = m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	m.status = "new destination choice"
+	m.install.Message = "new destination choice"
+
+	updated, _ = m.Update(oldMsg)
+	m = mustModel(t, updated)
+
+	if m.modal == nil {
+		t.Fatal("old install-use success closed reopened modal")
+	}
+	if m.status != "new destination choice" {
+		t.Fatalf("status = %q, want newer status preserved", m.status)
+	}
+	if m.install.Message != "new destination choice" {
+		t.Fatalf("message = %q, want newer message preserved", m.install.Message)
+	}
+}
+
 func TestInstallDestinationChecklistNavigationAndToggle(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

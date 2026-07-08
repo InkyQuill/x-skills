@@ -194,7 +194,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		if m.view == ViewInstall {
 			if row, ok := m.selectedInstallResult(); ok {
-				m.modal = newInstallDestinationModal(row)
+				m.openInstallDestinationModal(row)
 			}
 		}
 	case keyHelp:

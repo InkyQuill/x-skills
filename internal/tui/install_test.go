@@ -15,6 +15,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
+	"github.com/InkyQuill/x-skills/internal/skills"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -585,6 +586,65 @@ func TestInstallPreviewIgnoresResultAfterSelectionChange(t *testing.T) {
 	}
 	if m.status != "before" {
 		t.Fatalf("status changed after stale selection preview: %q", m.status)
+	}
+}
+
+func TestInstallArchiveOnlyArchivesRemoteSkillAndStaysOnInstall(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:        "svelte-coder",
+			Description: "Svelte help.",
+			Path:        "skills/svelte-coder",
+		},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.view != ViewInstall {
+		t.Fatalf("view = %q, want install", m.view)
+	}
+	if m.modal != nil {
+		t.Fatal("modal opened after archive-only action")
+	}
+	if m.status != "archived svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
+		t.Fatalf("archive state = %q, want archived", got)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Svelte help." {
+		t.Fatalf("description = %q", info.Description)
+	}
+	meta, ok, err := remote.ReadSourceMetadata(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("source metadata missing")
+	}
+	if meta.UpstreamName != "svelte-coder" || meta.SkillPath != "skills/svelte-coder" {
+		t.Fatalf("metadata = %#v", meta)
 	}
 }
 

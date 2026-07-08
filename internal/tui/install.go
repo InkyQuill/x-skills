@@ -32,6 +32,7 @@ type installState struct {
 	InputMode    installInputMode
 	searchToken  int
 	previewToken int
+	archiveToken int
 	searchClient remote.SearchClient
 	checkouts    *remote.CheckoutCache
 	testCloneURL string
@@ -51,6 +52,12 @@ type installPreviewMsg struct {
 	err   error
 }
 
+type installArchiveMsg struct {
+	token int
+	name  string
+	err   error
+}
+
 type installResultView struct {
 	Result       remote.SearchResult
 	ArchiveState string
@@ -60,6 +67,7 @@ type installResultView struct {
 const (
 	installSearchTimeout  = 30 * time.Second
 	installPreviewTimeout = 60 * time.Second
+	installArchiveTimeout = 60 * time.Second
 )
 
 func newInstallState() installState {
@@ -176,6 +184,48 @@ func (m *Model) previewInstallResult() tea.Cmd {
 	}
 }
 
+func (m *Model) archiveInstallResult() tea.Cmd {
+	row, ok := m.selectedInstallResult()
+	if !ok {
+		return nil
+	}
+	m.install.previewToken++
+	m.install.archiveToken++
+	token := m.install.archiveToken
+	checkouts := m.ensureInstallCheckoutCache()
+	source, err := m.gitSourceForInstall(row.Result)
+	if err != nil {
+		return func() tea.Msg {
+			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+		}
+	}
+	cfg := m.cfg
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+		defer cancel()
+
+		checkout, err := checkouts.Checkout(ctx, source)
+		if err != nil {
+			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+		}
+		found, err := checkout.FindSkillContext(ctx, row.Result.Name, row.Result.Path)
+		if err != nil {
+			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+		}
+		_, err = remote.ApplyArchive(remote.AddRequest{
+			Config:      cfg,
+			IncomingDir: found.SkillDir,
+			ArchiveName: row.Result.Name,
+			Metadata:    found.Metadata,
+			Conflict:    remote.ConflictReplaceArchive,
+		})
+		if err != nil {
+			return installArchiveMsg{token: token, name: row.Result.Name, err: err}
+		}
+		return installArchiveMsg{token: token, name: row.Result.Name}
+	}
+}
+
 func (m *Model) ensureInstallCheckoutCache() *remote.CheckoutCache {
 	if m.install.checkouts == nil {
 		m.install.checkouts = remote.NewCheckoutCache(filepath.Join(os.TempDir(), "x-skills-tui-checkouts"))
@@ -229,13 +279,27 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 	}
 }
 
-func (m Model) installArchiveState(result remote.SearchResult) string {
-	meta := remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      result.Owner,
-		Repo:       result.Repo,
-		SkillPath:  result.Path,
+func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
+	if msg.token == 0 || msg.token != m.install.archiveToken || m.view != ViewInstall {
+		return
 	}
+	if msg.err != nil {
+		m.status = msg.err.Error()
+		return
+	}
+	m.reload()
+	m.refreshInstallArchiveStates()
+	m.status = "archived " + msg.name
+}
+
+func (m *Model) refreshInstallArchiveStates() {
+	for i := range m.install.Results {
+		m.install.Results[i].ArchiveState = m.installArchiveState(m.install.Results[i].Result)
+	}
+}
+
+func (m Model) installArchiveState(result remote.SearchResult) string {
+	meta := m.installSourceMetadata(result)
 	archivePath, err := repo.SkillPath(m.cfg, result.Name)
 	if err != nil || !repo.HasSkill(m.cfg, result.Name) {
 		return remote.ArchiveStateNotArchived
@@ -245,4 +309,18 @@ func (m Model) installArchiveState(result remote.SearchResult) string {
 		return remote.ArchiveStateNameConflict
 	}
 	return remote.ArchiveStateArchived
+}
+
+func (m Model) installSourceMetadata(result remote.SearchResult) remote.SourceMetadata {
+	meta := remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      result.Owner,
+		Repo:       result.Repo,
+		SkillPath:  result.Path,
+	}
+	if m.install.testCloneURL != "" {
+		meta.SourceType = remote.SourceTypeGit
+		meta.CloneURL = m.install.testCloneURL
+	}
+	return meta
 }

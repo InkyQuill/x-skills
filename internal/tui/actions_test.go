@@ -272,6 +272,13 @@ func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go")); err != nil {
 		t.Fatalf("link was not created: %v", err)
 	}
+	view = plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "✓ zen-of-go linked") {
+		t.Fatalf("link result should report first successful apply, not a second failure:\n%s", view)
+	}
+	if strings.Contains(view, "already exists") {
+		t.Fatalf("link result reports duplicate second apply:\n%s", view)
+	}
 }
 
 func TestRepoLinkModalShowsFocusedFieldAndSelectedChoices(t *testing.T) {

@@ -271,9 +271,6 @@ func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	case "enter":
 		r.apply(m)
 	}
-	if msg.Type == tea.KeyEnter {
-		r.apply(m)
-	}
 	return false, nil
 }
 

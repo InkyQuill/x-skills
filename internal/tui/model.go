@@ -56,6 +56,7 @@ func New(cfg config.Config, opts ...Options) Model {
 			ViewRepo:   {},
 			ViewDoctor: {},
 		},
+		filter: newFilterState(),
 	}
 	m.reload()
 	return m
@@ -125,8 +126,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		if m.view == ViewActive || m.view == ViewRepo {
+			m.filter = newFilterState()
 			m.filter.Active = true
-			m.filter.Query = ""
+			m.filter.input.Focus()
 		}
 	case "enter":
 		m.openDetailModal()
@@ -250,7 +252,7 @@ func (m *Model) setView(view ViewName) {
 		ViewRepo:   {},
 		ViewDoctor: {},
 	}
-	m.filter = filterState{}
+	m.filter = newFilterState()
 }
 
 func (m *Model) moveCursor(delta int) {

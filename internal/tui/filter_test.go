@@ -56,6 +56,28 @@ func TestFilterClearsOnViewSwitchAfterFilterAccept(t *testing.T) {
 	}
 }
 
+func TestFilterSupportsBackspaceEditing(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zeta-skill", "Zeta.")
+	m := New(cfg)
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("zetx"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = mustModel(t, updated)
+
+	if m.filter.Query != "zet" {
+		t.Fatalf("filter query = %q, want zet", m.filter.Query)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "zeta-skill") || strings.Contains(view, "zen-of-go") {
+		t.Fatalf("filter did not apply edited query:\n%s", view)
+	}
+}
+
 func TestSelectionClearsOnViewSwitch(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")

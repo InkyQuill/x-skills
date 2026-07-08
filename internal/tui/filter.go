@@ -3,12 +3,21 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 type filterState struct {
 	Active bool
 	Query  string
+	input  textinput.Model
+}
+
+func newFilterState() filterState {
+	input := textinput.New()
+	input.Prompt = ""
+	input.CharLimit = 200
+	return filterState{input: input}
 }
 
 func (f filterState) matches(values ...string) bool {
@@ -29,20 +38,16 @@ func (f *filterState) update(msg tea.KeyMsg) bool {
 	case "esc":
 		f.Active = false
 		f.Query = ""
+		f.input.SetValue("")
 		return true
 	case "enter":
 		f.Active = false
 		return true
-	case "backspace":
-		if len(f.Query) > 0 {
-			f.Query = f.Query[:len(f.Query)-1]
-		}
-		return true
 	}
-	if len(msg.Runes) > 0 {
-		f.Query += string(msg.Runes)
-		return true
-	}
+	var cmd tea.Cmd
+	f.input, cmd = f.input.Update(msg)
+	_ = cmd
+	f.Query = f.input.Value()
 	return true
 }
 

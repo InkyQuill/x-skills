@@ -330,6 +330,9 @@ func (m *Model) setView(view ViewName) {
 	if m.view == view {
 		return
 	}
+	if m.view == ViewInstall && view != ViewInstall {
+		m.install.previewToken++
+	}
 	m.view = view
 	m.cursor = 0
 	m.selected = map[ViewName]map[string]bool{

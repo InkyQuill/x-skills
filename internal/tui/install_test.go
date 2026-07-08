@@ -368,6 +368,33 @@ func TestInstallPreviewIgnoresStaleAndNonInstallMessages(t *testing.T) {
 	}
 }
 
+func TestInstallPreviewIgnoresResultAfterLeavingAndReturning(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Description: "Svelte help.", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	msg := cmd().(installPreviewMsg)
+
+	m.setView(ViewActive)
+	m.setView(ViewInstall)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("preview modal opened after leaving and returning to install")
+	}
+}
+
 func TestInstallInputCtrlCQuits(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

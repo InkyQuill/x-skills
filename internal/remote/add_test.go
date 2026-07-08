@@ -3,7 +3,9 @@ package remote
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -309,6 +311,26 @@ func TestArchiveContentFingerprintFramesFileContents(t *testing.T) {
 	}
 	if firstFP == secondFP {
 		t.Fatalf("fingerprint collision: %q", firstFP)
+	}
+}
+
+func TestArchiveContentFingerprintRejectsSpecialFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fifo unavailable on windows")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pipe")
+	if err := exec.Command("mkfifo", path).Run(); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+
+	_, err := archiveContentFingerprint(dir)
+	if err == nil {
+		t.Fatal("expected special file error")
+	}
+	if !strings.Contains(err.Error(), "unsupported file type in archive content: pipe") {
+		t.Fatalf("error = %q", err)
 	}
 }
 

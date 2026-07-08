@@ -310,6 +310,9 @@ func hashContentFingerprintEntry(hash io.Writer, root string, entry contentFinge
 		if err != nil {
 			return fmt.Errorf("stat file %q: %w", entry.path, err)
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type in archive content: %s", entry.path)
+		}
 		file, err := os.Open(filepath.Join(root, filepath.FromSlash(entry.path)))
 		if err != nil {
 			return fmt.Errorf("read file %q: %w", entry.path, err)
@@ -385,15 +388,17 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("open destination file %q: %w", dst, err)
 	}
-	defer func() {
-		_ = out.Close()
-	}()
 
 	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
 		return fmt.Errorf("copy file %q: %w", src, err)
 	}
 	if err := out.Chmod(mode); err != nil {
+		_ = out.Close()
 		return fmt.Errorf("set file mode %q: %w", dst, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close destination file %q: %w", dst, err)
 	}
 	return nil
 }

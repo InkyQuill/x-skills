@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,7 +105,7 @@ func TestApplyArchiveRejectsSymlinkWithoutIngestingTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(incoming, "leak.txt")); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlink unavailable: %v", err)
 	}
 
 	_, err := ApplyArchive(AddRequest{
@@ -240,6 +241,74 @@ func TestApplyArchiveRenameIncomingDoesNotOverlayExistingArchive(t *testing.T) {
 	}
 	if info.Description != "Existing." {
 		t.Fatalf("description = %q", info.Description)
+	}
+}
+
+func TestApplyArchiveReplaceRestoresBackupWhenFinalRenameFails(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Existing.")
+	incoming := writeIncomingSkill(t, "svelte-coder", "Incoming.")
+	renameErr := errors.New("rename failed")
+
+	originalRenamePath := renamePath
+	t.Cleanup(func() {
+		renamePath = originalRenamePath
+	})
+	failedFinalRename := false
+	renamePath = func(oldpath, newpath string) error {
+		if newpath == archive && !failedFinalRename {
+			failedFinalRename = true
+			return renameErr
+		}
+		return originalRenamePath(oldpath, newpath)
+	}
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    ConflictReplaceArchive,
+	})
+	if err == nil {
+		t.Fatal("expected rename error")
+	}
+	if !strings.Contains(err.Error(), "install archive") {
+		t.Fatalf("error = %q", err)
+	}
+	info, err := skills.Read(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing." {
+		t.Fatalf("description = %q", info.Description)
+	}
+}
+
+func TestArchiveContentFingerprintFramesFileContents(t *testing.T) {
+	first := t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "a"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first, "b"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(second, "a"), []byte("x\x00file\x00b\x00y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	firstFP, err := archiveContentFingerprint(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondFP, err := archiveContentFingerprint(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstFP == secondFP {
+		t.Fatalf("fingerprint collision: %q", firstFP)
 	}
 }
 

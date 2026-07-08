@@ -50,6 +50,8 @@ type AddResult struct {
 	Status string
 }
 
+var renamePath = os.Rename
+
 func PlanArchive(
 	cfg config.Config,
 	incomingDir string,
@@ -118,13 +120,8 @@ func ApplyArchive(req AddRequest) (AddResult, error) {
 		}
 	}()
 
-	if req.Conflict == "" || req.Conflict == ConflictReplaceArchive {
-		if err := os.RemoveAll(archivePath); err != nil {
-			return AddResult{}, fmt.Errorf("replace archive: %w", err)
-		}
-	}
-	if err := os.Rename(tempPath, archivePath); err != nil {
-		return AddResult{}, fmt.Errorf("install archive: %w", err)
+	if err := installArchiveTemp(req, tempPath, archivePath, existed); err != nil {
+		return AddResult{}, err
 	}
 	cleanupTemp = false
 
@@ -200,6 +197,58 @@ func prepareArchiveTemp(req AddRequest) (string, error) {
 	return tempPath, nil
 }
 
+func installArchiveTemp(req AddRequest, tempPath, archivePath string, existed bool) error {
+	replace := req.Conflict == "" || req.Conflict == ConflictReplaceArchive
+	if !replace || !existed {
+		if err := renamePath(tempPath, archivePath); err != nil {
+			return fmt.Errorf("install archive: %w", err)
+		}
+		return nil
+	}
+
+	backupPath, err := reserveArchiveBackup(req.Config, req.ArchiveName)
+	if err != nil {
+		return err
+	}
+	backupActive := false
+	defer func() {
+		if backupActive {
+			_ = os.RemoveAll(backupPath)
+		}
+	}()
+
+	if err := renamePath(archivePath, backupPath); err != nil {
+		return fmt.Errorf("backup archive: %w", err)
+	}
+	backupActive = true
+
+	if err := renamePath(tempPath, archivePath); err != nil {
+		if restoreErr := renamePath(backupPath, archivePath); restoreErr != nil {
+			return fmt.Errorf("install archive: %w; restore backup: %v", err, restoreErr)
+		}
+		backupActive = false
+		return fmt.Errorf("install archive: %w", err)
+	}
+
+	if err := os.RemoveAll(backupPath); err != nil {
+		return fmt.Errorf("remove archive backup: %w", err)
+	}
+	backupActive = false
+	return nil
+}
+
+func reserveArchiveBackup(cfg config.Config, archiveName string) (string, error) {
+	root := cfg.ArchiveSkillsRoot()
+	backupPath, err := os.MkdirTemp(root, "."+archiveName+"-backup-")
+	if err != nil {
+		return "", fmt.Errorf("create archive backup: %w", err)
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return "", fmt.Errorf("reserve archive backup: %w", err)
+	}
+	return backupPath, nil
+}
+
 func archiveContentFingerprint(root string) (string, error) {
 	var entries []contentFingerprintEntry
 	if err := filepath.WalkDir(root, func(path string, dirEntry fs.DirEntry, walkErr error) error {
@@ -257,6 +306,10 @@ func hashContentFingerprintEntry(hash io.Writer, root string, entry contentFinge
 	case entry.info.IsDir():
 		writeContentFingerprint(hash, "dir", entry.path, "")
 	default:
+		info, err := entry.info.Info()
+		if err != nil {
+			return fmt.Errorf("stat file %q: %w", entry.path, err)
+		}
 		file, err := os.Open(filepath.Join(root, filepath.FromSlash(entry.path)))
 		if err != nil {
 			return fmt.Errorf("read file %q: %w", entry.path, err)
@@ -264,7 +317,7 @@ func hashContentFingerprintEntry(hash io.Writer, root string, entry contentFinge
 		defer func() {
 			_ = file.Close()
 		}()
-		writeContentFingerprintFilePrefix(hash, "file", entry.path)
+		writeContentFingerprintFilePrefix(hash, "file", entry.path, info.Size())
 		if _, err := io.Copy(hash, file); err != nil {
 			return fmt.Errorf("hash file %q: %w", entry.path, err)
 		}
@@ -277,8 +330,8 @@ func writeContentFingerprint(hash io.Writer, kind, path, value string) {
 	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00%s\x00", kind, path, len(value), value)
 }
 
-func writeContentFingerprintFilePrefix(hash io.Writer, kind, path string) {
-	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00", kind, path)
+func writeContentFingerprintFilePrefix(hash io.Writer, kind, path string, size int64) {
+	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00", kind, path, size)
 }
 
 func copyDir(src, dst string) error {

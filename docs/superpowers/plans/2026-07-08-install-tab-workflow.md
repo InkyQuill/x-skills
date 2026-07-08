@@ -86,7 +86,7 @@ ok  	github.com/InkyQuill/x-skills/cmd/x-skills
 - Modify: `internal/repo/repo.go`
 - Test: `internal/remote/source_test.go`
 
-- [ ] **Step 1: Write metadata round-trip tests**
+- [x] **Step 1: Write metadata round-trip tests**
 
 Create `internal/remote/source_test.go`:
 
@@ -144,7 +144,7 @@ func TestSourceIdentityMatchesSameGitHubSkill(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -159,7 +159,7 @@ FAIL
 package github.com/InkyQuill/x-skills/internal/remote is not in std
 ```
 
-- [ ] **Step 3: Implement metadata helpers**
+- [x] **Step 3: Implement metadata helpers**
 
 Create `internal/remote/source.go`:
 
@@ -237,7 +237,7 @@ func cleanSkillPath(path string) string {
 }
 ```
 
-- [ ] **Step 4: Expose metadata on repo skills**
+- [x] **Step 4: Expose metadata on repo skills**
 
 Modify `internal/repo/repo.go`:
 
@@ -272,7 +272,7 @@ Inside `List`, after reading skill metadata:
 
 Set `Source: sourcePtr` in the appended `Skill`.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -299,7 +299,7 @@ git commit -m "feat: track remote source metadata"
 - Create: `internal/remote/search.go`
 - Create: `internal/remote/search_test.go`
 
-- [ ] **Step 1: Write search client tests**
+- [x] **Step 1: Write search client tests**
 
 Create `internal/remote/search_test.go`:
 
@@ -355,7 +355,7 @@ func TestSearchRequestShapeAndResponse(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -365,7 +365,7 @@ go test ./internal/remote -run TestSearch -count=1 -v
 
 Expected: FAIL with undefined `NewSearchClient`, `SearchRequest`, and missing `strings` import in the test. Add `strings` to the test imports before implementing.
 
-- [ ] **Step 3: Implement search client**
+- [x] **Step 3: Implement search client**
 
 Create `internal/remote/search.go`:
 
@@ -464,7 +464,7 @@ func (c SearchClient) Search(ctx context.Context, req SearchRequest) ([]SearchRe
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -490,7 +490,7 @@ git commit -m "feat: add skills search client"
 - Create: `internal/remote/git.go`
 - Create: `internal/remote/git_test.go`
 
-- [ ] **Step 1: Write local-git tests**
+- [x] **Step 1: Write local-git tests**
 
 Create `internal/remote/git_test.go` with helper local repos:
 
@@ -588,7 +588,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 }
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -598,7 +598,7 @@ go test ./internal/remote -run 'TestCheckout|TestFindSkill' -count=1 -v
 
 Expected: FAIL with undefined checkout types.
 
-- [ ] **Step 3: Implement git checkout cache**
+- [x] **Step 3: Implement git checkout cache**
 
 Create `internal/remote/git.go`:
 
@@ -744,7 +744,7 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -770,7 +770,7 @@ git commit -m "feat: cache remote git checkouts"
 - Create: `internal/remote/add.go`
 - Create: `internal/remote/add_test.go`
 
-- [ ] **Step 1: Write add planning tests**
+- [x] **Step 1: Write add planning tests**
 
 Create `internal/remote/add_test.go`:
 
@@ -849,7 +849,7 @@ func makeArchivedSkillForRemoteTest(t *testing.T, cfg config.Config, name, desc 
 }
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -859,7 +859,7 @@ go test ./internal/remote -run 'TestApplyArchive|TestPlanArchive' -count=1 -v
 
 Expected: FAIL with undefined add APIs.
 
-- [ ] **Step 3: Implement archive plan/apply**
+- [x] **Step 3: Implement archive plan/apply**
 
 Create `internal/remote/add.go`:
 
@@ -1002,7 +1002,7 @@ func copyDir(src, dst string) error {
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -1032,7 +1032,7 @@ git commit -m "feat: plan and apply remote archives"
 - Modify: `internal/tui/keys.go`
 - Modify: `internal/tui/modal_help.go`
 
-- [ ] **Step 1: Write shell tests**
+- [x] **Step 1: Write shell tests**
 
 Create `internal/tui/install_test.go`:
 
@@ -1077,7 +1077,7 @@ func TestInstallHelpShowsRealInstallKeys(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -1087,7 +1087,7 @@ go test ./internal/tui -run 'TestInstallTabSwitches|TestInstallHelp' -count=1 -v
 
 Expected: FAIL because `ViewInstall` and key handling do not exist.
 
-- [ ] **Step 3: Add install state and key**
+- [x] **Step 3: Add install state and key**
 
 Create `internal/tui/install.go`:
 
@@ -1172,7 +1172,7 @@ Add key switch case:
 		m.setView(ViewInstall)
 ```
 
-- [ ] **Step 4: Render install shell**
+- [x] **Step 4: Render install shell**
 
 Modify `internal/tui/views.go`:
 
@@ -1269,7 +1269,7 @@ Modify `internal/tui/modal_help.go`, replacing the Install line and adding Insta
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "a", Label: "Install: a archive only"}),
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -1296,7 +1296,7 @@ git commit -m "feat: add install tab shell"
 - Modify: `internal/tui/model.go`
 - Modify: `internal/tui/install_test.go`
 
-- [ ] **Step 1: Write search workflow tests**
+- [x] **Step 1: Write search workflow tests**
 
 Append to `internal/tui/install_test.go`:
 
@@ -1345,7 +1345,7 @@ func testSearchServer(t *testing.T, results []remote.SearchResult) string {
 }
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1355,7 +1355,7 @@ go test ./internal/tui -run TestInstallSearchRunsAfterEnterAndKeepsResults -coun
 
 Expected: FAIL with missing search message/handler.
 
-- [ ] **Step 3: Implement install input state and command**
+- [x] **Step 3: Implement install input state and command**
 
 Modify `internal/tui/install.go`:
 
@@ -1411,7 +1411,7 @@ func (m *Model) startInstallSearch() tea.Cmd {
 
 Add imports: `context`, `strings`, `tea`.
 
-- [ ] **Step 4: Wire key handling and result message**
+- [x] **Step 4: Wire key handling and result message**
 
 Modify `internal/tui/model.go` in `Update`:
 
@@ -1515,7 +1515,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 
 Add imports `fmt`, `strconv`.
 
-- [ ] **Step 5: Add archive-state helper**
+- [x] **Step 5: Add archive-state helper**
 
 In `internal/tui/install.go`:
 
@@ -1541,7 +1541,7 @@ func (m Model) installArchiveState(result remote.SearchResult) string {
 
 Add imports `repo` and use `remote.SourceTypeGitHub`.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run:
 
@@ -1569,7 +1569,7 @@ git commit -m "feat: search from install tab"
 - Modify: `internal/tui/model.go`
 - Modify: `internal/tui/install_test.go`
 
-- [ ] **Step 1: Write preview test with local git source**
+- [x] **Step 1: Write preview test with local git source**
 
 Append to `internal/tui/install_test.go`:
 
@@ -1647,7 +1647,7 @@ func runTUITestGit(t *testing.T, dir string, args ...string) {
 }
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1657,7 +1657,7 @@ go test ./internal/tui -run TestInstallEnterPreviewsRemoteSkill -count=1 -v
 
 Expected: FAIL with undefined preview message/handler.
 
-- [ ] **Step 3: Implement preview command**
+- [x] **Step 3: Implement preview command**
 
 In `internal/tui/install.go`, add:
 
@@ -1721,7 +1721,7 @@ And in `gitSourceForInstall`, first:
 	}
 ```
 
-- [ ] **Step 4: Wire Enter on Install**
+- [x] **Step 4: Wire Enter on Install**
 
 Modify `internal/tui/model.go` in `case "enter"`:
 
@@ -1745,7 +1745,7 @@ Modify `Update`:
 		return m, nil
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -1772,7 +1772,7 @@ git commit -m "feat: preview install results"
 - Modify: `internal/tui/model.go`
 - Modify: `internal/tui/install_test.go`
 
-- [ ] **Step 1: Write archive-only test**
+- [x] **Step 1: Write archive-only test**
 
 Append:
 
@@ -1809,7 +1809,7 @@ func TestInstallArchiveOnlyArchivesRemoteSkillAndStaysOnInstall(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1819,7 +1819,7 @@ go test ./internal/tui -run TestInstallArchiveOnlyArchivesRemoteSkillAndStaysOnI
 
 Expected: FAIL with undefined archive message/action.
 
-- [ ] **Step 3: Implement archive command**
+- [x] **Step 3: Implement archive command**
 
 In `internal/tui/install.go`:
 
@@ -1901,7 +1901,7 @@ func (m *Model) refreshInstallArchiveStates() {
 }
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -2565,8 +2565,8 @@ The TUI has Active, Repo, Doctor, and Install pages: press `A` for Active,
 `R` for Repo, `D` for Doctor, and `I` for Install. Refresh is `ctrl+r`.
 
 Use Install to search `skills.sh`, preview remote `SKILL.md`, archive a skill,
-or install and link it into the current project. Manual generic Git installs
-remain CLI-first through `x-skills add --git`.
+or install and link it into the current project. Generic Git and URL install
+sources remain outside the TUI Install page for now.
 ```
 
 - [x] **Step 2: Run final verification**

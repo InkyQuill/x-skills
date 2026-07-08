@@ -784,7 +784,7 @@ func TestInstallAndUseIgnoresStaleSuccess(t *testing.T) {
 	}
 }
 
-func TestInstallAndUseIgnoresSuccessAfterDestinationModalReopened(t *testing.T) {
+func TestInstallAndUseBlocksDestinationModalWhileInFlightAndCompletes(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
 	gitTUITestCommit(t, repoDir, "initial")
@@ -812,30 +812,33 @@ func TestInstallAndUseIgnoresSuccessAfterDestinationModalReopened(t *testing.T) 
 	if cmd == nil {
 		t.Fatal("cmd is nil")
 	}
-	oldMsg := cmd().(installUseMsg)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = mustModel(t, updated)
-	if m.modal != nil {
-		t.Fatal("modal still open after cancel")
-	}
+	token := m.install.useToken
 	m.cursor = 1
-	updated, _ = m.Update(keyRunes("i"))
+	updated, blockedCmd := m.Update(keyRunes("i"))
 	m = mustModel(t, updated)
-	m.status = "new destination choice"
-	m.install.Message = "new destination choice"
+	if blockedCmd != nil {
+		t.Fatalf("blocked cmd = %#v, want nil", blockedCmd)
+	}
+	if m.modal != nil {
+		t.Fatal("destination modal opened while install-use was in flight")
+	}
+	if m.install.useToken != token {
+		t.Fatalf("use token = %d, want still %d", m.install.useToken, token)
+	}
+	if m.status != "install already running" {
+		t.Fatalf("status = %q", m.status)
+	}
 
-	updated, _ = m.Update(oldMsg)
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
-	if m.modal == nil {
-		t.Fatal("old install-use success closed reopened modal")
+	if m.modal != nil {
+		t.Fatal("modal is open after install-use completes")
 	}
-	if m.status != "new destination choice" {
-		t.Fatalf("status = %q, want newer status preserved", m.status)
-	}
-	if m.install.Message != "new destination choice" {
-		t.Fatalf("message = %q, want newer message preserved", m.install.Message)
+	if m.status != "installed svelte-coder to .Ag" {
+		t.Fatalf("status = %q", m.status)
 	}
 }
 
@@ -869,12 +872,9 @@ func TestInstallAndUseStaleCommandDoesNotArchiveOrLink(t *testing.T) {
 		t.Fatal("old cmd is nil")
 	}
 
-	m.cursor = 1
-	updated, _ = m.Update(keyRunes("i"))
-	m = mustModel(t, updated)
-	if m.modal == nil {
-		t.Fatal("new destination modal is nil")
-	}
+	m.install.bumpUseToken()
+	m.status = "newer state"
+	m.install.Message = "newer state"
 
 	originalLink := installUseLink
 	linkCalls := 0
@@ -899,8 +899,11 @@ func TestInstallAndUseStaleCommandDoesNotArchiveOrLink(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); !os.IsNotExist(err) {
 		t.Fatalf("stale link exists or unexpected error: %v", err)
 	}
-	if m.modal == nil {
-		t.Fatal("stale command closed newer destination modal")
+	if m.status != "newer state" {
+		t.Fatalf("status = %q, want newer state preserved", m.status)
+	}
+	if m.install.Message != "newer state" {
+		t.Fatalf("message = %q, want newer state preserved", m.install.Message)
 	}
 }
 
@@ -1054,6 +1057,77 @@ func TestInstallAndUseRollsBackPartialLinksAfterLateFailure(t *testing.T) {
 	}
 	if m.status != "late link failure" {
 		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallAndUseRollsBackLinksAfterMidLinkInvalidation(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+
+	generation := m.install.ensureUseGeneration()
+	originalLink := installUseLink
+	calls := 0
+	installUseLink = func(cfg config.Config, req actions.LinkRequest) (actions.MutationResult, error) {
+		calls++
+		result, err := originalLink(cfg, req)
+		if calls == 1 {
+			generation.next()
+		}
+		return result, err
+	}
+	t.Cleanup(func() {
+		installUseLink = originalLink
+	})
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	if !msg.stale {
+		t.Fatalf("stale = false, want true")
+	}
+	m.status = "newer state"
+	m.install.Message = "newer state"
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if calls != 1 {
+		t.Fatalf("link calls = %d, want 1", calls)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf(".Ag link remains after stale rollback: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf(".Cl link exists after stale rollback: %v", err)
+	}
+	if m.status != "newer state" {
+		t.Fatalf("status = %q, want newer state preserved", m.status)
+	}
+	if m.install.Message != "newer state" {
+		t.Fatalf("message = %q, want newer state preserved", m.install.Message)
+	}
+	if m.install.useInFlight {
+		t.Fatal("useInFlight remained set after stale result")
 	}
 }
 

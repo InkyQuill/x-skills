@@ -28,20 +28,22 @@ const (
 )
 
 type installState struct {
-	Query         string
-	Owner         string
-	Searching     bool
-	Results       []installResultView
-	Message       string
-	InputMode     installInputMode
-	searchToken   int
-	previewToken  int
-	archiveToken  int
-	useToken      int
-	useGeneration *installUseGeneration
-	searchClient  remote.SearchClient
-	checkouts     *remote.CheckoutCache
-	testCloneURL  string
+	Query            string
+	Owner            string
+	Searching        bool
+	Results          []installResultView
+	Message          string
+	InputMode        installInputMode
+	searchToken      int
+	previewToken     int
+	archiveToken     int
+	useToken         int
+	useGeneration    *installUseGeneration
+	useInFlight      bool
+	useInFlightToken int
+	searchClient     remote.SearchClient
+	checkouts        *remote.CheckoutCache
+	testCloneURL     string
 }
 
 type installUseGeneration struct {
@@ -82,6 +84,7 @@ type installUseMsg struct {
 	token        int
 	name         string
 	destinations []installDestination
+	stale        bool
 	err          error
 }
 
@@ -333,29 +336,42 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		m.install.Message = m.status
 		return nil
 	}
+	if m.install.useInFlight {
+		m.status = "install already running"
+		m.install.Message = m.status
+		return nil
+	}
 	token := m.install.bumpUseToken()
 	archiveCmd := m.archiveInstallRow(row)
 	if archiveCmd == nil {
 		return nil
 	}
+	m.install.useInFlight = true
+	m.install.useInFlightToken = token
 	cfg := m.cfg
 	useGeneration := m.install.ensureUseGeneration()
 	return func() tea.Msg {
 		if !useGeneration.isCurrent(token) {
-			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		archiveMsg := archiveCmd().(installArchiveMsg)
 		if archiveMsg.err != nil {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: archiveMsg.err}
 		}
 		if !useGeneration.isCurrent(token) {
-			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		if err := preflightInstallUseDestinations(cfg, row.Result.Name, destinations); err != nil {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 		}
 		createdPaths := make([]string, 0, len(destinations))
 		for _, dest := range destinations {
+			if !useGeneration.isCurrent(token) {
+				if err := rollbackInstallUseLinks(createdPaths); err != nil {
+					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+				}
+				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
+			}
 			result, err := installUseLink(cfg, actions.LinkRequest{Name: row.Result.Name, Scope: dest.Scope, Target: dest.Target})
 			if err != nil {
 				if rollbackErr := rollbackInstallUseLinks(createdPaths); rollbackErr != nil {
@@ -365,6 +381,12 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 			}
 			if result.Path != "" {
 				createdPaths = append(createdPaths, result.Path)
+			}
+			if !useGeneration.isCurrent(token) {
+				if err := rollbackInstallUseLinks(createdPaths); err != nil {
+					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+				}
+				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 			}
 		}
 		return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
@@ -436,6 +458,11 @@ func newInstallDestinationModal(row installResultView) modal {
 }
 
 func (m *Model) openInstallDestinationModal(row installResultView) {
+	if m.install.useInFlight {
+		m.status = "install already running"
+		m.install.Message = m.status
+		return
+	}
 	m.install.bumpUseToken()
 	m.modal = newInstallDestinationModal(row)
 }
@@ -580,7 +607,14 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 }
 
 func (m *Model) applyInstallUseResult(msg installUseMsg) {
+	if msg.token != 0 && msg.token == m.install.useInFlightToken {
+		m.install.useInFlight = false
+		m.install.useInFlightToken = 0
+	}
 	if msg.token == 0 || msg.token != m.install.useToken {
+		return
+	}
+	if msg.stale {
 		return
 	}
 	if msg.err != nil {

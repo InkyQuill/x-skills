@@ -160,6 +160,15 @@ func TestRenderPillUsesRoundedCapsuleShape(t *testing.T) {
 	}
 }
 
+func TestRootChipCapsUnknownTargets(t *testing.T) {
+	if got := rootChip("project", "opencode"); got != ".Op" {
+		t.Fatalf("rootChip(project, opencode) = %q, want .Op", got)
+	}
+	if got := rootChip("global", "hermes"); got != "~He" {
+		t.Fatalf("rootChip(global, hermes) = %q, want ~He", got)
+	}
+}
+
 func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
 	m := Model{
 		symbols: symbolsFor(Options{}),

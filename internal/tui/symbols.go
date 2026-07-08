@@ -1,5 +1,7 @@
 package tui
 
+import "strings"
+
 type symbols struct {
 	ProductMark string
 	Cursor      string
@@ -55,6 +57,15 @@ func rootChip(scope, target string) string {
 	case "codex":
 		return prefix + "Cd"
 	default:
-		return prefix + target
+		runes := []rune(target)
+		if len(runes) == 0 {
+			return prefix + "??"
+		}
+		first := strings.ToUpper(string(runes[0]))
+		second := "?"
+		if len(runes) > 1 {
+			second = strings.ToLower(string(runes[1]))
+		}
+		return prefix + first + second
 	}
 }

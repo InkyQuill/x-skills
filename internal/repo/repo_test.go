@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
@@ -122,6 +123,71 @@ func TestListRepoSkillsSkipsUnreadableSkillMetadata(t *testing.T) {
 	}
 	if len(skills) != 1 || skills[0].Name != "readable" {
 		t.Fatalf("skills = %#v, want only readable", skills)
+	}
+}
+
+func TestListRepoSkillsIncludesSourceMetadata(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	skill := filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: svelte-coder\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := remote.SourceMetadata{
+		SourceType:   remote.SourceTypeGitHub,
+		Owner:        "vercel-labs",
+		Repo:         "skills",
+		CloneURL:     "https://github.com/vercel-labs/skills.git",
+		Ref:          "main",
+		Commit:       "abc123",
+		SkillPath:    "skills/svelte-coder",
+		UpstreamName: "svelte-coder",
+	}
+	if err := remote.WriteSourceMetadata(skill, want); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := List(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("len(skills) = %d, want 1: %#v", len(skills), skills)
+	}
+	if skills[0].Source == nil {
+		t.Fatal("Source = nil, want metadata")
+	}
+	if *skills[0].Source != want {
+		t.Fatalf("Source = %#v, want %#v", *skills[0].Source, want)
+	}
+}
+
+func TestListRepoSkillsIgnoresInvalidSourceMetadata(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	skill := filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: svelte-coder\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, remote.MetadataFile), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := List(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("len(skills) = %d, want 1: %#v", len(skills), skills)
+	}
+	if skills[0].Source != nil {
+		t.Fatalf("Source = %#v, want nil", skills[0].Source)
 	}
 }
 

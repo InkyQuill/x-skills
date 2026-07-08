@@ -58,12 +58,16 @@ func (m SourceMetadata) SameIdentity(other SourceMetadata) bool {
 	if m.SourceType == "" || other.SourceType == "" || m.SourceType != other.SourceType {
 		return false
 	}
-	if m.SourceType == SourceTypeGitHub {
+	switch m.SourceType {
+	case SourceTypeGitHub:
 		return strings.EqualFold(m.Owner, other.Owner) &&
 			strings.EqualFold(m.Repo, other.Repo) &&
 			cleanSkillPath(m.SkillPath) == cleanSkillPath(other.SkillPath)
+	case SourceTypeGit:
+		return m.CloneURL == other.CloneURL && cleanSkillPath(m.SkillPath) == cleanSkillPath(other.SkillPath)
+	default:
+		return false
 	}
-	return m.CloneURL == other.CloneURL && cleanSkillPath(m.SkillPath) == cleanSkillPath(other.SkillPath)
 }
 
 func cleanSkillPath(path string) string {

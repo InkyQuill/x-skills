@@ -49,3 +49,27 @@ func TestSourceIdentityMatchesSameGitHubSkill(t *testing.T) {
 		t.Fatalf("expected same identity: %#v %#v", left, right)
 	}
 }
+
+func TestSourceIdentityMatchesSameGitSkill(t *testing.T) {
+	left := SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/skills.git", SkillPath: "skills/svelte-coder"}
+	right := SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/skills.git", SkillPath: filepath.ToSlash("skills/svelte-coder")}
+	if !left.SameIdentity(right) {
+		t.Fatalf("expected same identity: %#v %#v", left, right)
+	}
+}
+
+func TestSourceIdentityDoesNotMatchUnknownSourceType(t *testing.T) {
+	left := SourceMetadata{SourceType: "archive", CloneURL: "https://example.com/skills.tar.gz", SkillPath: "skills/svelte-coder"}
+	right := SourceMetadata{SourceType: "archive", CloneURL: "https://example.com/skills.tar.gz", SkillPath: "skills/svelte-coder"}
+	if left.SameIdentity(right) {
+		t.Fatalf("expected unknown source type not to match: %#v %#v", left, right)
+	}
+}
+
+func TestSourceIdentityDoesNotMatchDifferentSourceTypes(t *testing.T) {
+	left := SourceMetadata{SourceType: SourceTypeGitHub, Owner: "vercel-labs", Repo: "skills", CloneURL: "https://github.com/vercel-labs/skills.git", SkillPath: "skills/svelte-coder"}
+	right := SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://github.com/vercel-labs/skills.git", SkillPath: "skills/svelte-coder"}
+	if left.SameIdentity(right) {
+		t.Fatalf("expected different source types not to match: %#v %#v", left, right)
+	}
+}

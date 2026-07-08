@@ -189,6 +189,11 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	if row.ArchiveState == remote.ArchiveStateNameConflict {
+		m.status = "archive conflict for " + row.Result.Name
+		m.install.Message = m.status
+		return nil
+	}
 	m.install.previewToken++
 	m.install.archiveToken++
 	token := m.install.archiveToken
@@ -280,7 +285,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 }
 
 func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
-	if msg.token == 0 || msg.token != m.install.archiveToken || m.view != ViewInstall {
+	if msg.token == 0 || msg.token != m.install.archiveToken {
 		return
 	}
 	if msg.err != nil {

@@ -3,6 +3,7 @@ package remote
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -92,6 +93,153 @@ func TestPlanArchiveIgnoresSourceMetadataWhenContentMatches(t *testing.T) {
 	}
 	if plan.State != ArchiveStateArchived {
 		t.Fatalf("state = %q, want archived", plan.State)
+	}
+}
+
+func TestApplyArchiveRejectsSymlinkWithoutIngestingTarget(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	incoming := writeIncomingSkill(t, "svelte-coder", "Svelte help.")
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(incoming, "leak.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    ConflictReplaceArchive,
+	})
+	if err == nil {
+		t.Fatal("expected symlink error")
+	}
+	if !strings.Contains(err.Error(), "unsupported file type in incoming skill: leak.txt") {
+		t.Fatalf("error = %q", err)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder", "leak.txt")); readErr == nil {
+		t.Fatalf("outside file content was ingested: %q", data)
+	} else if !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	entries, readErr := os.ReadDir(cfg.ArchiveSkillsRoot())
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary archive entries remain: %v", entries)
+	}
+}
+
+func TestApplyArchiveCancelDoesNotMutateExistingArchive(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Existing.")
+	incoming := writeIncomingSkill(t, "svelte-coder", "Incoming.")
+
+	result, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    ConflictCancel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != AddStatusSkipped {
+		t.Fatalf("status = %q", result.Status)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing." {
+		t.Fatalf("description = %q", info.Description)
+	}
+}
+
+func TestApplyArchiveRejectsUnknownConflict(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	incoming := writeIncomingSkill(t, "svelte-coder", "Svelte help.")
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    "overwrite-ish",
+	})
+	if err == nil {
+		t.Fatal("expected unknown conflict error")
+	}
+	if !strings.Contains(err.Error(), `unknown archive conflict "overwrite-ish"`) {
+		t.Fatalf("error = %q", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("archive was created: err=%v", err)
+	}
+}
+
+func TestApplyArchiveReplaceRemovesStaleFilesAndReturnsUpdated(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Old.")
+	if err := os.WriteFile(filepath.Join(archive, "stale.txt"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	incoming := writeIncomingSkill(t, "svelte-coder", "New.")
+
+	result, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    ConflictReplaceArchive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != AddStatusUpdated {
+		t.Fatalf("status = %q", result.Status)
+	}
+	if _, err := os.Stat(filepath.Join(archive, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale file remains: err=%v", err)
+	}
+	info, err := skills.Read(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "New." {
+		t.Fatalf("description = %q", info.Description)
+	}
+}
+
+func TestApplyArchiveRenameIncomingDoesNotOverlayExistingArchive(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeArchivedSkillForRemoteTest(t, cfg, "svelte-coder", "Existing.")
+	incoming := writeIncomingSkill(t, "svelte-coder", "Incoming.")
+
+	_, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/repo.git", SkillPath: "svelte-coder"},
+		Conflict:    ConflictRenameIncoming,
+	})
+	if err == nil {
+		t.Fatal("expected rename conflict error")
+	}
+	if !strings.Contains(err.Error(), "archive destination already exists: svelte-coder") {
+		t.Fatalf("error = %q", err)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing." {
+		t.Fatalf("description = %q", info.Description)
 	}
 }
 

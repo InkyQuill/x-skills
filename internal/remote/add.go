@@ -87,29 +87,52 @@ func PlanArchive(
 }
 
 func ApplyArchive(req AddRequest) (AddResult, error) {
-	if req.Conflict == ConflictCancel {
+	switch req.Conflict {
+	case ConflictCancel:
 		return AddResult{Name: req.ArchiveName, Status: AddStatusSkipped}, nil
-	}
-	if req.Conflict == "" {
-		req.Conflict = ConflictReplaceArchive
+	case "", ConflictReplaceArchive, ConflictRenameIncoming:
+	default:
+		return AddResult{}, fmt.Errorf("unknown archive conflict %q", req.Conflict)
 	}
 
 	archivePath, err := archiveSkillPath(req.Config, req.ArchiveName)
 	if err != nil {
 		return AddResult{}, err
 	}
-	if req.Conflict == ConflictReplaceArchive {
+	existed, err := pathExists(archivePath)
+	if err != nil {
+		return AddResult{}, err
+	}
+	if req.Conflict == ConflictRenameIncoming && existed {
+		return AddResult{}, fmt.Errorf("archive destination already exists: %s", req.ArchiveName)
+	}
+
+	tempPath, err := prepareArchiveTemp(req)
+	if err != nil {
+		return AddResult{}, err
+	}
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.RemoveAll(tempPath)
+		}
+	}()
+
+	if req.Conflict == "" || req.Conflict == ConflictReplaceArchive {
 		if err := os.RemoveAll(archivePath); err != nil {
 			return AddResult{}, fmt.Errorf("replace archive: %w", err)
 		}
 	}
-	if err := copyDir(req.IncomingDir, archivePath); err != nil {
-		return AddResult{}, err
+	if err := os.Rename(tempPath, archivePath); err != nil {
+		return AddResult{}, fmt.Errorf("install archive: %w", err)
 	}
-	if err := WriteSourceMetadata(archivePath, req.Metadata); err != nil {
-		return AddResult{}, err
+	cleanupTemp = false
+
+	status := AddStatusArchived
+	if existed && (req.Conflict == "" || req.Conflict == ConflictReplaceArchive) {
+		status = AddStatusUpdated
 	}
-	return AddResult{Name: req.ArchiveName, Path: archivePath, Status: AddStatusArchived}, nil
+	return AddResult{Name: req.ArchiveName, Path: archivePath, Status: status}, nil
 }
 
 func archiveSkillPath(cfg config.Config, name string) (string, error) {
@@ -138,6 +161,43 @@ func hasArchivedSkill(cfg config.Config, name string) bool {
 		return false
 	}
 	return skills.IsDir(path)
+}
+
+func pathExists(path string) (bool, error) {
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat archive destination: %w", err)
+	}
+	return true, nil
+}
+
+func prepareArchiveTemp(req AddRequest) (string, error) {
+	root := req.Config.ArchiveSkillsRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("create archive root: %w", err)
+	}
+	tempPath, err := os.MkdirTemp(root, "."+req.ArchiveName+"-")
+	if err != nil {
+		return "", fmt.Errorf("create archive temp: %w", err)
+	}
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.RemoveAll(tempPath)
+		}
+	}()
+
+	if err := copyDir(req.IncomingDir, tempPath); err != nil {
+		return "", err
+	}
+	if err := WriteSourceMetadata(tempPath, req.Metadata); err != nil {
+		return "", err
+	}
+
+	cleanupTemp = false
+	return tempPath, nil
 }
 
 func archiveContentFingerprint(root string) (string, error) {
@@ -231,6 +291,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
 		target := filepath.Join(dst, rel)
 
 		info, err := dirEntry.Info()
@@ -242,6 +303,9 @@ func copyDir(src, dst string) error {
 				return fmt.Errorf("create directory %q: %w", target, err)
 			}
 			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type in incoming skill: %s", rel)
 		}
 
 		if err := copyFile(path, target, info.Mode().Perm()); err != nil {

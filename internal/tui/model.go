@@ -91,6 +91,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reloadResultMsg:
 		m.applyReloadResult(msg)
 		return m, nil
+	case installSearchResultMsg:
+		m.applyInstallSearchResult(msg)
+		return m, nil
 	default:
 		return m, nil
 	}
@@ -105,6 +108,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if close {
 			m.modal = nil
 		}
+		return m, cmd
+	}
+
+	if m.view == ViewInstall && m.install.InputMode != installInputNone {
+		cmd := m.updateInstallInput(msg)
 		return m, cmd
 	}
 
@@ -144,10 +152,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "selection cleared"
 		}
 	case "/":
-		if m.view == ViewActive || m.view == ViewRepo {
+		if m.view == ViewInstall {
+			m.install.InputMode = installInputQuery
+			m.status = ""
+		} else if m.view == ViewActive || m.view == ViewRepo {
 			m.filter = newFilterState()
 			m.filter.Active = true
 			m.filter.input.Focus()
+		}
+	case "o":
+		if m.view == ViewInstall {
+			m.install.InputMode = installInputOwner
+			m.status = ""
 		}
 	case "enter":
 		m.openDetailModal()

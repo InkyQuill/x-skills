@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestInstallTabSwitchesAndRendersShell(t *testing.T) {
@@ -64,4 +68,43 @@ func TestInstallScrollKeepsFocusedResultAndSearchVisible(t *testing.T) {
 			t.Fatalf("install view missing %q with cursor at last result:\n%s", want, view)
 		}
 	}
+}
+
+func TestInstallSearchRunsAfterEnterAndKeepsResults(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.install.searchClient = remote.NewSearchClient(testSearchServer(t, []remote.SearchResult{
+		{Name: "svelte-coder", Description: "Svelte help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder", Installs: 812},
+	}), http.DefaultClient)
+	m.setView(ViewInstall)
+
+	updated, cmd := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	for _, key := range []string{"s", "v", "e", "l", "t", "e"} {
+		updated, cmd = m.Update(keyRunes(key))
+		m = mustModel(t, updated)
+		_ = cmd
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if !m.install.Searching {
+		t.Fatal("searching = false")
+	}
+	msg := cmd().(installSearchResultMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if len(m.install.Results) != 1 || m.install.Results[0].Result.Name != "svelte-coder" {
+		t.Fatalf("results = %#v", m.install.Results)
+	}
+	if m.status != "found 1 result for \"svelte\"" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func testSearchServer(t *testing.T, results []remote.SearchResult) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
 }

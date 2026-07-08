@@ -30,7 +30,7 @@ This is one implementation plan because the feature is one coherent TUI rewrite,
 8. shell layout and responsive rendering;
 9. CLI flags and README cleanup.
 
-Remote `skills.sh` install/search, theme switching, mouse support, fuzzy filtering, command palette, and per-file conflict merge choices remain out of scope and are already tracked in `docs/backlog.md`.
+Remote `skills.sh` install/search shipped in the follow-up Install tab workflow plan. Theme switching, mouse support, fuzzy filtering, command palette, and per-file conflict merge choices remain out of scope and are already tracked in `docs/backlog.md`.
 
 ## File Structure
 
@@ -1574,7 +1574,7 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  A        switch to Active view",
 		"  R        switch to Repo view",
 		"  D        switch to Doctor view",
-		"  I        Install (design in progress, not yet available)",
+		"  I        switch to Install view",
 		"  enter    view row details",
 		"  /        enter local filter mode",
 		"  space    toggle Active/Repo row selection",

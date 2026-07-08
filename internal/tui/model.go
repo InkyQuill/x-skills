@@ -92,8 +92,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyReloadResult(msg)
 		return m, nil
 	case installSearchResultMsg:
-		m.applyInstallSearchResult(msg)
-		return m, nil
+		return m, m.applyInstallSearchResult(msg)
 	case installPreviewMsg:
 		if msg.token != m.install.previewToken || m.view != ViewInstall {
 			return m, nil
@@ -109,6 +108,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case installArchiveMsg:
 		m.applyInstallArchiveResult(msg)
+		return m, nil
+	case installArchiveStateMsg:
+		m.applyInstallArchiveStateResult(msg)
 		return m, nil
 	case installUseMsg:
 		return m, m.applyInstallUseResult(msg)

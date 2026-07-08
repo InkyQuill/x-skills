@@ -172,6 +172,95 @@ func TestInstallSearchResultRendersAuditPillInASCIIMode(t *testing.T) {
 	}
 }
 
+func TestInstallSearchResultCachesAuditFromResult(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 30
+	m.install.searchToken = 1
+	result := remote.SearchResult{
+		Name:        "svelte-coder",
+		Description: "Svelte help.",
+		Owner:       "vercel-labs",
+		Repo:        "skills",
+		Path:        "skills/svelte-coder",
+		Audit:       &remote.AuditSummary{Available: true, Critical: 1},
+	}
+
+	updated, _ := m.Update(installSearchResultMsg{
+		token:   1,
+		query:   "coder",
+		results: []remote.SearchResult{result},
+	})
+	m = mustModel(t, updated)
+
+	if got := m.install.Results[0].AuditPill; got != "‼ risky" {
+		t.Fatalf("AuditPill = %q, want %q", got, "‼ risky")
+	}
+	if got := m.install.Audit[installAuditKey(result)]; !got.Available || got.Critical != 1 {
+		t.Fatalf("cached audit = %#v", got)
+	}
+}
+
+func TestInstallSearchResultAsyncStateCheckMarksUpdateAvailable(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGit,
+		CloneURL:   repoDir,
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.searchToken = 1
+	result := remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}
+	updated, cmd := m.Update(installSearchResultMsg{
+		token:   1,
+		query:   "svelte",
+		results: []remote.SearchResult{result},
+	})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive state check cmd is nil")
+	}
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
+		t.Fatalf("initial archive state = %q, want archived", got)
+	}
+	stateMsg := cmd().(installArchiveStateMsg)
+	updated, _ = m.Update(stateMsg)
+	m = mustModel(t, updated)
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateUpdateAvailable {
+		t.Fatalf("archive state = %q, want update available", got)
+	}
+
+	updated, cmd = m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("update diff cmd is nil")
+	}
+	diffMsg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("update diff modal is nil")
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, "Incoming remote") || !strings.Contains(view, "Archive conflict: svelte-coder") {
+		t.Fatalf("update diff missing remote labels:\n%s", view)
+	}
+}
+
 func TestInstallSearchErrorClearsPreviousResults(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

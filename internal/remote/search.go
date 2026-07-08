@@ -20,12 +20,13 @@ type SearchRequest struct {
 }
 
 type SearchResult struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Owner       string `json:"owner"`
-	Repo        string `json:"repo"`
-	Path        string `json:"path"`
-	Installs    int    `json:"installs"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Owner       string        `json:"owner"`
+	Repo        string        `json:"repo"`
+	Path        string        `json:"path"`
+	Installs    int           `json:"installs"`
+	Audit       *AuditSummary `json:"audit,omitempty"`
 }
 
 func (r SearchResult) Source() string {

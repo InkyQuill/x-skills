@@ -1,9 +1,9 @@
 package remote
 
 type AuditSummary struct {
-	Available bool
-	Alerts    int
-	Critical  int
+	Available bool `json:"available"`
+	Alerts    int  `json:"alerts"`
+	Critical  int  `json:"critical"`
 }
 
 func (a AuditSummary) Pill() string {

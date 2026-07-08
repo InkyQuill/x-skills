@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
@@ -253,6 +254,48 @@ func TestInstallSearchZeroResultsUpdatesMessage(t *testing.T) {
 	}
 }
 
+func TestInstallSearchCommandUsesBoundedContext(t *testing.T) {
+	var sawDeadline bool
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			deadline, ok := r.Context().Deadline()
+			if !ok {
+				return nil, errors.New("missing search context deadline")
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 || remaining > installSearchTimeout {
+				return nil, fmt.Errorf("search context deadline = %s, want within %s", remaining, installSearchTimeout)
+			}
+			sawDeadline = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       ioNopCloser{strings.NewReader(`{"results":[]}`)},
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.install.searchClient = remote.NewSearchClient("https://skills.example/search", client)
+	m.setView(ViewInstall)
+	m.install.InputMode = installInputQuery
+	m.install.Query = "svelte"
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installSearchResultMsg)
+	if msg.err != nil {
+		t.Fatalf("search err = %v", msg.err)
+	}
+	if !sawDeadline {
+		t.Fatal("search command did not reach bounded transport")
+	}
+}
+
 func TestInstallEnterPreviewsRemoteSkill(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
@@ -365,6 +408,79 @@ func TestInstallPreviewIgnoresStaleAndNonInstallMessages(t *testing.T) {
 	}
 	if m.status != "before" {
 		t.Fatalf("status changed outside install view: %q", m.status)
+	}
+}
+
+func TestInstallPreviewIgnoresResultAfterInputEdit(t *testing.T) {
+	tests := []struct {
+		name         string
+		openInputKey tea.KeyMsg
+		editKey      tea.KeyMsg
+		query        string
+		owner        string
+	}{
+		{
+			name:         "query rune",
+			openInputKey: keyRunes("/"),
+			editKey:      keyRunes("r"),
+		},
+		{
+			name:         "query backspace",
+			openInputKey: keyRunes("/"),
+			editKey:      tea.KeyMsg{Type: tea.KeyBackspace},
+			query:        "sv",
+		},
+		{
+			name:         "owner rune",
+			openInputKey: keyRunes("o"),
+			editKey:      keyRunes("v"),
+		},
+		{
+			name:         "owner backspace",
+			openInputKey: keyRunes("o"),
+			editKey:      tea.KeyMsg{Type: tea.KeyBackspace},
+			owner:        "vercel",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New(config.Default(t.TempDir(), t.TempDir()))
+			m.setView(ViewInstall)
+			m.install.Query = tt.query
+			m.install.Owner = tt.owner
+			m.install.Results = []installResultView{{
+				Result:       remote.SearchResult{Name: "no-source", Description: "Missing source."},
+				ArchiveState: remote.ArchiveStateNotArchived,
+			}}
+			m.status = "before"
+
+			updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = mustModel(t, updated)
+			if previewCmd == nil {
+				t.Fatal("preview cmd is nil")
+			}
+			previewToken := m.install.previewToken
+
+			updated, _ = m.Update(tt.openInputKey)
+			m = mustModel(t, updated)
+			updated, _ = m.Update(tt.editKey)
+			m = mustModel(t, updated)
+			if m.install.previewToken == previewToken {
+				t.Fatalf("previewToken = %d, want increment after input edit", m.install.previewToken)
+			}
+			m.status = "after edit"
+
+			previewMsg := previewCmd().(installPreviewMsg)
+			updated, _ = m.Update(previewMsg)
+			m = mustModel(t, updated)
+			if m.status != "after edit" {
+				t.Fatalf("status = %q, want stale preview ignored", m.status)
+			}
+			if m.modal != nil {
+				t.Fatal("stale preview opened modal after input edit")
+			}
+		})
 	}
 }
 
@@ -495,6 +611,20 @@ func testSearchServer(t *testing.T, results []remote.SearchResult) string {
 	}))
 	t.Cleanup(server.Close)
 	return server.URL
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type ioNopCloser struct {
+	*strings.Reader
+}
+
+func (c ioNopCloser) Close() error {
+	return nil
 }
 
 func makeTUITestGitRepo(t *testing.T) string {

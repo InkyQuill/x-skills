@@ -99,6 +99,9 @@ func (m *Model) startInstallSearch() tea.Cmd {
 }
 
 func (m *Model) updateInstallInput(msg tea.KeyMsg) tea.Cmd {
+	beforeQuery := m.install.Query
+	beforeOwner := m.install.Owner
+
 	switch msg.String() {
 	case "esc":
 		m.install.InputMode = installInputNone
@@ -121,6 +124,9 @@ func (m *Model) updateInstallInput(msg tea.KeyMsg) tea.Cmd {
 				m.install.Owner += string(msg.Runes)
 			}
 		}
+	}
+	if m.install.Query != beforeQuery || m.install.Owner != beforeOwner {
+		m.install.previewToken++
 	}
 	return nil
 }

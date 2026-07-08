@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -27,19 +28,32 @@ const (
 )
 
 type installState struct {
-	Query        string
-	Owner        string
-	Searching    bool
-	Results      []installResultView
-	Message      string
-	InputMode    installInputMode
-	searchToken  int
-	previewToken int
-	archiveToken int
-	useToken     int
-	searchClient remote.SearchClient
-	checkouts    *remote.CheckoutCache
-	testCloneURL string
+	Query         string
+	Owner         string
+	Searching     bool
+	Results       []installResultView
+	Message       string
+	InputMode     installInputMode
+	searchToken   int
+	previewToken  int
+	archiveToken  int
+	useToken      int
+	useGeneration *installUseGeneration
+	searchClient  remote.SearchClient
+	checkouts     *remote.CheckoutCache
+	testCloneURL  string
+}
+
+type installUseGeneration struct {
+	value atomic.Int64
+}
+
+func (g *installUseGeneration) next() int {
+	return int(g.value.Add(1))
+}
+
+func (g *installUseGeneration) isCurrent(token int) bool {
+	return token != 0 && g.value.Load() == int64(token)
 }
 
 type installSearchResultMsg struct {
@@ -94,9 +108,27 @@ var installUseLink = actions.Link
 
 func newInstallState() installState {
 	return installState{
-		Message:      "type at least 2 characters",
-		searchClient: remote.NewSearchClient(remote.DefaultSearchEndpoint, http.DefaultClient),
+		Message:       "type at least 2 characters",
+		useGeneration: &installUseGeneration{},
+		searchClient:  remote.NewSearchClient(remote.DefaultSearchEndpoint, http.DefaultClient),
 	}
+}
+
+func (s *installState) ensureUseGeneration() *installUseGeneration {
+	if s.useGeneration == nil {
+		s.useGeneration = &installUseGeneration{}
+		s.useGeneration.value.Store(int64(s.useToken))
+	}
+	return s.useGeneration
+}
+
+func (s *installState) bumpUseToken() int {
+	generation := s.ensureUseGeneration()
+	if current := generation.value.Load(); int64(s.useToken) != current {
+		generation.value.Store(int64(s.useToken))
+	}
+	s.useToken = generation.next()
+	return s.useToken
 }
 
 func (m Model) runInstallSearch() tea.Cmd {
@@ -301,17 +333,23 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		m.install.Message = m.status
 		return nil
 	}
-	m.install.useToken++
-	token := m.install.useToken
+	token := m.install.bumpUseToken()
 	archiveCmd := m.archiveInstallRow(row)
 	if archiveCmd == nil {
 		return nil
 	}
 	cfg := m.cfg
+	useGeneration := m.install.ensureUseGeneration()
 	return func() tea.Msg {
+		if !useGeneration.isCurrent(token) {
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
+		}
 		archiveMsg := archiveCmd().(installArchiveMsg)
 		if archiveMsg.err != nil {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: archiveMsg.err}
+		}
+		if !useGeneration.isCurrent(token) {
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
 		}
 		if err := preflightInstallUseDestinations(cfg, row.Result.Name, destinations); err != nil {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
@@ -398,7 +436,7 @@ func newInstallDestinationModal(row installResultView) modal {
 }
 
 func (m *Model) openInstallDestinationModal(row installResultView) {
-	m.install.useToken++
+	m.install.bumpUseToken()
 	m.modal = newInstallDestinationModal(row)
 }
 
@@ -430,7 +468,7 @@ func (d installDestinationModal) View(width, height int, m Model) string {
 func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
-		m.install.useToken++
+		m.install.bumpUseToken()
 		return true, nil
 	case "up", "k":
 		if len(d.destinations) > 0 {

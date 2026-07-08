@@ -839,6 +839,71 @@ func TestInstallAndUseIgnoresSuccessAfterDestinationModalReopened(t *testing.T) 
 	}
 }
 
+func TestInstallAndUseStaleCommandDoesNotArchiveOrLink(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "React help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{
+			Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+		{
+			Result:       remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+	}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, oldCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if oldCmd == nil {
+		t.Fatal("old cmd is nil")
+	}
+
+	m.cursor = 1
+	updated, _ = m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("new destination modal is nil")
+	}
+
+	originalLink := installUseLink
+	linkCalls := 0
+	installUseLink = func(cfg config.Config, req actions.LinkRequest) (actions.MutationResult, error) {
+		linkCalls++
+		return originalLink(cfg, req)
+	}
+	t.Cleanup(func() {
+		installUseLink = originalLink
+	})
+
+	oldMsg := oldCmd().(installUseMsg)
+	updated, _ = m.Update(oldMsg)
+	m = mustModel(t, updated)
+
+	if linkCalls != 0 {
+		t.Fatalf("link calls = %d, want 0 for stale command", linkCalls)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("stale archive exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("stale link exists or unexpected error: %v", err)
+	}
+	if m.modal == nil {
+		t.Fatal("stale command closed newer destination modal")
+	}
+}
+
 func TestInstallDestinationChecklistNavigationAndToggle(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

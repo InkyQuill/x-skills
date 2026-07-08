@@ -350,12 +350,16 @@ func (m *Model) moveCursor(delta int) {
 		m.cursor = 0
 		return
 	}
+	previous := m.cursor
 	m.cursor += delta
 	if m.cursor < 0 {
 		m.cursor = count - 1
 	}
 	if m.cursor >= count {
 		m.cursor = 0
+	}
+	if m.view == ViewInstall && m.cursor != previous {
+		m.install.previewToken++
 	}
 }
 

@@ -431,6 +431,47 @@ func TestInstallPreviewIgnoresResultAfterNewSearch(t *testing.T) {
 	}
 }
 
+func TestInstallPreviewIgnoresResultAfterSelectionChange(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{
+		{
+			Result:       remote.SearchResult{Name: "svelte-coder", Description: "Svelte help.", Path: "skills/svelte-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+		{
+			Result:       remote.SearchResult{Name: "react-coder", Description: "React help.", Path: "skills/react-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+	}
+	m.install.testCloneURL = repoDir
+	m.status = "before"
+
+	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("j"))
+	m = mustModel(t, updated)
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+
+	previewMsg := previewCmd().(installPreviewMsg)
+	updated, _ = m.Update(previewMsg)
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatal("preview modal opened after install selection changed")
+	}
+	if m.status != "before" {
+		t.Fatalf("status changed after stale selection preview: %q", m.status)
+	}
+}
+
 func TestInstallInputCtrlCQuits(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)

@@ -100,10 +100,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+
 	if m.modal != nil {
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
 		close, cmd := m.modal.Update(msg, &m)
 		if close {
 			m.modal = nil
@@ -130,7 +131,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "q":
 		return m, tea.Quit
 	case keyActive:
 		m.setView(ViewActive)

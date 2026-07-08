@@ -64,11 +64,12 @@ func (m Model) runInstallSearch() tea.Cmd {
 }
 
 func (m *Model) startInstallSearch() tea.Cmd {
+	m.install.searchToken++
 	if len([]rune(strings.TrimSpace(m.install.Query))) < 2 {
+		m.install.Searching = false
 		m.install.Message = "type at least 2 characters"
 		return nil
 	}
-	m.install.searchToken++
 	m.install.Searching = true
 	m.install.Message = "searching..."
 	return m.runInstallSearch()
@@ -127,9 +128,13 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 		})
 	}
 	count := len(msg.results)
-	if count == 1 {
+	switch count {
+	case 0:
+		m.install.Message = "no results for " + strconv.Quote(msg.query)
+		m.status = "found 0 results for " + strconv.Quote(msg.query)
+	case 1:
 		m.status = "found 1 result for " + strconv.Quote(msg.query)
-	} else {
+	default:
 		m.status = fmt.Sprintf("found %d results for %q", count, msg.query)
 	}
 }

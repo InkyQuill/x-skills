@@ -100,6 +100,89 @@ func TestInstallSearchRunsAfterEnterAndKeepsResults(t *testing.T) {
 	}
 }
 
+func TestInstallSearchShortQueryInvalidatesPendingResult(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.install.searchClient = remote.NewSearchClient(testSearchServer(t, []remote.SearchResult{
+		{Name: "svelte-coder", Description: "Svelte help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder", Installs: 812},
+	}), http.DefaultClient)
+	m.setView(ViewInstall)
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	for _, key := range []string{"s", "v", "e", "l", "t", "e"} {
+		updated, _ = m.Update(keyRunes(key))
+		m = mustModel(t, updated)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	oldMsg := cmd().(installSearchResultMsg)
+
+	updated, _ = m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	for range 5 {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		m = mustModel(t, updated)
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("short query command = %#v, want nil", cmd)
+	}
+	if m.install.Searching {
+		t.Fatal("searching = true after short query")
+	}
+
+	updated, _ = m.Update(oldMsg)
+	m = mustModel(t, updated)
+	if len(m.install.Results) != 0 {
+		t.Fatalf("stale results applied: %#v", m.install.Results)
+	}
+	if m.install.Message != "type at least 2 characters" {
+		t.Fatalf("message = %q", m.install.Message)
+	}
+}
+
+func TestInstallSearchZeroResultsUpdatesMessage(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.install.searchClient = remote.NewSearchClient(testSearchServer(t, nil), http.DefaultClient)
+	m.setView(ViewInstall)
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+	for _, key := range []string{"m", "i", "s", "s"} {
+		updated, _ = m.Update(keyRunes(key))
+		m = mustModel(t, updated)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	msg := cmd().(installSearchResultMsg)
+
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.install.Message != "no results for \"miss\"" {
+		t.Fatalf("message = %q", m.install.Message)
+	}
+	if m.status != "found 0 results for \"miss\"" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallInputCtrlCQuits(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	updated, _ := m.Update(keyRunes("/"))
+	m = mustModel(t, updated)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("cmd = nil, want quit")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Fatalf("cmd msg = %T, want tea.QuitMsg", msg)
+	}
+}
+
 func testSearchServer(t *testing.T, results []remote.SearchResult) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

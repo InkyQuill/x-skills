@@ -1,6 +1,8 @@
 package remote
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,6 +103,19 @@ func TestFindSkillUsesValidPreferredPath(t *testing.T) {
 	}
 	if found.Metadata.SkillPath != "packs/two" {
 		t.Fatalf("skill path = %q, want packs/two", found.Metadata.SkillPath)
+	}
+}
+
+func TestFindSkillContextStopsWhenCanceled(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	checkout := Checkout{Path: root}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := checkout.FindSkillContext(ctx, "svelte-coder", "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
 

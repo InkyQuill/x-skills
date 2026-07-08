@@ -162,7 +162,7 @@ func (m *Model) previewInstallResult() tea.Cmd {
 		if err != nil {
 			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
 		}
-		found, err := checkout.FindSkill(row.Result.Name, row.Result.Path)
+		found, err := checkout.FindSkillContext(ctx, row.Result.Name, row.Result.Path)
 		if err != nil {
 			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
 		}

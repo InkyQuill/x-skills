@@ -77,15 +77,28 @@ func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkou
 }
 
 func (c Checkout) FindSkill(name, preferredPath string) (FoundSkill, error) {
+	return c.FindSkillContext(context.Background(), name, preferredPath)
+}
+
+func (c Checkout) FindSkillContext(ctx context.Context, name, preferredPath string) (FoundSkill, error) {
+	if err := ctx.Err(); err != nil {
+		return FoundSkill{}, err
+	}
 	if preferredPath != "" {
 		skillDir, rel, err := c.resolvePreferredSkillPath(preferredPath)
 		if err != nil {
+			return FoundSkill{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return FoundSkill{}, err
 		}
 		return c.foundAt(skillDir, rel)
 	}
 	var matches []string
 	err := filepath.WalkDir(c.Path, func(path string, entry os.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return err
 		}
@@ -97,6 +110,9 @@ func (c Checkout) FindSkill(name, preferredPath string) (FoundSkill, error) {
 			if err == nil && (info.Name == name || filepath.Base(path) == name) {
 				rel, _ := filepath.Rel(c.Path, path)
 				matches = append(matches, filepath.ToSlash(rel))
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
 			}
 			return filepath.SkipDir
 		}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -97,6 +98,47 @@ func TestInstallSearchRunsAfterEnterAndKeepsResults(t *testing.T) {
 	}
 	if m.status != "found 1 result for \"svelte\"" {
 		t.Fatalf("status = %q", m.status)
+	}
+	if m.install.Message != "found 1 result for \"svelte\"" {
+		t.Fatalf("message = %q", m.install.Message)
+	}
+}
+
+func TestInstallSearchErrorClearsPreviousResults(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 100
+	m.height = 30
+	m.install.searchToken = 1
+
+	updated, _ := m.Update(installSearchResultMsg{
+		token: 1,
+		query: "svelte",
+		results: []remote.SearchResult{
+			{Name: "svelte-coder", Description: "Svelte help.", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder", Installs: 812},
+		},
+	})
+	m = mustModel(t, updated)
+	if len(m.install.Results) != 1 {
+		t.Fatalf("results after success = %#v", m.install.Results)
+	}
+
+	m.install.searchToken = 2
+	updated, _ = m.Update(installSearchResultMsg{
+		token: 2,
+		query: "react",
+		err:   errors.New("search failed"),
+	})
+	m = mustModel(t, updated)
+	if len(m.install.Results) != 0 {
+		t.Fatalf("results after error = %#v", m.install.Results)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "search failed") {
+		t.Fatalf("install view missing error:\n%s", view)
+	}
+	if strings.Contains(view, "svelte-coder") {
+		t.Fatalf("install view shows stale result after error:\n%s", view)
 	}
 }
 

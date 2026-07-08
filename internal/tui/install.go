@@ -116,6 +116,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 	}
 	m.install.Searching = false
 	if msg.err != nil {
+		m.install.Results = nil
 		m.install.Message = msg.err.Error()
 		m.status = msg.err.Error()
 		return
@@ -134,8 +135,10 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 		m.status = "found 0 results for " + strconv.Quote(msg.query)
 	case 1:
 		m.status = "found 1 result for " + strconv.Quote(msg.query)
+		m.install.Message = m.status
 	default:
 		m.status = fmt.Sprintf("found %d results for %q", count, msg.query)
+		m.install.Message = m.status
 	}
 }
 

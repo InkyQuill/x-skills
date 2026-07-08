@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
@@ -22,12 +23,20 @@ type GitSource struct {
 
 type CheckoutCache struct {
 	root      string
+	mu        sync.Mutex
 	checkouts map[checkoutKey]Checkout
+	inflight  map[checkoutKey]*checkoutCall
 }
 
 type checkoutKey struct {
 	cloneURL string
 	ref      string
+}
+
+type checkoutCall struct {
+	done     chan struct{}
+	checkout Checkout
+	err      error
 }
 
 type Checkout struct {
@@ -43,15 +52,53 @@ type FoundSkill struct {
 }
 
 func NewCheckoutCache(root string) *CheckoutCache {
-	return &CheckoutCache{root: root, checkouts: map[checkoutKey]Checkout{}}
+	return &CheckoutCache{
+		root:      root,
+		checkouts: map[checkoutKey]Checkout{},
+		inflight:  map[checkoutKey]*checkoutCall{},
+	}
 }
 
 func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkout, error) {
 	key := checkoutKey{cloneURL: source.CloneURL, ref: source.Ref}
+	c.mu.Lock()
 	if checkout, ok := c.checkouts[key]; ok {
+		c.mu.Unlock()
 		checkout.Source = source
 		return checkout, nil
 	}
+	if call, ok := c.inflight[key]; ok {
+		c.mu.Unlock()
+		select {
+		case <-call.done:
+			if call.err != nil {
+				return Checkout{}, call.err
+			}
+			checkout := call.checkout
+			checkout.Source = source
+			return checkout, nil
+		case <-ctx.Done():
+			return Checkout{}, ctx.Err()
+		}
+	}
+	call := &checkoutCall{done: make(chan struct{})}
+	c.inflight[key] = call
+	c.mu.Unlock()
+
+	checkout, err := c.checkout(ctx, source)
+	c.mu.Lock()
+	if err == nil {
+		c.checkouts[key] = checkout
+	}
+	call.checkout = checkout
+	call.err = err
+	delete(c.inflight, key)
+	close(call.done)
+	c.mu.Unlock()
+	return checkout, err
+}
+
+func (c *CheckoutCache) checkout(ctx context.Context, source GitSource) (Checkout, error) {
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
 		return Checkout{}, fmt.Errorf("create checkout cache: %w", err)
 	}
@@ -72,7 +119,6 @@ func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkou
 		return Checkout{}, cleanupCheckoutDir(dir, err)
 	}
 	checkout := Checkout{Path: dir, Source: source, Commit: strings.TrimSpace(commit)}
-	c.checkouts[key] = checkout
 	return checkout, nil
 }
 

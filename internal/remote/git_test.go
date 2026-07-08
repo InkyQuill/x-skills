@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -68,6 +69,79 @@ func TestCheckoutCacheHitUsesCurrentSourceMetadata(t *testing.T) {
 		found.Metadata.Owner != "octo" ||
 		found.Metadata.Repo != "skills" {
 		t.Fatalf("metadata = %#v", found.Metadata)
+	}
+}
+
+func TestCheckoutCacheConcurrentCheckoutReusesClone(t *testing.T) {
+	repo := makeGitRepo(t)
+	writeRemoteSkill(t, repo, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitCommit(t, repo, "initial")
+
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	cache := NewCheckoutCache(cacheRoot)
+	source := GitSource{CloneURL: repo}
+
+	const callers = 16
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	start := make(chan struct{})
+	results := make(chan Checkout, callers)
+	errs := make(chan error, callers)
+
+	for range callers {
+		go func() {
+			defer wg.Done()
+			<-start
+			checkout, err := cache.Checkout(t.Context(), source)
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- checkout
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("Checkout returned error: %v", err)
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+
+	var path string
+	count := 0
+	for checkout := range results {
+		if checkout.Path == "" {
+			t.Fatal("Checkout returned empty path")
+		}
+		if path == "" {
+			path = checkout.Path
+		} else if checkout.Path != path {
+			t.Fatalf("Checkout path = %q, want %q", checkout.Path, path)
+		}
+		count++
+	}
+	if count != callers {
+		t.Fatalf("received %d successful checkouts, want %d", count, callers)
+	}
+
+	entries, err := os.ReadDir(cacheRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clones := 0
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "repo-") {
+			clones++
+		}
+	}
+	if clones != 1 {
+		t.Fatalf("cache contains %d clone dirs, want 1", clones)
 	}
 }
 

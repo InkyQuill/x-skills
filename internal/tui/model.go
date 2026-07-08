@@ -160,7 +160,27 @@ func (m *Model) openDetailModal() {
 		if m.cursor >= 0 && m.cursor < len(groups) {
 			m.modal = activeDetailModal(groups[m.cursor], m.symbols)
 		}
+	case ViewRepo:
+		skills := m.visibleRepoSkills()
+		if m.cursor >= 0 && m.cursor < len(skills) {
+			if skill, ok := m.repoSkillByName(skills[m.cursor].Name); ok {
+				m.modal = repoDetailModal(skill, m.repoUsage[skill.Name], m.symbols)
+			}
+		}
+	case ViewDoctor:
+		if m.cursor >= 0 && m.cursor < len(m.issues) {
+			m.modal = doctorDetailModal(m.issues[m.cursor])
+		}
 	}
+}
+
+func (m *Model) repoSkillByName(name string) (repo.Skill, bool) {
+	for _, skill := range m.repo {
+		if skill.Name == name {
+			return skill, true
+		}
+	}
+	return repo.Skill{}, false
 }
 
 func (m *Model) openPreviewModal() {

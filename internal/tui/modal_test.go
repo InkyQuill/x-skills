@@ -76,6 +76,62 @@ func TestEnterOpensActiveDetailModal(t *testing.T) {
 	}
 }
 
+func TestEnterOpensRepoDetailModal(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
+	if err := os.RemoveAll(active); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), "zen-of-go"), active); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("modal is nil")
+	}
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"Detail: zen-of-go (Repo)", "Archive path", cfg.ArchiveSkillsRoot(), "Description", "Go style.", "Usages", ".Ag"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("repo detail modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestEnterOpensDoctorDetailModal(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	brokenPath := filepath.Join(root, "zen-of-go")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), brokenPath); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("modal is nil")
+	}
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"Detail: zen-of-go (Doctor)", "Issue kind", "broken-symlink", "Affected path", brokenPath, "Reason", "Safe fix"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("doctor detail modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestQuestionMarkOpensHelpModalWithGlobalKeys(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)

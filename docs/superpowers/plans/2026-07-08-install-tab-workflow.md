@@ -2549,14 +2549,14 @@ git commit -m "feat: render install audit summaries"
 
 ### Task 12: Documentation And Final Verification
 
-Status: in progress
+Status: completed
 
 **Files:**
 - Modify: `README.md`
 - Modify: `docs/superpowers/specs/2026-07-06-go-tui-install-and-repo-updates-design.md` only if implementation intentionally narrows behavior.
 - Test: full Go suite.
 
-- [ ] **Step 1: Update README TUI section**
+- [x] **Step 1: Update README TUI section**
 
 Replace the Install wording in `README.md`:
 
@@ -2569,7 +2569,7 @@ or install and link it into the current project. Manual generic Git installs
 remain CLI-first through `x-skills add --git`.
 ```
 
-- [ ] **Step 2: Run final verification**
+- [x] **Step 2: Run final verification**
 
 Run:
 
@@ -2583,7 +2583,7 @@ go build -o bin/x-skills ./cmd/x-skills
 
 Expected: all commands pass.
 
-- [ ] **Step 3: Manual smoke test**
+- [x] **Step 3: Manual smoke test**
 
 Run:
 
@@ -2600,7 +2600,7 @@ Manual checklist:
 - Press `a` on a testable result; archive is created and app remains on Install.
 - Press `i`; destination checklist opens with `.Ag` checked.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/superpowers/specs/2026-07-06-go-tui-install-and-repo-updates-design.md internal/remote internal/tui

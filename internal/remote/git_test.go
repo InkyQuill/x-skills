@@ -53,6 +53,46 @@ func TestFindSkillReportsAmbiguousName(t *testing.T) {
 	}
 }
 
+func TestFindSkillUsesValidPreferredPath(t *testing.T) {
+	repo := makeGitRepo(t)
+	writeRemoteSkill(t, repo, "packs/one", "dup-skill", "One.")
+	writeRemoteSkill(t, repo, "packs/two", "dup-skill", "Two.")
+	gitCommit(t, repo, "initial")
+	cache := NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	checkout, err := cache.Checkout(t.Context(), GitSource{CloneURL: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := checkout.FindSkill("dup-skill", "packs/two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Metadata.SkillPath != "packs/two" {
+		t.Fatalf("skill path = %q, want packs/two", found.Metadata.SkillPath)
+	}
+}
+
+func TestFindSkillRejectsPreferredPathTraversal(t *testing.T) {
+	checkout := Checkout{Path: t.TempDir()}
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "parent", path: "../outside"},
+		{name: "nested parent", path: "skills/../../outside"},
+		{name: "contained parent", path: "skills/../outside"},
+		{name: "absolute", path: filepath.Join(checkout.Path, "outside")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := checkout.FindSkill("skill", tt.path)
+			if err == nil || !strings.Contains(err.Error(), "invalid skill path") {
+				t.Fatalf("err = %v, want invalid skill path", err)
+			}
+		})
+	}
+}
+
 func makeGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

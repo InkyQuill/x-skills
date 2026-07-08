@@ -2,9 +2,11 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -20,7 +22,12 @@ type GitSource struct {
 
 type CheckoutCache struct {
 	root      string
-	checkouts map[string]Checkout
+	checkouts map[checkoutKey]Checkout
+}
+
+type checkoutKey struct {
+	cloneURL string
+	ref      string
 }
 
 type Checkout struct {
@@ -36,11 +43,11 @@ type FoundSkill struct {
 }
 
 func NewCheckoutCache(root string) *CheckoutCache {
-	return &CheckoutCache{root: root, checkouts: map[string]Checkout{}}
+	return &CheckoutCache{root: root, checkouts: map[checkoutKey]Checkout{}}
 }
 
 func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkout, error) {
-	key := source.CloneURL + "@" + source.Ref
+	key := checkoutKey{cloneURL: source.CloneURL, ref: source.Ref}
 	if checkout, ok := c.checkouts[key]; ok {
 		return checkout, nil
 	}
@@ -57,11 +64,11 @@ func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkou
 	}
 	args = append(args, source.CloneURL, dir)
 	if err := runGitCommand(ctx, "", args...); err != nil {
-		return Checkout{}, err
+		return Checkout{}, cleanupCheckoutDir(dir, err)
 	}
 	commit, err := gitCommandOutput(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
-		return Checkout{}, err
+		return Checkout{}, cleanupCheckoutDir(dir, err)
 	}
 	checkout := Checkout{Path: dir, Source: source, Commit: strings.TrimSpace(commit)}
 	c.checkouts[key] = checkout
@@ -70,7 +77,11 @@ func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkou
 
 func (c Checkout) FindSkill(name, preferredPath string) (FoundSkill, error) {
 	if preferredPath != "" {
-		return c.foundAt(filepath.Join(c.Path, filepath.FromSlash(preferredPath)), preferredPath)
+		skillDir, rel, err := c.resolvePreferredSkillPath(preferredPath)
+		if err != nil {
+			return FoundSkill{}, err
+		}
+		return c.foundAt(skillDir, rel)
 	}
 	var matches []string
 	err := filepath.WalkDir(c.Path, func(path string, entry os.DirEntry, err error) error {
@@ -102,6 +113,40 @@ func (c Checkout) FindSkill(name, preferredPath string) (FoundSkill, error) {
 	return c.foundAt(filepath.Join(c.Path, filepath.FromSlash(matches[0])), matches[0])
 }
 
+func (c Checkout) resolvePreferredSkillPath(preferredPath string) (string, string, error) {
+	normalized := strings.ReplaceAll(preferredPath, `\`, `/`)
+	cleanRel := path.Clean(normalized)
+	if path.IsAbs(normalized) || filepath.IsAbs(preferredPath) || cleanRel == "." || hasParentTraversal(normalized) {
+		return "", "", fmt.Errorf("invalid skill path %q", preferredPath)
+	}
+
+	root, err := filepath.Abs(c.Path)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve checkout root: %w", err)
+	}
+	target, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(cleanRel)))
+	if err != nil {
+		return "", "", fmt.Errorf("resolve skill path: %w", err)
+	}
+	relToRoot, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", "", fmt.Errorf("check skill path: %w", err)
+	}
+	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(os.PathSeparator)) || filepath.IsAbs(relToRoot) {
+		return "", "", fmt.Errorf("invalid skill path %q", preferredPath)
+	}
+	return target, cleanRel, nil
+}
+
+func hasParentTraversal(path string) bool {
+	for _, part := range strings.Split(path, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 func (c Checkout) foundAt(path, rel string) (FoundSkill, error) {
 	info, err := skills.Read(path)
 	if err != nil {
@@ -125,6 +170,13 @@ func (c Checkout) foundAt(path, rel string) (FoundSkill, error) {
 
 func runGitCommand(ctx context.Context, dir string, args ...string) error {
 	_, err := gitCommandOutput(ctx, dir, args...)
+	return err
+}
+
+func cleanupCheckoutDir(dir string, err error) error {
+	if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+		return errors.Join(err, fmt.Errorf("cleanup checkout dir: %w", cleanupErr))
+	}
 	return err
 }
 

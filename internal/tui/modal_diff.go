@@ -11,15 +11,20 @@ import (
 )
 
 type conflictDiffModal struct {
-	name     string
-	diff     directoryDiff
-	selected int
-	scroll   int
-	apply    func(string)
+	name          string
+	diff          directoryDiff
+	selected      int
+	scroll        int
+	incomingLabel string
+	apply         func(string)
 }
 
 func newConflictDiffModal(name string, diff directoryDiff, apply func(string)) modal {
-	return conflictDiffModal{name: name, diff: diff, apply: apply}
+	return newConflictDiffModalWithIncomingLabel(name, diff, "Incoming active", apply)
+}
+
+func newConflictDiffModalWithIncomingLabel(name string, diff directoryDiff, incomingLabel string, apply func(string)) modal {
+	return conflictDiffModal{name: name, diff: diff, incomingLabel: incomingLabel, apply: apply}
 }
 
 func (c conflictDiffModal) Title() string {
@@ -38,6 +43,21 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 		verticalChrome     = 12
 		minBodyHeight      = 4
 	)
+	if width < 72 || height < 18 {
+		lines := []string{
+			accentStyle.Render("Archive conflict: " + c.name),
+			"",
+			"Terminal too small to review this diff.",
+			"Please resize to at least 72x18.",
+			"",
+			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+				{ASCII: "q", Label: "cancel"},
+			})),
+		}
+		return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+	}
+
 	innerWidth := width - horizontalMargin
 	if innerWidth > maxInnerWidth {
 		innerWidth = maxInnerWidth
@@ -64,14 +84,14 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 	lines := []string{
 		accentStyle.Render("Archive conflict: " + c.name),
 		"Decision applies to the whole skill directory.",
-		diffLegend(),
+		diffLegend(c.incomingLabel),
 		"",
 		fmt.Sprintf("%-*s │ %s", fileWidth, "Files", "Diff review"),
 		fmt.Sprintf("%s─┼─%s", strings.Repeat("─", fileWidth), strings.Repeat("─", diffWidth)),
 	}
 	diffLines := []string{mutedStyle.Render("No differences.")}
 	if len(c.diff.Files) > 0 {
-		diffLines = coloredDiffLines(c.diff.Files[c.selected].Text)
+		diffLines = coloredDiffLines(c.diff.Files[c.selected].Text, c.incomingLabel)
 	}
 	c.scroll = clampScroll(c.scroll, len(diffLines), bodyHeight)
 	for row := 0; row < bodyHeight; row++ {
@@ -149,8 +169,8 @@ func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func diffLegend() string {
-	return "Legend: " + archiveStyle.Render("Archive") + "  " + incomingStyle.Render("Incoming active")
+func diffLegend(incomingLabel string) string {
+	return "Legend: " + archiveStyle.Render("Archive") + "  " + incomingStyle.Render(incomingLabel)
 }
 
 func diffMarker(kind string) string {
@@ -166,21 +186,21 @@ func diffMarker(kind string) string {
 	}
 }
 
-func coloredDiffLines(text string) []string {
+func coloredDiffLines(text string, incomingLabel string) []string {
 	raw := strings.Split(text, "\n")
 	lines := make([]string, 0, len(raw))
 	for _, line := range raw {
-		lines = append(lines, colorDiffLine(line))
+		lines = append(lines, colorDiffLine(line, incomingLabel))
 	}
 	return lines
 }
 
-func colorDiffLine(line string) string {
+func colorDiffLine(line string, incomingLabel string) string {
 	switch {
 	case strings.HasPrefix(line, "--- archive"):
 		return diffMetaStyle.Render("Archive block")
 	case strings.HasPrefix(line, "+++ active"):
-		return diffMetaStyle.Render("Incoming active block")
+		return diffMetaStyle.Render(incomingLabel + " block")
 	case strings.HasPrefix(line, "-"):
 		return archiveStyle.Render("Archive   " + strings.TrimPrefix(line, "-"))
 	case strings.HasPrefix(line, "+"):

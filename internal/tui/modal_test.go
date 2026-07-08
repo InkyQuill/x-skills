@@ -258,6 +258,38 @@ func TestConflictModalShowsFileListAndDiff(t *testing.T) {
 	}
 }
 
+func TestConflictModalSupportsIncomingRemoteLabel(t *testing.T) {
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Kind: "changed", Text: "--- archive\n+++ active\n-old\n+new"}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.modal = newConflictDiffModalWithIncomingLabel("zen-of-go", diff, "Incoming remote", func(string) {})
+
+	view := plain(m.modal.View(120, 40, m))
+	for _, want := range []string{"Legend:", "Archive", "Incoming remote"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("conflict modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Incoming active") {
+		t.Fatalf("remote conflict modal should not say Incoming active:\n%s", view)
+	}
+}
+
+func TestConflictModalPromptsResizeWhenTooSmall(t *testing.T) {
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Kind: "changed", Text: "-old\n+new"}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.modal = newConflictDiffModal("zen-of-go", diff, func(string) {})
+
+	view := plain(m.modal.View(50, 12, m))
+	for _, want := range []string{"Archive conflict: zen-of-go", "Terminal too small", "resize", "Esc cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("small diff modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "SKILL.md") {
+		t.Fatalf("small diff modal should not squeeze diff content:\n%s", view)
+	}
+}
+
 func TestConflictModalScrollsDiffBody(t *testing.T) {
 	var lines []string
 	lines = append(lines, "--- archive", "+++ active")

@@ -22,6 +22,8 @@ type SearchRequest struct {
 type SearchResult struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
+	ID          string        `json:"id,omitempty"`
+	SourceSlug  string        `json:"source,omitempty"`
 	Owner       string        `json:"owner"`
 	Repo        string        `json:"repo"`
 	Path        string        `json:"path"`
@@ -85,9 +87,44 @@ func (c SearchClient) Search(ctx context.Context, req SearchRequest) ([]SearchRe
 	}
 	var payload struct {
 		Results []SearchResult `json:"results"`
+		Skills  []SearchResult `json:"skills"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode search results: %w", err)
 	}
+	if len(payload.Skills) > 0 {
+		results := make([]SearchResult, 0, len(payload.Skills))
+		for _, result := range payload.Skills {
+			normalized, ok := normalizeSkillsAPIResult(result)
+			if ok {
+				results = append(results, normalized)
+			}
+		}
+		return results, nil
+	}
 	return payload.Results, nil
+}
+
+func normalizeSkillsAPIResult(result SearchResult) (SearchResult, bool) {
+	result.Name = strings.TrimSpace(result.Name)
+	result.ID = strings.TrimSpace(result.ID)
+	if result.Name == "" || result.ID == "" {
+		return SearchResult{}, false
+	}
+	source := strings.TrimSpace(result.SourceSlug)
+	if source == "" {
+		source = strings.TrimSpace(result.ID)
+		if slash := strings.LastIndex(source, "/"); slash >= 0 {
+			source = source[:slash]
+		}
+	}
+	parts := strings.SplitN(source, "/", 2)
+	if len(parts) == 2 {
+		result.Owner = parts[0]
+		result.Repo = parts[1]
+	}
+	if result.Path == "" && source != "" {
+		result.Path = strings.TrimPrefix(result.ID, source+"/")
+	}
+	return result, true
 }

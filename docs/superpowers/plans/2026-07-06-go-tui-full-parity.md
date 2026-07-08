@@ -72,7 +72,7 @@ Remote `skills.sh` install/search, theme switching, mouse support, fuzzy filteri
 ### Files Not To Touch For This Plan
 
 - Python/Textual files from old `interactive` specs: the Go path is `x-skills tui`.
-- Remote search/install code: the Install tab is reserved but not implemented in this pass.
+- Remote search/install code shipped in the follow-up Install tab workflow plan; this original parity plan is retained as historical implementation context.
 
 ## Shared Test Helpers
 
@@ -130,7 +130,7 @@ Expected after each task: `ok github.com/InkyQuill/x-skills/internal/tui`.
 - Modify: `internal/tui/styles.go`
 - Modify: `internal/tui/model_test.go`
 
-- [ ] **Step 1: Write failing key schema tests**
+- [x] **Step 1: Write failing key schema tests**
 
 Add these tests to `internal/tui/model_test.go`:
 
@@ -191,7 +191,7 @@ func TestCtrlRRefreshesWithoutTakingRepoKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -201,7 +201,7 @@ go test ./internal/tui -run 'TestModelSwitchesViewsWithUppercaseGlobalTabs|TestL
 
 Expected: FAIL because lowercase `r`/`d` still switch views and `ctrl+r` is not handled.
 
-- [ ] **Step 3: Add options and symbols**
+- [x] **Step 3: Add options and symbols**
 
 Create `internal/tui/options.go`:
 
@@ -295,7 +295,7 @@ func isRefreshKey(msg tea.KeyMsg) bool {
 }
 ```
 
-- [ ] **Step 4: Update model construction and key routing**
+- [x] **Step 4: Update model construction and key routing**
 
 Change `Model` in `internal/tui/model.go` to include options and symbols:
 
@@ -372,7 +372,7 @@ case "f":
 
 Do not keep lowercase `a`, `r`, or `d` as tab switches.
 
-- [ ] **Step 5: Update header/footer rendering**
+- [x] **Step 5: Update header/footer rendering**
 
 In `internal/tui/views.go`, update `renderHeader` and `renderStatus`:
 
@@ -403,7 +403,7 @@ func renderStatus(m Model, width int) string {
 }
 ```
 
-- [ ] **Step 6: Run tests and verify pass**
+- [x] **Step 6: Run tests and verify pass**
 
 Run:
 
@@ -413,7 +413,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS after updating any existing tests that still press lowercase `r` or `d` for tab navigation.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui/options.go internal/tui/keys.go internal/tui/symbols.go internal/tui/model.go internal/tui/views.go internal/tui/styles.go internal/tui/model_test.go
@@ -430,7 +430,7 @@ git commit -m "feat: align tui global key schema"
 - Modify: `internal/tui/styles.go`
 - Modify: `internal/tui/model_test.go`
 
-- [ ] **Step 1: Write failing CLI option test**
+- [x] **Step 1: Write failing CLI option test**
 
 Add to `internal/cli/tui_test.go`:
 
@@ -446,7 +446,7 @@ func TestTUIAcceptsASCIIFlagWithNoInput(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Write failing ASCII render test**
+- [x] **Step 2: Write failing ASCII render test**
 
 Add to `internal/tui/model_test.go`:
 
@@ -468,7 +468,7 @@ func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -478,7 +478,7 @@ go test ./internal/cli ./internal/tui -run 'TestTUIAcceptsASCIIFlagWithNoInput|T
 
 Expected: FAIL because `--ascii` is not wired and row rendering still hardcodes symbols.
 
-- [ ] **Step 4: Wire CLI flag**
+- [x] **Step 4: Wire CLI flag**
 
 Change `internal/cli/tui.go`:
 
@@ -512,7 +512,7 @@ func newTUICommand(rootOptions *options) *cobra.Command {
 }
 ```
 
-- [ ] **Step 5: Route symbols into row prefixes**
+- [x] **Step 5: Route symbols into row prefixes**
 
 Update `rowPrefix` in `internal/tui/views.go`:
 
@@ -530,7 +530,7 @@ func rowPrefix(m Model, index int, id string) string {
 }
 ```
 
-- [ ] **Step 6: Disable colors when `NO_COLOR` is set**
+- [x] **Step 6: Disable colors when `NO_COLOR` is set**
 
 In `internal/tui/styles.go`, add:
 
@@ -557,7 +557,7 @@ func init() {
 }
 ```
 
-- [ ] **Step 7: Run tests and verify pass**
+- [x] **Step 7: Run tests and verify pass**
 
 Run:
 
@@ -567,7 +567,7 @@ go test ./internal/cli ./internal/tui -count=1
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/cli/tui.go internal/cli/tui_test.go internal/tui/styles.go internal/tui/views.go internal/tui/model_test.go
@@ -583,7 +583,7 @@ git commit -m "feat: add tui ascii and no-color support"
 - Create: `internal/tui/rows_test.go`
 - Modify: `internal/tui/views.go`
 
-- [ ] **Step 1: Write failing row model tests**
+- [x] **Step 1: Write failing row model tests**
 
 Create `internal/tui/rows_test.go`:
 
@@ -665,7 +665,7 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -675,7 +675,7 @@ go test ./internal/tui -run 'TestActiveGroupRowsShowRootChipsAliasesAndCount|Tes
 
 Expected: FAIL because `Aliases` and `Chips` do not exist and rows do not render `xN` badges with spec symbols.
 
-- [ ] **Step 3: Add row model fields and helpers**
+- [x] **Step 3: Add row model fields and helpers**
 
 Move active row model code from `views.go` into `internal/tui/rows.go`, and define:
 
@@ -723,7 +723,7 @@ func appendUnique(values []string, value string) []string {
 
 Update `groupActiveSkills` so each member appends `rootChip(skill.Root.Scope, skill.Root.Target)` to `Chips`, and basename aliases that differ from `Name` to `Aliases`.
 
-- [ ] **Step 4: Render active rows from chips and symbols**
+- [x] **Step 4: Render active rows from chips and symbols**
 
 Update `renderActiveRows` and `activeDetail` in `internal/tui/views.go`:
 
@@ -760,7 +760,7 @@ func renderStatusChip(m Model, status string) string {
 
 Remove the old `renderStatusChip(status string)` from `styles.go`.
 
-- [ ] **Step 5: Run tests and verify pass**
+- [x] **Step 5: Run tests and verify pass**
 
 Run:
 
@@ -770,7 +770,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/tui/rows.go internal/tui/rows_test.go internal/tui/views.go internal/tui/styles.go
@@ -786,7 +786,7 @@ git commit -m "feat: render active rows with chips and aliases"
 - Modify: `internal/tui/rows_test.go`
 - Modify: `internal/tui/views.go`
 
-- [ ] **Step 1: Write failing repo and doctor render tests**
+- [x] **Step 1: Write failing repo and doctor render tests**
 
 Add to `internal/tui/rows_test.go`:
 
@@ -836,7 +836,7 @@ func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
 
 Add imports for `github.com/InkyQuill/x-skills/internal/doctor` and `github.com/InkyQuill/x-skills/internal/repo`.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -846,7 +846,7 @@ go test ./internal/tui -run 'TestRepoRowsShowUsageChipsAndSelectionMarkers|TestD
 
 Expected: FAIL because `Model.repoUsage` does not exist and doctor rows do not use spec symbols.
 
-- [ ] **Step 3: Add usage map to model reload**
+- [x] **Step 3: Add usage map to model reload**
 
 In `internal/tui/model.go`, add:
 
@@ -882,7 +882,7 @@ func usageByRepoName(groups []ActiveGroup) map[string][]string {
 }
 ```
 
-- [ ] **Step 4: Render repo and doctor rows**
+- [x] **Step 4: Render repo and doctor rows**
 
 Update `renderRepoRows`:
 
@@ -915,7 +915,7 @@ func renderDoctorRows(m Model, width int) []string {
 }
 ```
 
-- [ ] **Step 5: Run tests and verify pass**
+- [x] **Step 5: Run tests and verify pass**
 
 Run:
 
@@ -925,7 +925,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/tui/model.go internal/tui/rows.go internal/tui/rows_test.go internal/tui/views.go
@@ -943,7 +943,7 @@ git commit -m "feat: render repo usage and doctor issue rows"
 - Modify: `internal/tui/views.go`
 - Modify: `internal/tui/model_test.go`
 
-- [ ] **Step 1: Write failing filter tests**
+- [x] **Step 1: Write failing filter tests**
 
 Create `internal/tui/filter_test.go`:
 
@@ -1020,7 +1020,7 @@ func TestSelectionClearsOnViewSwitch(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -1030,7 +1030,7 @@ go test ./internal/tui -run 'TestFilterNarrowsActiveRowsAndExcludesFullPaths|Tes
 
 Expected: FAIL because filter state is not implemented and selections persist.
 
-- [ ] **Step 3: Implement filter model**
+- [x] **Step 3: Implement filter model**
 
 Create `internal/tui/filter.go`:
 
@@ -1084,7 +1084,7 @@ func (f *filterState) update(msg tea.KeyMsg) bool {
 }
 ```
 
-- [ ] **Step 4: Wire filter state into model**
+- [x] **Step 4: Wire filter state into model**
 
 Add to `Model`:
 
@@ -1128,7 +1128,7 @@ func (m *Model) setView(view ViewName) {
 }
 ```
 
-- [ ] **Step 5: Apply filter in row renderers**
+- [x] **Step 5: Apply filter in row renderers**
 
 In `renderActiveRows`, skip groups that do not match:
 
@@ -1148,7 +1148,7 @@ if !m.filter.matches(skill.Name, skill.Description, strings.Join(m.repoUsage[ski
 
 Do not match absolute paths.
 
-- [ ] **Step 6: Render filter command bar above footer**
+- [x] **Step 6: Render filter command bar above footer**
 
 In `renderStatus`, before footer line:
 
@@ -1160,7 +1160,7 @@ if m.filter.Active {
 }
 ```
 
-- [ ] **Step 7: Run tests and verify pass**
+- [x] **Step 7: Run tests and verify pass**
 
 Run:
 
@@ -1170,7 +1170,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/tui/filter.go internal/tui/filter_test.go internal/tui/model.go internal/tui/views.go internal/tui/model_test.go
@@ -1191,7 +1191,7 @@ git commit -m "feat: add tui filtering semantics"
 - Modify: `internal/tui/views.go`
 - Keep temporarily: `internal/tui/wizard.go`
 
-- [ ] **Step 1: Write failing modal routing tests**
+- [x] **Step 1: Write failing modal routing tests**
 
 Create `internal/tui/modal_test.go`:
 
@@ -1251,7 +1251,7 @@ func TestModalRendersOverShellWithoutRemovingFooter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -1261,7 +1261,7 @@ go test ./internal/tui -run 'TestModalConsumesBackgroundKeys|TestEscClosesModal|
 
 Expected: FAIL because `Model.modal` and result modal do not exist.
 
-- [ ] **Step 3: Add modal interface and result modal**
+- [x] **Step 3: Add modal interface and result modal**
 
 Create `internal/tui/modal.go`:
 
@@ -1345,7 +1345,7 @@ func modalStyle(width, height int) lipgloss.Style {
 }
 ```
 
-- [ ] **Step 4: Route modal keys in model**
+- [x] **Step 4: Route modal keys in model**
 
 Add to `Model`:
 
@@ -1368,7 +1368,7 @@ if m.modal != nil {
 }
 ```
 
-- [ ] **Step 5: Render modal above status/footer**
+- [x] **Step 5: Render modal above status/footer**
 
 In `View`, replace wizard rendering with modal rendering:
 
@@ -1385,7 +1385,7 @@ parts = append(parts, renderStatus(m, width))
 
 Leave `wizard` code in place for one task if needed, but do not render it once modal exists.
 
-- [ ] **Step 6: Run tests and verify pass**
+- [x] **Step 6: Run tests and verify pass**
 
 Run:
 
@@ -1395,7 +1395,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS after updating tests that expected `wizard.Open` rendering.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui/modal.go internal/tui/modal_result.go internal/tui/modal_test.go internal/tui/model.go internal/tui/views.go internal/tui/styles.go
@@ -1414,7 +1414,7 @@ git commit -m "feat: add typed tui modal routing"
 - Modify: `internal/tui/model.go`
 - Modify: `go.mod`, `go.sum`
 
-- [ ] **Step 1: Add Glamour dependency**
+- [x] **Step 1: Add Glamour dependency**
 
 Run:
 
@@ -1424,7 +1424,7 @@ go get github.com/charmbracelet/glamour@latest
 
 Expected: `go.mod` includes `github.com/charmbracelet/glamour`.
 
-- [ ] **Step 2: Write failing modal open tests**
+- [x] **Step 2: Write failing modal open tests**
 
 Add to `internal/tui/modal_test.go`:
 
@@ -1488,7 +1488,7 @@ func TestPreviewModalTogglesRawAndRendered(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -1498,7 +1498,7 @@ go test ./internal/tui -run 'TestEnterOpensActiveDetailModal|TestQuestionMarkOpe
 
 Expected: FAIL because detail/help/preview modals are not implemented.
 
-- [ ] **Step 4: Implement detail modal**
+- [x] **Step 4: Implement detail modal**
 
 Create `internal/tui/modal_detail.go` with:
 
@@ -1549,7 +1549,7 @@ func (d detailModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 ```
 
-- [ ] **Step 5: Implement help modal**
+- [x] **Step 5: Implement help modal**
 
 Create `internal/tui/modal_help.go`:
 
@@ -1605,7 +1605,7 @@ func (h helpModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 ```
 
-- [ ] **Step 6: Implement preview modal**
+- [x] **Step 6: Implement preview modal**
 
 Create `internal/tui/modal_preview.go`:
 
@@ -1674,7 +1674,7 @@ func (p previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 ```
 
-- [ ] **Step 7: Open modals from model**
+- [x] **Step 7: Open modals from model**
 
 In `handleKey`, add:
 
@@ -1724,7 +1724,7 @@ func resolvedSkillPath(path string) string {
 
 Import `path/filepath` and `github.com/InkyQuill/x-skills/internal/repo`.
 
-- [ ] **Step 8: Run tests and verify pass**
+- [x] **Step 8: Run tests and verify pass**
 
 Run:
 
@@ -1734,7 +1734,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add go.mod go.sum internal/tui/modal_detail.go internal/tui/modal_help.go internal/tui/modal_preview.go internal/tui/modal_test.go internal/tui/model.go
@@ -1750,7 +1750,7 @@ git commit -m "feat: add tui detail help and preview modals"
 - Create: `internal/tui/diff_test.go`
 - Modify: `internal/actions/migrate.go`
 
-- [ ] **Step 1: Write failing diff tests**
+- [x] **Step 1: Write failing diff tests**
 
 Create `internal/tui/diff_test.go`:
 
@@ -1843,7 +1843,7 @@ func TestBuildDirectoryDiffShowsBinaryMetadata(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -1853,7 +1853,7 @@ go test ./internal/tui -run 'TestBuildDirectoryDiff' -count=1
 
 Expected: FAIL because `buildDirectoryDiff` does not exist.
 
-- [ ] **Step 3: Implement diff model**
+- [x] **Step 3: Implement diff model**
 
 Create `internal/tui/diff.go`:
 
@@ -2018,7 +2018,7 @@ func shortSHA(data []byte) string {
 }
 ```
 
-- [ ] **Step 4: Run tests and verify pass**
+- [x] **Step 4: Run tests and verify pass**
 
 Run:
 
@@ -2028,7 +2028,7 @@ go test ./internal/tui -run 'TestBuildDirectoryDiff' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tui/diff.go internal/tui/diff_test.go
@@ -2045,7 +2045,7 @@ git commit -m "feat: add tui archive conflict diff model"
 - Modify: `internal/tui/wizard.go`
 - Modify: `internal/tui/model.go`
 
-- [ ] **Step 1: Write failing conflict modal tests**
+- [x] **Step 1: Write failing conflict modal tests**
 
 Add to `internal/tui/modal_test.go`:
 
@@ -2091,7 +2091,7 @@ func TestConflictModalAppliesKeepArchiveKey(t *testing.T) {
 
 If `actions.ConflictResolution` is not a named type, use `func(string)` in `newConflictDiffModal`.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -2101,7 +2101,7 @@ go test ./internal/tui -run 'TestConflictModal' -count=1
 
 Expected: FAIL because `newConflictDiffModal` does not exist.
 
-- [ ] **Step 3: Implement conflict modal**
+- [x] **Step 3: Implement conflict modal**
 
 Create `internal/tui/modal_diff.go`:
 
@@ -2207,7 +2207,7 @@ func firstDiffLine(text string) string {
 }
 ```
 
-- [ ] **Step 4: Fix key conflict inside diff modal**
+- [x] **Step 4: Fix key conflict inside diff modal**
 
 The modal spec uses `k` for keep archive and arrow keys for scrolling. Remove `"k"` from the scroll case in `Update`:
 
@@ -2221,7 +2221,7 @@ case "k":
 	return true, nil
 ```
 
-- [ ] **Step 5: Run tests and verify pass**
+- [x] **Step 5: Run tests and verify pass**
 
 Run:
 
@@ -2231,7 +2231,7 @@ go test ./internal/tui -run 'TestConflictModal' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/tui/modal_diff.go internal/tui/modal_test.go
@@ -2248,7 +2248,7 @@ git commit -m "feat: add fullscreen conflict diff modal"
 - Modify: `internal/tui/model.go`
 - Modify: `internal/tui/wizard.go`
 
-- [ ] **Step 1: Write failing migrate flow tests**
+- [x] **Step 1: Write failing migrate flow tests**
 
 Create `internal/tui/actions_test.go`:
 
@@ -2331,7 +2331,7 @@ func TestActiveMigrateDivergentArchiveOpensConflictModal(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -2341,7 +2341,7 @@ go test ./internal/tui -run 'TestActiveMigrate' -count=1
 
 Expected: FAIL because `m` still opens the old wizard or does not open modal flow.
 
-- [ ] **Step 3: Create action result types**
+- [x] **Step 3: Create action result types**
 
 Create `internal/tui/actions.go`:
 
@@ -2418,7 +2418,7 @@ func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution st
 
 This uses `newConfirmModal`, created in the next step.
 
-- [ ] **Step 4: Implement compact confirmation modal**
+- [x] **Step 4: Implement compact confirmation modal**
 
 Create `internal/tui/modal_confirm.go`:
 
@@ -2486,7 +2486,7 @@ func (c confirmModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 ```
 
-- [ ] **Step 5: Route migrate key**
+- [x] **Step 5: Route migrate key**
 
 In `handleKey`, replace `m.openWizard(ActionMigrate)` with:
 
@@ -2494,7 +2494,7 @@ In `handleKey`, replace `m.openWizard(ActionMigrate)` with:
 m.openMigrateModal()
 ```
 
-- [ ] **Step 6: Run tests and verify pass**
+- [x] **Step 6: Run tests and verify pass**
 
 Run:
 
@@ -2504,7 +2504,7 @@ go test ./internal/tui -run 'TestActiveMigrate' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui/actions.go internal/tui/actions_test.go internal/tui/modal_confirm.go internal/tui/model.go
@@ -2521,7 +2521,7 @@ git commit -m "feat: migrate active skills through modals"
 - Modify: `internal/tui/actions_test.go`
 - Modify: `internal/tui/model.go`
 
-- [ ] **Step 1: Write failing active unlink test**
+- [x] **Step 1: Write failing active unlink test**
 
 Add to `internal/tui/actions_test.go`:
 
@@ -2562,7 +2562,7 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -2572,7 +2572,7 @@ go test ./internal/tui -run TestActiveUnlinkGroupsManagedBrokenAndUnmanaged -cou
 
 Expected: FAIL because `u` still opens wizard.
 
-- [ ] **Step 3: Implement choice modal**
+- [x] **Step 3: Implement choice modal**
 
 Create `internal/tui/modal_choice.go`:
 
@@ -2634,7 +2634,7 @@ func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 ```
 
-- [ ] **Step 4: Implement unlink modal opener**
+- [x] **Step 4: Implement unlink modal opener**
 
 Add to `internal/tui/actions.go`:
 
@@ -2694,7 +2694,7 @@ func (m *Model) applyUnlinkTargets(targets []actions.ActiveSkill, deleteUnmanage
 }
 ```
 
-- [ ] **Step 5: Route unlink key**
+- [x] **Step 5: Route unlink key**
 
 In `handleKey`, replace `m.openWizard(ActionUnlink)` with:
 
@@ -2702,7 +2702,7 @@ In `handleKey`, replace `m.openWizard(ActionUnlink)` with:
 m.openUnlinkModal()
 ```
 
-- [ ] **Step 6: Run tests and verify pass**
+- [x] **Step 6: Run tests and verify pass**
 
 Run:
 
@@ -2712,7 +2712,7 @@ go test ./internal/tui -run 'TestActiveUnlink|TestActiveMigrate' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui/modal_choice.go internal/tui/actions.go internal/tui/actions_test.go internal/tui/model.go
@@ -2729,7 +2729,7 @@ git commit -m "feat: add active unlink workbench modal"
 - Modify: `internal/tui/model.go`
 - Modify: `internal/repo/repo.go` if no delete helper exists
 
-- [ ] **Step 1: Write failing repo action tests**
+- [x] **Step 1: Write failing repo action tests**
 
 Add to `internal/tui/actions_test.go`:
 
@@ -2858,7 +2858,7 @@ func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -2868,7 +2868,7 @@ go test ./internal/tui -run 'TestRepoLinkModal|TestRepoUnlinkUsageChooser|TestRe
 
 Expected: FAIL because repo action modals are not implemented.
 
-- [ ] **Step 3: Implement repo link modal with destination state**
+- [x] **Step 3: Implement repo link modal with destination state**
 
 Add to `internal/tui/actions.go`:
 
@@ -3002,7 +3002,7 @@ func (r *repoLinkModal) move(direction string) {
 }
 ```
 
-- [ ] **Step 4: Implement repo usage chooser**
+- [x] **Step 4: Implement repo usage chooser**
 
 Add to `internal/tui/actions.go`:
 
@@ -3123,7 +3123,7 @@ func (m *Model) applyRepoUsageUnlink(r repoUsageModal) {
 }
 ```
 
-- [ ] **Step 5: Implement repo delete modal**
+- [x] **Step 5: Implement repo delete modal**
 
 Add to `internal/tui/actions.go`:
 
@@ -3181,7 +3181,7 @@ func (m *Model) applyRepoDelete(name string) {
 
 Add imports for `os`, `strings`, `tea "github.com/charmbracelet/bubbletea"`, `internal/config`, and `internal/repo`.
 
-- [ ] **Step 6: Route repo keys**
+- [x] **Step 6: Route repo keys**
 
 In `handleKey`:
 
@@ -3204,7 +3204,7 @@ case "d":
 
 Keep lowercase `d` as a Repo-only action; it must not switch Doctor.
 
-- [ ] **Step 7: Run tests and verify pass**
+- [x] **Step 7: Run tests and verify pass**
 
 Run:
 
@@ -3214,7 +3214,7 @@ go test ./internal/tui -run 'TestRepoLink|TestRepoUnlink|TestRepoDelete' -count=
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/tui/actions.go internal/tui/actions_test.go internal/tui/model.go
@@ -3230,7 +3230,7 @@ git commit -m "feat: add repo link unlink and delete modals"
 - Modify: `internal/tui/actions_test.go`
 - Modify: `internal/tui/model.go`
 
-- [ ] **Step 1: Write failing doctor fix test**
+- [x] **Step 1: Write failing doctor fix test**
 
 Add to `internal/tui/actions_test.go`:
 
@@ -3271,7 +3271,7 @@ func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -3281,7 +3281,7 @@ go test ./internal/tui -run TestDoctorFixModalShowsIssueCountsAndApplies -count=
 
 Expected: FAIL because `f` still uses wizard or old flow.
 
-- [ ] **Step 3: Implement doctor fix modal**
+- [x] **Step 3: Implement doctor fix modal**
 
 Add to `internal/tui/actions.go`:
 
@@ -3319,7 +3319,7 @@ func (m *Model) openDoctorFixModal() {
 
 Add import for `internal/doctor` if missing.
 
-- [ ] **Step 4: Route doctor fix key**
+- [x] **Step 4: Route doctor fix key**
 
 In `handleKey`:
 
@@ -3330,7 +3330,7 @@ case "f":
 	}
 ```
 
-- [ ] **Step 5: Run tests and verify pass**
+- [x] **Step 5: Run tests and verify pass**
 
 Run:
 
@@ -3340,7 +3340,7 @@ go test ./internal/tui -run TestDoctorFixModalShowsIssueCountsAndApplies -count=
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/tui/actions.go internal/tui/actions_test.go internal/tui/model.go
@@ -3356,7 +3356,7 @@ git commit -m "feat: add doctor fix confirmation modal"
 - Modify: `internal/tui/styles.go`
 - Create: `internal/tui/render_test.go`
 
-- [ ] **Step 1: Write failing render tests**
+- [x] **Step 1: Write failing render tests**
 
 Create `internal/tui/render_test.go`:
 
@@ -3403,7 +3403,7 @@ func TestNarrowShellCollapsesInspector(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -3413,7 +3413,7 @@ go test ./internal/tui -run 'TestWideShellRendersListInspectorStatusAndFooter|Te
 
 Expected: FAIL because there is no inspector shell.
 
-- [ ] **Step 3: Render shell panels**
+- [x] **Step 3: Render shell panels**
 
 In `internal/tui/views.go`, replace `renderRows` usage in `View` with:
 
@@ -3473,7 +3473,7 @@ func rowsForView(m Model, width int) []string {
 }
 ```
 
-- [ ] **Step 4: Render inspector**
+- [x] **Step 4: Render inspector**
 
 Add:
 
@@ -3504,7 +3504,7 @@ func renderInspector(m Model, width, height int) string {
 }
 ```
 
-- [ ] **Step 5: Run tests and verify pass**
+- [x] **Step 5: Run tests and verify pass**
 
 Run:
 
@@ -3514,7 +3514,7 @@ go test ./internal/tui -run 'TestWideShell|TestNarrowShell|TestRowsScroll' -coun
 
 Expected: PASS, including the existing scroll test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/tui/views.go internal/tui/styles.go internal/tui/render_test.go
@@ -3531,7 +3531,7 @@ git commit -m "feat: render tui list inspector shell"
 - Modify: `internal/tui/model_test.go`
 - Modify: `internal/tui/actions_test.go`
 
-- [ ] **Step 1: Write failing assertion that wizard is gone**
+- [x] **Step 1: Write failing assertion that wizard is gone**
 
 Add to `internal/tui/model_test.go`:
 
@@ -3555,7 +3555,7 @@ func TestModelUsesModalInsteadOfWizard(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure if wizard remains visible**
+- [x] **Step 2: Run tests and verify failure if wizard remains visible**
 
 Run:
 
@@ -3565,7 +3565,7 @@ go test ./internal/tui -run TestModelUsesModalInsteadOfWizard -count=1
 
 Expected: FAIL if old wizard strings are still rendered or old key paths are still active.
 
-- [ ] **Step 3: Remove wizard state**
+- [x] **Step 3: Remove wizard state**
 
 Remove from `Model`:
 
@@ -3589,7 +3589,7 @@ func (m Model) selectedActiveSkillsForAction(action string) []actions.ActiveSkil
 
 Use action strings `"migrate"` and `"unlink"` or define local constants in `actions.go`.
 
-- [ ] **Step 4: Update obsolete tests**
+- [x] **Step 4: Update obsolete tests**
 
 Replace old wizard tests:
 
@@ -3601,7 +3601,7 @@ Replace old wizard tests:
 
 Do not delete coverage; rename tests and assert modal behavior.
 
-- [ ] **Step 5: Run tests and verify pass**
+- [x] **Step 5: Run tests and verify pass**
 
 Run:
 
@@ -3611,7 +3611,7 @@ go test ./internal/tui -count=1
 
 Expected: PASS and no references to `Wizard` remain.
 
-- [ ] **Step 6: Search for wizard references**
+- [x] **Step 6: Search for wizard references**
 
 Run:
 
@@ -3621,7 +3621,7 @@ rg -n 'Wizard|wizard|ActionInstall|openWizard|renderWizard' internal/tui
 
 Expected: no output.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui
@@ -3635,7 +3635,7 @@ git commit -m "refactor: replace tui wizard with modals"
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Write failing README check**
+- [x] **Step 1: Write failing README check**
 
 Run:
 
@@ -3645,7 +3645,7 @@ rg -n 'x-skills interactive|interactive command|Textual-based manager' README.md
 
 Expected before edit: lines still mention the old interactive command.
 
-- [ ] **Step 2: Update README wording**
+- [x] **Step 2: Update README wording**
 
 Replace Go-path references to `x-skills interactive` with `x-skills tui`. Keep historical Python/design docs untouched.
 
@@ -3663,7 +3663,7 @@ go run ./cmd/x-skills tui
 Use `x-skills tui` for longer maintenance sessions where you need previews, conflict review, or grouped link/unlink operations.
 ```
 
-- [ ] **Step 3: Verify README no longer points users to old command**
+- [x] **Step 3: Verify README no longer points users to old command**
 
 Run:
 
@@ -3673,7 +3673,7 @@ rg -n 'x-skills interactive|Textual-based manager' README.md
 
 Expected: no output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md
@@ -3687,7 +3687,7 @@ git commit -m "docs: document go tui command"
 **Files:**
 - No planned source edits.
 
-- [ ] **Step 1: Run package tests**
+- [x] **Step 1: Run package tests**
 
 Run:
 
@@ -3697,7 +3697,7 @@ go test ./...
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused TUI tests with race detector**
+- [x] **Step 2: Run focused TUI tests with race detector**
 
 Run:
 
@@ -3707,7 +3707,7 @@ go test -race ./internal/tui
 
 Expected: PASS.
 
-- [ ] **Step 3: Build binary**
+- [x] **Step 3: Build binary**
 
 Run:
 
@@ -3717,7 +3717,7 @@ go build ./cmd/x-skills
 
 Expected: PASS and binary `./x-skills` is created in the repository root.
 
-- [ ] **Step 4: Smoke non-interactive guard**
+- [x] **Step 4: Smoke non-interactive guard**
 
 Run:
 
@@ -3731,7 +3731,7 @@ Expected: exits non-zero with:
 tui requires an interactive terminal
 ```
 
-- [ ] **Step 5: Manual TUI smoke**
+- [x] **Step 5: Manual TUI smoke**
 
 Run:
 
@@ -3755,7 +3755,7 @@ Expected manual checks:
 - divergent migrate opens fullscreen conflict diff;
 - Repo delete modal states current-project/global visibility limit.
 
-- [ ] **Step 6: Final consistency search**
+- [x] **Step 6: Final consistency search**
 
 Run:
 
@@ -3771,7 +3771,7 @@ Expected:
 - no lowercase tab-key spec entries;
 - no stale user-facing command or keymap wording.
 
-- [ ] **Step 7: Commit any verification-only fixes**
+- [x] **Step 7: Commit any verification-only fixes**
 
 If Step 6 required edits, run:
 

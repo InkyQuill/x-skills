@@ -59,3 +59,36 @@ func TestSearchRequestShapeAndResponse(t *testing.T) {
 		t.Fatalf("audit = %#v", results[0].Audit)
 	}
 }
+
+func TestSearchDecodesSkillsAPIShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"query":      "svelte",
+			"searchType": "fuzzy",
+			"skills": []map[string]any{{
+				"id":       "vercel-labs/json-render/svelte",
+				"name":     "svelte",
+				"installs": 802,
+				"source":   "vercel-labs/json-render",
+			}},
+			"count": 1,
+		})
+	}))
+	defer server.Close()
+
+	client := NewSearchClient(server.URL, server.Client())
+	results, err := client.Search(t.Context(), SearchRequest{Query: "svelte", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %#v", results)
+	}
+	got := results[0]
+	if got.Name != "svelte" || got.Owner != "vercel-labs" || got.Repo != "json-render" || got.Path != "svelte" || got.Installs != 802 {
+		t.Fatalf("result = %#v", got)
+	}
+	if got.Source() != "vercel-labs/json-render" {
+		t.Fatalf("source = %q", got.Source())
+	}
+}

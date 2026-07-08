@@ -37,6 +37,38 @@ func TestCheckoutCacheReusesCloneAndFindsSkill(t *testing.T) {
 	}
 }
 
+func TestCheckoutCacheHitUsesCurrentSourceMetadata(t *testing.T) {
+	repo := makeGitRepo(t)
+	writeRemoteSkill(t, repo, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitCommit(t, repo, "initial")
+
+	cache := NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	first, err := cache.Checkout(t.Context(), GitSource{CloneURL: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := cache.Checkout(t.Context(), GitSource{
+		CloneURL: repo,
+		Owner:    "octo",
+		Repo:     "skills",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Path != second.Path {
+		t.Fatalf("cache did not reuse checkout: %q != %q", first.Path, second.Path)
+	}
+	found, err := second.FindSkill("svelte-coder", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Metadata.SourceType != SourceTypeGitHub ||
+		found.Metadata.Owner != "octo" ||
+		found.Metadata.Repo != "skills" {
+		t.Fatalf("metadata = %#v", found.Metadata)
+	}
+}
+
 func TestFindSkillReportsAmbiguousName(t *testing.T) {
 	repo := makeGitRepo(t)
 	writeRemoteSkill(t, repo, "packs/one", "dup-skill", "One.")
@@ -90,6 +122,23 @@ func TestFindSkillRejectsPreferredPathTraversal(t *testing.T) {
 				t.Fatalf("err = %v, want invalid skill path", err)
 			}
 		})
+	}
+}
+
+func TestFindSkillRejectsPreferredPathSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeRemoteSkill(t, outside, "outside-skill", "outside-skill", "Outside.")
+	if err := os.Symlink(
+		filepath.Join(outside, "outside-skill"),
+		filepath.Join(root, "linked-skill"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	checkout := Checkout{Path: root}
+	_, err := checkout.FindSkill("outside-skill", "linked-skill")
+	if err == nil || !strings.Contains(err.Error(), "invalid skill path") {
+		t.Fatalf("err = %v, want invalid skill path", err)
 	}
 }
 

@@ -49,6 +49,7 @@ func NewCheckoutCache(root string) *CheckoutCache {
 func (c *CheckoutCache) Checkout(ctx context.Context, source GitSource) (Checkout, error) {
 	key := checkoutKey{cloneURL: source.CloneURL, ref: source.Ref}
 	if checkout, ok := c.checkouts[key]; ok {
+		checkout.Source = source
 		return checkout, nil
 	}
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
@@ -132,7 +133,26 @@ func (c Checkout) resolvePreferredSkillPath(preferredPath string) (string, strin
 	if err != nil {
 		return "", "", fmt.Errorf("check skill path: %w", err)
 	}
-	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(os.PathSeparator)) || filepath.IsAbs(relToRoot) {
+	if relToRoot == ".." ||
+		strings.HasPrefix(relToRoot, ".."+string(os.PathSeparator)) ||
+		filepath.IsAbs(relToRoot) {
+		return "", "", fmt.Errorf("invalid skill path %q", preferredPath)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve checkout root: %w", err)
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", "", err
+	}
+	relToResolvedRoot, err := filepath.Rel(resolvedRoot, resolvedTarget)
+	if err != nil {
+		return "", "", fmt.Errorf("check skill path: %w", err)
+	}
+	if relToResolvedRoot == ".." ||
+		strings.HasPrefix(relToResolvedRoot, ".."+string(os.PathSeparator)) ||
+		filepath.IsAbs(relToResolvedRoot) {
 		return "", "", fmt.Errorf("invalid skill path %q", preferredPath)
 	}
 	return target, cleanRel, nil

@@ -115,8 +115,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		m.toggleSelection()
 	case "c":
-		m.selected = map[string]bool{}
-		m.status = "selection cleared"
+		if m.view == ViewActive || m.view == ViewRepo {
+			m.selected = map[string]bool{}
+			m.status = "selection cleared"
+		}
 	case "/":
 		if m.view == ViewActive || m.view == ViewRepo {
 			m.filter.Active = true
@@ -259,6 +261,9 @@ func (m *Model) moveCursor(delta int) {
 }
 
 func (m *Model) toggleSelection() {
+	if m.view == ViewDoctor {
+		return
+	}
 	id, ok := m.currentID()
 	if !ok {
 		return
@@ -282,22 +287,20 @@ func (m *Model) selectedIDsForView() []string {
 				ids = append(ids, id)
 			}
 		}
-	case ViewDoctor:
-		for _, issue := range m.issues {
-			id := issueID(issue)
-			if m.selected[id] {
-				ids = append(ids, id)
-			}
-		}
 	}
 	if len(ids) > 0 {
 		return ids
 	}
-	id, ok := m.currentID()
-	if !ok {
+	switch m.view {
+	case ViewActive, ViewRepo:
+		id, ok := m.currentID()
+		if !ok {
+			return nil
+		}
+		return []string{id}
+	default:
 		return nil
 	}
-	return []string{id}
 }
 
 func (m *Model) currentID() (string, bool) {

@@ -167,4 +167,7 @@ func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
 			t.Fatalf("doctor row missing %q:\n%s", want, got)
 		}
 	}
+	if strings.Contains(got, m.symbols.Unchecked) || strings.Contains(got, m.symbols.Checked) {
+		t.Fatalf("doctor row should not render selection checkbox:\n%s", got)
+	}
 }

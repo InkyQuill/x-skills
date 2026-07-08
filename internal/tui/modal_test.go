@@ -142,9 +142,14 @@ func TestQuestionMarkOpensHelpModalWithGlobalKeys(t *testing.T) {
 		t.Fatal("modal is nil")
 	}
 	view := m.modal.View(100, 30, m)
-	for _, want := range []string{"Help", "A", "R", "D", "I", "^R", ".Ag", "~Cd"} {
+	for _, want := range []string{"Help", "A", "R", "D", "I", "^R", ".Ag", "~Cd", "toggle Active/Repo row selection", "clear Active/Repo selection"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("help modal missing %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"toggle row selection", "clear selection"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("help modal contains unscoped selection label %q:\n%s", unwanted, view)
 		}
 	}
 }

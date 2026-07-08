@@ -193,8 +193,7 @@ func renderRepoRows(m Model, width int) []string {
 func renderDoctorRows(m Model, width int) []string {
 	var rows []string
 	for i, issue := range m.issues {
-		id := issueID(issue)
-		prefix := rowPrefix(m, i, id)
+		prefix := cursorPrefix(m, i)
 		rows = append(rows, selectableRow(
 			[]rowSegment{
 				{text: fmt.Sprintf("%s %s %s ", prefix, dangerStyle.Render(m.symbols.Broken), issue.Kind)},
@@ -204,7 +203,7 @@ func renderDoctorRows(m Model, width int) []string {
 				{text: fmt.Sprintf("  %s %s", issue.Name, issue.Reason)},
 			},
 			i == m.cursor,
-			m.selected[id],
+			false,
 			width-6,
 		))
 	}
@@ -304,6 +303,14 @@ func rowPrefix(m Model, index int, id string) string {
 	return cursorStyle.Render(cursor) + " " + selectedStyle.Render(selected)
 }
 
+func cursorPrefix(m Model, index int) string {
+	cursor := " "
+	if index == m.cursor {
+		cursor = m.symbols.Cursor
+	}
+	return cursorStyle.Render(cursor)
+}
+
 func activeDetail(group ActiveGroup) string {
 	if group.Status == actions.StatusBroken {
 		return dangerStyle.Render(group.Reason)
@@ -349,7 +356,6 @@ func commandPalette(m Model) string {
 		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "details"},
 			{ASCII: "f", Label: "fix"},
-			{ASCII: "c", Label: "clear"},
 			{ASCII: "^R", Label: "refresh"},
 			{ASCII: "?", Label: "help"},
 			{ASCII: "q", Label: "quit"},

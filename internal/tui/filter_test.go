@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,6 +88,56 @@ func TestClearSelectionKeyClearsCurrentSelection(t *testing.T) {
 	m = mustModel(t, updated)
 	if len(m.selected) != 0 {
 		t.Fatalf("selected = %#v, want cleared", m.selected)
+	}
+}
+
+func TestDoctorSpaceDoesNotToggleSelection(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), filepath.Join(root, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	if len(m.selected) != 0 {
+		t.Fatalf("doctor selection = %#v, want empty", m.selected)
+	}
+	view := plain(m.View())
+	if strings.Contains(view, "□") || strings.Contains(view, "■") {
+		t.Fatalf("doctor view should not render selection checkbox:\n%s", view)
+	}
+	if strings.Contains(view, "c clear") {
+		t.Fatalf("doctor footer should not advertise clear selection:\n%s", view)
+	}
+}
+
+func TestDoctorClearSelectionKeyDoesNothing(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), filepath.Join(root, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("c"))
+	m = mustModel(t, updated)
+	if m.status == "selection cleared" {
+		t.Fatalf("doctor clear key set selection status")
+	}
+	if ids := m.selectedIDsForView(); ids != nil {
+		t.Fatalf("doctor selected IDs = %#v, want nil", ids)
 	}
 }
 

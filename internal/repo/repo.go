@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
@@ -15,6 +16,7 @@ type Skill struct {
 	Name        string
 	Path        string
 	Description string
+	Source      *remote.SourceMetadata
 }
 
 var readSkill = skills.Read
@@ -40,10 +42,20 @@ func List(cfg config.Config) ([]Skill, error) {
 		if err != nil {
 			continue
 		}
+		source, ok, err := remote.ReadSourceMetadata(path)
+		if err != nil {
+			source = remote.SourceMetadata{}
+			ok = false
+		}
+		var sourcePtr *remote.SourceMetadata
+		if ok {
+			sourcePtr = &source
+		}
 		found = append(found, Skill{
 			Name:        entry.Name(),
 			Path:        info.Path,
 			Description: info.Description,
+			Source:      sourcePtr,
 		})
 	}
 

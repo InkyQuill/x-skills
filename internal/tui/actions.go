@@ -26,20 +26,17 @@ func (m *Model) openMigrateModal() {
 		m.modal = newResultModal("Migrate active skills", []string{"No unmanaged active skill directories selected."})
 		return
 	}
-	lines := []string{"Targets"}
-	for _, target := range targets {
-		lines = append(lines, "  "+filepath.Base(target.Path)+"  "+renderRootChip(m.symbols, rootChip(target.Root.Scope, target.Root.Target), lipgloss.NoColor{}))
-	}
-	lines = append(lines, "", "Plan", "  1. Compare active content with archive", "  2. If identical, relink active copies", "  3. If different, review full-file diff")
-	m.modal = newConfirmModal("Migrate active skills", lines, false, func(current *Model) {
+	m.modal = newMigrateConfirmModal(targets, func(current *Model) {
 		current.applyMigrateTargets(targets, actions.ConflictResolutionAsk)
 	})
 }
 
 func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution string) {
-	var lines []string
-	var successes []string
-	for _, skill := range targets {
+	m.applyMigrateTargetsWithResults(targets, resolution, nil, nil)
+}
+
+func (m *Model) applyMigrateTargetsWithResults(targets []actions.ActiveSkill, resolution string, successes, failures []string) {
+	for i, skill := range targets {
 		result, err := actions.Migrate(m.cfg, actions.MigrateRequest{
 			Name:               filepath.Base(skill.Path),
 			Scope:              skill.Root.Scope,
@@ -55,24 +52,164 @@ func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution st
 					m.modal = newResultModal("Migration Results", []string{fmt.Sprintf("failed to build conflict diff: %v", diffErr)})
 					return
 				}
-				m.modal = newConflictDiffModal(conflict.Name, diff, func(chosen string) {
-					m.applyMigrateTargets([]actions.ActiveSkill{skill}, chosen)
+				tail := append([]actions.ActiveSkill(nil), targets[i+1:]...)
+				successesBeforeConflict := append([]string(nil), successes...)
+				failuresBeforeConflict := append([]string(nil), failures...)
+				m.modal = newConflictDiffModalWithModelApply(conflict.Name, diff, "Incoming active", func(current *Model, chosen string) {
+					current.applyResolvedMigrateConflict(skill, tail, chosen, successesBeforeConflict, failuresBeforeConflict)
 				})
 				return
 			}
-			lines = append(lines, "x "+filepath.Base(skill.Path)+"  "+err.Error())
+			failures = append(failures, "x "+filepath.Base(skill.Path)+"  "+err.Error())
 			continue
 		}
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
 	}
+	m.finishMigrateTargets(successes, failures)
+}
+
+func (m *Model) applyResolvedMigrateConflict(skill actions.ActiveSkill, remaining []actions.ActiveSkill, resolution string, successes, failures []string) {
+	result, err := actions.Migrate(m.cfg, actions.MigrateRequest{
+		Name:               filepath.Base(skill.Path),
+		Scope:              skill.Root.Scope,
+		Target:             skill.Root.Target,
+		Confirmed:          true,
+		ConflictResolution: resolution,
+	})
+	if err != nil {
+		failures = append(failures, "x "+filepath.Base(skill.Path)+"  "+err.Error())
+	} else {
+		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
+	}
+	m.applyMigrateTargetsWithResults(remaining, actions.ConflictResolutionAsk, successes, failures)
+}
+
+func (m *Model) finishMigrateTargets(successes, failures []string) {
 	m.reload()
-	if len(lines) == 0 {
+	if len(failures) == 0 {
 		m.modal = nil
 		m.status = mutationSuccessStatus(successes, "migrated")
 		return
 	}
-	lines = append(successes, lines...)
+	lines := append(successes, failures...)
 	m.modal = newResultModal("Migration Results", lines)
+}
+
+type migrateConfirmModal struct {
+	targets []actions.ActiveSkill
+	scroll  int
+	choice  int
+	apply   func(*Model)
+}
+
+func newMigrateConfirmModal(targets []actions.ActiveSkill, apply func(*Model)) modal {
+	return migrateConfirmModal{targets: targets, apply: apply}
+}
+
+func (c migrateConfirmModal) Title() string {
+	return "Migrate active skills"
+}
+
+func (c migrateConfirmModal) View(width, height int, m Model) string {
+	targetRows := c.visibleTargetRows(width, height, m)
+	lines := []string{
+		accentStyle.Render("Migrate active skills"),
+		"",
+		fmt.Sprintf("Targets (%d)", len(c.targets)),
+	}
+	lines = append(lines, targetRows...)
+	lines = append(lines,
+		"",
+	)
+	apply := "[ Apply ]"
+	cancel := "Cancel"
+	if c.choice == 1 {
+		apply = "Apply"
+		cancel = "[ Cancel ]"
+	}
+	if c.choice == 0 {
+		apply = selectedBg.Render(apply)
+	} else {
+		cancel = selectedBg.Render(cancel)
+	}
+	lines = append(lines, apply+"   "+cancel, mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+		{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
+		{ASCII: "enter", Unicode: "↵", Label: "apply"},
+		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+	})))
+	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+}
+
+func (c migrateConfirmModal) visibleTargetRows(width, height int, m Model) []string {
+	visible := c.visibleTargetCount(height)
+	start := c.scroll
+	maxStart := len(c.targets) - visible
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if start > maxStart {
+		start = maxStart
+	}
+	end := start + visible
+	if end > len(c.targets) {
+		end = len(c.targets)
+	}
+	rows := make([]string, 0, visible)
+	maxTextWidth := width - 14
+	if maxTextWidth < 20 {
+		maxTextWidth = 20
+	}
+	for _, target := range c.targets[start:end] {
+		row := "  " + filepath.Base(target.Path) + "  " + renderRootChip(m.symbols, rootChip(target.Root.Scope, target.Root.Target), lipgloss.NoColor{})
+		rows = append(rows, truncate(row, maxTextWidth))
+	}
+	return rows
+}
+
+func (c migrateConfirmModal) visibleTargetCount(height int) int {
+	visible := height - 8
+	if visible < 1 {
+		return 1
+	}
+	if visible > len(c.targets) {
+		return len(c.targets)
+	}
+	return visible
+}
+
+func (c migrateConfirmModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "n":
+		return true, nil
+	case "up":
+		if c.scroll > 0 {
+			c.scroll--
+		}
+		m.modal = c
+	case "down":
+		visible := c.visibleTargetCount(m.height)
+		if c.scroll+visible < len(c.targets) {
+			c.scroll++
+		}
+		m.modal = c
+	case "left", "right":
+		if c.choice == 0 {
+			c.choice = 1
+		} else {
+			c.choice = 0
+		}
+		m.modal = c
+	case "enter":
+		if c.choice == 0 {
+			c.apply(m)
+			return false, nil
+		}
+		return true, nil
+	case "y":
+		c.apply(m)
+	}
+	return false, nil
 }
 
 func (m *Model) openUnlinkModal() {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,177 @@ func TestActiveMigrateDivergentArchiveOpensConflictModal(t *testing.T) {
 	}
 	if info.Description != "Archived." {
 		t.Fatalf("archive description = %q, want Archived.", info.Description)
+	}
+}
+
+func TestActiveMigrateModalKeepsFooterVisibleAndScrollsTargets(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	for i := 0; i < 12; i++ {
+		makeSkill(t, cfg.MustActiveRoot("project", "agents"), fmt.Sprintf("skill-%02d", i), "Local.")
+	}
+	m := New(cfg)
+	m.width = 100
+	m.height = 18
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("migrate modal did not open")
+	}
+	view := plain(m.modal.View(m.width, m.height, m))
+	if got := strings.Count(view, "\n") + 1; got > m.height {
+		t.Fatalf("migrate modal height = %d, want <= %d:\n%s", got, m.height, view)
+	}
+	for _, want := range []string{"Migrate active skills", "Targets (12)", "skill-00", "[ Apply ]", "Cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("migrate modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "skill-11") {
+		t.Fatalf("migrate modal should not render every target before scrolling:\n%s", view)
+	}
+	for _, unexpected := range []string{"Plan", "Compare active content", "If identical", "If different"} {
+		if strings.Contains(view, unexpected) {
+			t.Fatalf("migrate modal should not explain migration internals %q:\n%s", unexpected, view)
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	view = plain(m.modal.View(m.width, m.height, m))
+	if got := strings.Count(view, "\n") + 1; got > m.height {
+		t.Fatalf("scrolled migrate modal height = %d, want <= %d:\n%s", got, m.height, view)
+	}
+	for _, want := range []string{"skill-11", "[ Apply ]", "Cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("scrolled migrate modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestActiveMigrateContinuesBatchAfterConflictResolution(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "bravo-skill", "Active.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "bravo-skill", "Archived.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "charlie-skill", "Charlie.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 40
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected conflict modal")
+	}
+	if view := plain(m.modal.View(120, 40, m)); !strings.Contains(view, "Archive conflict: bravo-skill") {
+		t.Fatalf("expected bravo conflict modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after continuing batch", m.modal)
+	}
+	if m.status != "migrated 3 locations" {
+		t.Fatalf("status = %q, want migrated 3 locations", m.status)
+	}
+	for _, name := range []string{"alpha-skill", "charlie-skill"} {
+		activePath := filepath.Join(cfg.MustActiveRoot("project", "agents"), name)
+		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), name)
+		if _, err := os.Stat(archivePath); err != nil {
+			t.Fatalf("%s archive missing after batch continuation: %v", name, err)
+		}
+		resolved, err := filepath.EvalSymlinks(activePath)
+		if err != nil {
+			t.Fatalf("%s active link missing after batch continuation: %v", name, err)
+		}
+		if resolved != archivePath {
+			t.Fatalf("%s active resolved to %q, want %q", name, resolved, archivePath)
+		}
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "bravo-skill"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Archived." {
+		t.Fatalf("bravo archive description = %q, want Archived.", info.Description)
+	}
+}
+
+func TestActiveMigrateContinuesBatchAfterUseActiveConflictResolution(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Active alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Archived alpha.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "bravo-skill", "Active bravo.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "bravo-skill", "Archived bravo.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "charlie-skill", "Charlie.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 40
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected first conflict modal")
+	}
+	if view := plain(m.modal.View(120, 40, m)); !strings.Contains(view, "Archive conflict: alpha-skill") {
+		t.Fatalf("expected alpha conflict modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected second conflict modal after choosing active for first conflict")
+	}
+	if view := plain(m.modal.View(120, 40, m)); !strings.Contains(view, "Archive conflict: bravo-skill") {
+		t.Fatalf("expected bravo conflict modal after continuing queue:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after completing queue", m.modal)
+	}
+	if m.status != "migrated 3 locations" {
+		t.Fatalf("status = %q, want migrated 3 locations", m.status)
+	}
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "alpha-skill", want: "Active alpha."},
+		{name: "bravo-skill", want: "Active bravo."},
+		{name: "charlie-skill", want: "Charlie."},
+	} {
+		info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), tc.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Description != tc.want {
+			t.Fatalf("%s archive description = %q, want %q", tc.name, info.Description, tc.want)
+		}
 	}
 }
 

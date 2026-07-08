@@ -238,6 +238,31 @@ func TestPreviewModalScrollsRawContent(t *testing.T) {
 	}
 }
 
+func TestPreviewModalScrollStateStaysBounded(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	skill := filepath.Join(cfg.MustActiveRoot("project", "agents"), "short-skill")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: short-skill\n---\n# Title\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("short-skill", skill)
+
+	for i := 0; i < 100; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	before := plain(m.modal.View(100, 16, m))
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	after := plain(m.modal.View(100, 16, m))
+	if before != after {
+		t.Fatalf("preview should stay stable after scrolling past end:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
 func TestConflictModalShowsFileListAndDiff(t *testing.T) {
 	active := t.TempDir()
 	archive := t.TempDir()

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 
@@ -16,7 +17,7 @@ type previewModal struct {
 	path     string
 	raw      string
 	rendered bool
-	scroll   int
+	viewport viewport.Model
 }
 
 func newPreviewModal(title, skillPath string) modal {
@@ -27,39 +28,47 @@ func newPreviewModal(title, skillPath string) modal {
 	} else {
 		raw = string(rawBytes)
 	}
-	return previewModal{title: title, path: filepath.Join(skillPath, "SKILL.md"), raw: raw, rendered: true}
+	vp := viewport.New(0, 0)
+	p := previewModal{title: title, path: filepath.Join(skillPath, "SKILL.md"), raw: raw, rendered: true, viewport: vp}
+	p.viewport.SetContent(p.renderContent())
+	return p
 }
 
 func (p previewModal) Title() string {
 	return p.title
 }
 
+func (p previewModal) renderContent() string {
+	if p.rendered {
+		rendered, err := glamour.Render(p.raw, "dark")
+		if err == nil {
+			return strings.TrimRight(rendered, "\n")
+		}
+	}
+	return strings.TrimRight(p.raw, "\n")
+}
+
 func (p previewModal) View(width, height int, m Model) string {
 	mode := "rendered with Glamour"
-	bodyText := p.raw
-	if p.rendered {
-		if rendered, err := glamour.Render(p.raw, "dark"); err == nil {
-			bodyText = rendered
-		}
-	} else {
+	if !p.rendered {
 		mode = "raw SKILL.md"
 	}
 	bodyHeight := height - 12
 	if bodyHeight < 4 {
 		bodyHeight = 4
 	}
-	bodyLines := strings.Split(bodyText, "\n")
-	p.scroll = clampScroll(p.scroll, len(bodyLines), bodyHeight)
-	end := p.scroll + bodyHeight
-	if end > len(bodyLines) {
-		end = len(bodyLines)
+	bodyWidth := width - 12
+	if bodyWidth < 20 {
+		bodyWidth = 20
 	}
-	visibleBody := strings.Join(bodyLines[p.scroll:end], "\n")
+	p.viewport.Width = bodyWidth
+	p.viewport.Height = bodyHeight
+	p.viewport.SetContent(p.renderContent())
 	lines := []string{
 		accentStyle.Render(p.title),
 		p.path + "       " + mode,
 		strings.Repeat("-", 60),
-		visibleBody,
+		p.viewport.View(),
 		"",
 		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
@@ -77,19 +86,13 @@ func (p previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	}
 	if msg.String() == "r" {
 		p.rendered = !p.rendered
-		p.scroll = 0
+		p.viewport.SetContent(p.renderContent())
+		p.viewport.GotoTop()
 		m.modal = p
 		return false, nil
 	}
-	switch msg.String() {
-	case "down":
-		p.scroll++
-		m.modal = p
-	case "up":
-		if p.scroll > 0 {
-			p.scroll--
-		}
-		m.modal = p
-	}
-	return false, nil
+	var cmd tea.Cmd
+	p.viewport, cmd = p.viewport.Update(msg)
+	m.modal = p
+	return false, cmd
 }

@@ -1422,10 +1422,25 @@ func TestInstallArchiveOnlyNameConflictReplaceArchive(t *testing.T) {
 	if m.modal == nil {
 		t.Fatal("conflict modal is nil")
 	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("replace archive cmd is nil")
+	}
+	if !m.install.archiveInFlight {
+		t.Fatal("archive replace did not mark archive in-flight")
+	}
+	if m.status != "archiving svelte-coder..." {
+		t.Fatalf("pending status = %q", m.status)
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.status != "archived svelte-coder" {
 		t.Fatalf("status = %q", m.status)
+	}
+	if m.install.archiveInFlight {
+		t.Fatal("archive in-flight remained set after replace")
 	}
 
 	info, err := skills.Read(archivePath)
@@ -1482,7 +1497,13 @@ func TestInstallArchiveOnlyNameConflictRenameExisting(t *testing.T) {
 		t.Fatalf("rename existing modal missing suggestion:\n%s", plain(m.modal.View(120, 35, m)))
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("rename existing archive cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.status != "archived svelte-coder" {
 		t.Fatalf("status = %q", m.status)
@@ -1500,6 +1521,69 @@ func TestInstallArchiveOnlyNameConflictRenameExisting(t *testing.T) {
 	}
 	if incomingInfo.Description != "Incoming help." {
 		t.Fatalf("incoming description = %q", incomingInfo.Description)
+	}
+}
+
+func TestInstallArchiveOnlyNameConflictRenameExistingRollsBackOnApplyFailure(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalApplyArchive := installApplyArchive
+	installApplyArchive = func(remote.AddRequest) (remote.AddResult, error) {
+		return remote.AddResult{}, errors.New("injected archive failure")
+	}
+	t.Cleanup(func() {
+		installApplyArchive = originalApplyArchive
+	})
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNameConflict,
+	}}
+
+	updated, _ := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("rename existing archive cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if !strings.Contains(m.status, "injected archive failure") {
+		t.Fatalf("status = %q, want injected archive failure", m.status)
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing help." {
+		t.Fatalf("original archive description = %q, want rollback to existing archive", info.Description)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder-local")); !os.IsNotExist(err) {
+		t.Fatalf("renamed archive still exists or unexpected error: %v", err)
 	}
 }
 
@@ -1535,7 +1619,13 @@ func TestInstallArchiveOnlyNameConflictRenameIncoming(t *testing.T) {
 		t.Fatalf("rename incoming modal missing suggestion:\n%s", plain(m.modal.View(120, 35, m)))
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("rename incoming archive cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.status != "archived svelte-coder-remote" {
 		t.Fatalf("status = %q", m.status)
@@ -1626,6 +1716,117 @@ func TestInstallArchiveOnlyNameConflictCancelEmptyAndDuplicate(t *testing.T) {
 	}
 	if info.Description != "Duplicate help." {
 		t.Fatalf("duplicate archive changed: %q", info.Description)
+	}
+}
+
+func TestInstallAndUseNameConflictReplaceThenContinuesToDestinations(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Incoming help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNameConflict,
+	}}
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil while conflict modal opens", cmd)
+	}
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "Name conflict: svelte-coder") {
+		t.Fatalf("install-use did not open conflict modal:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("replace archive cmd is nil")
+	}
+	archiveMsg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(archiveMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "Install and use svelte-coder") {
+		t.Fatalf("install-use did not continue to destinations:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("install-use cmd is nil after conflict resolution")
+	}
+	useMsg := cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+	if m.status != "installed svelte-coder to .Ag" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallAndUseUpdateAcceptIncomingThenContinuesToDestinations(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("update diff cmd is nil")
+	}
+	diffMsg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 40, m)), "Incoming remote") {
+		t.Fatalf("install-use did not open update diff:\n%s", plain(m.modal.View(120, 40, m)))
+	}
+
+	updated, cmd = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("accept incoming archive cmd is nil")
+	}
+	archiveMsg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(archiveMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "Install and use svelte-coder") {
+		t.Fatalf("install-use did not continue to destinations:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("install-use cmd is nil after update resolution")
+	}
+	useMsg := cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+	if m.status != "installed svelte-coder to .Ag" {
+		t.Fatalf("status = %q", m.status)
 	}
 }
 
@@ -1867,15 +2068,76 @@ func TestInstallSameSourceUpdateOpensIncomingRemoteDiff(t *testing.T) {
 
 	updated, cmd := m.Update(keyRunes("a"))
 	m = mustModel(t, updated)
-	if cmd != nil {
-		t.Fatalf("cmd = %#v, want nil for update diff", cmd)
+	if cmd == nil {
+		t.Fatal("update diff cmd is nil")
 	}
+	if m.modal != nil {
+		t.Fatal("diff modal opened before async command completed")
+	}
+	if m.status != "comparing update for svelte-coder..." {
+		t.Fatalf("status = %q", m.status)
+	}
+	msg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
 	if m.modal == nil {
-		t.Fatal("diff modal is nil")
+		t.Fatal("diff modal is nil after update diff command")
 	}
 	view := plain(m.modal.View(120, 40, m))
 	if !strings.Contains(view, "Incoming remote") || !strings.Contains(view, "Archive conflict: svelte-coder") {
 		t.Fatalf("update diff missing remote labels:\n%s", view)
+	}
+}
+
+func TestInstallSameSourceUpdateDiffIgnoresStaleResult(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{
+			Result:       remote.SearchResult{Name: "svelte-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder"},
+			ArchiveState: remote.ArchiveStateUpdateAvailable,
+		},
+		{
+			Result:       remote.SearchResult{Name: "react-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/react-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+	}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("update diff cmd is nil")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	m.status = "newer selection"
+	m.install.Message = "newer selection"
+	msg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		// nil is the expected state; keep the branch explicit for the failure below.
+	} else {
+		t.Fatalf("stale update diff opened modal: %T", m.modal)
+	}
+	if m.status != "newer selection" {
+		t.Fatalf("status = %q, want stale update diff ignored", m.status)
 	}
 }
 
@@ -1900,9 +2162,21 @@ func TestInstallSameSourceUpdateAcceptIncomingReplacesArchive(t *testing.T) {
 		ArchiveState: remote.ArchiveStateUpdateAvailable,
 	}}
 
-	updated, _ := m.Update(keyRunes("a"))
+	updated, cmd := m.Update(keyRunes("a"))
 	m = mustModel(t, updated)
-	updated, _ = m.Update(keyRunes("l"))
+	if cmd == nil {
+		t.Fatal("update diff cmd is nil")
+	}
+	msg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("accept incoming archive cmd is nil")
+	}
+	archiveMsg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(archiveMsg)
 	m = mustModel(t, updated)
 	if m.status != "archived svelte-coder" {
 		t.Fatalf("status = %q", m.status)
@@ -1940,7 +2214,13 @@ func TestInstallSameSourceUpdateKeepArchiveLeavesArchive(t *testing.T) {
 		ArchiveState: remote.ArchiveStateUpdateAvailable,
 	}}
 
-	updated, _ := m.Update(keyRunes("a"))
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("update diff cmd is nil")
+	}
+	msg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("k"))
 	m = mustModel(t, updated)

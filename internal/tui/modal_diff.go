@@ -21,7 +21,7 @@ type conflictDiffModal struct {
 	selected      int
 	scroll        int
 	incomingLabel string
-	apply         func(*Model, string)
+	apply         func(*Model, string) tea.Cmd
 }
 
 func newConflictDiffModal(name string, diff directoryDiff, apply func(string)) modal {
@@ -35,6 +35,13 @@ func newConflictDiffModalWithIncomingLabel(name string, diff directoryDiff, inco
 }
 
 func newConflictDiffModalWithModelApply(name string, diff directoryDiff, incomingLabel string, apply func(*Model, string)) modal {
+	return newConflictDiffModalWithModelCommandApply(name, diff, incomingLabel, func(m *Model, resolution string) tea.Cmd {
+		apply(m, resolution)
+		return nil
+	})
+}
+
+func newConflictDiffModalWithModelCommandApply(name string, diff directoryDiff, incomingLabel string, apply func(*Model, string) tea.Cmd) modal {
 	return conflictDiffModal{name: name, diff: diff, incomingLabel: incomingLabel, apply: apply}
 }
 
@@ -89,11 +96,15 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 	if bodyHeight < minBodyHeight {
 		bodyHeight = minBodyHeight
 	}
+	acceptLabel := "save active"
+	if c.incomingLabel == "Incoming remote" {
+		acceptLabel = "use incoming"
+	}
 	footer := mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 		{ASCII: "left/right", Unicode: "←/→", Label: "file"},
 		{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
 		{ASCII: "k", Label: "keep archive"},
-		{ASCII: "l", Label: "save active"},
+		{ASCII: "l", Label: acceptLabel},
 		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
 	}))
 	lines := []string{
@@ -179,12 +190,10 @@ func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		m.modal = c
 	case "k":
 		m.modal = nil
-		c.apply(m, actions.ConflictResolutionKeepArchive)
-		return false, nil
+		return false, c.apply(m, actions.ConflictResolutionKeepArchive)
 	case "l":
 		m.modal = nil
-		c.apply(m, actions.ConflictResolutionUseActive)
-		return false, nil
+		return false, c.apply(m, actions.ConflictResolutionUseActive)
 	}
 	return false, nil
 }

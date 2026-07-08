@@ -12,10 +12,10 @@ type textModal struct {
 	title string
 	label string
 	input textinput.Model
-	apply func(*Model, string)
+	apply func(*Model, string) tea.Cmd
 }
 
-func newTextModal(title, label, value string, apply func(*Model, string)) modal {
+func newTextModal(title, label, value string, apply func(*Model, string) tea.Cmd) modal {
 	input := textinput.New()
 	input.SetValue(value)
 	input.Focus()
@@ -46,8 +46,7 @@ func (t textModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	case "esc", "q":
 		return true, nil
 	case "enter":
-		t.apply(m, strings.TrimSpace(t.input.Value()))
-		return false, nil
+		return false, t.apply(m, strings.TrimSpace(t.input.Value()))
 	}
 
 	var cmd tea.Cmd

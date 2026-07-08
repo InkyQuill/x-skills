@@ -297,8 +297,14 @@ func TestConflictModalSupportsIncomingRemoteLabel(t *testing.T) {
 			t.Fatalf("conflict modal missing %q:\n%s", want, view)
 		}
 	}
+	if !strings.Contains(view, "l use incoming") {
+		t.Fatalf("remote conflict modal should say use incoming:\n%s", view)
+	}
 	if strings.Contains(view, "Incoming active") {
 		t.Fatalf("remote conflict modal should not say Incoming active:\n%s", view)
+	}
+	if strings.Contains(view, "save active") {
+		t.Fatalf("remote conflict modal should not say save active:\n%s", view)
 	}
 }
 

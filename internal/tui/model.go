@@ -104,6 +104,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.modal = newPreviewModal("Preview: "+msg.name, msg.path)
 		return m, nil
+	case installUpdateDiffMsg:
+		m.applyInstallUpdateDiffResult(msg)
+		return m, nil
 	case installArchiveMsg:
 		m.applyInstallArchiveResult(msg)
 		return m, nil
@@ -194,7 +197,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		if m.view == ViewInstall {
 			if row, ok := m.selectedInstallResult(); ok {
-				m.openInstallDestinationModal(row)
+				return m, m.openInstallDestinationModal(row)
 			}
 		}
 	case keyHelp:

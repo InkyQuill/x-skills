@@ -13,10 +13,17 @@ type choiceModal struct {
 	lines   []string
 	choices []string
 	index   int
-	apply   func(*Model, int)
+	apply   func(*Model, int) tea.Cmd
 }
 
 func newChoiceModal(title string, lines, choices []string, defaultIndex int, apply func(*Model, int)) modal {
+	return newChoiceModalWithCommand(title, lines, choices, defaultIndex, func(m *Model, choice int) tea.Cmd {
+		apply(m, choice)
+		return nil
+	})
+}
+
+func newChoiceModalWithCommand(title string, lines, choices []string, defaultIndex int, apply func(*Model, int) tea.Cmd) modal {
 	return choiceModal{title: title, lines: lines, choices: choices, index: defaultIndex, apply: apply}
 }
 
@@ -63,7 +70,7 @@ func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		}
 		m.modal = c
 	case "enter":
-		c.apply(m, c.index)
+		return false, c.apply(m, c.index)
 	}
 	return false, nil
 }

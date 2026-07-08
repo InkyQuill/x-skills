@@ -626,11 +626,13 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 		m.refreshInstallArchiveStates()
 		m.updateInstallArchiveState(msg.identity, msg.archiveState)
 		m.status = msg.err.Error()
+		m.install.Message = m.status
 		return
 	}
 	m.reload()
 	m.refreshInstallArchiveStates()
 	m.status = "archived " + msg.name
+	m.install.Message = m.status
 }
 
 func (m *Model) applyInstallUseResult(msg installUseMsg) {

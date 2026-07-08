@@ -627,6 +627,9 @@ func TestInstallArchiveOnlyArchivesRemoteSkillAndStaysOnInstall(t *testing.T) {
 	if m.status != "archived svelte-coder" {
 		t.Fatalf("status = %q", m.status)
 	}
+	if m.install.Message != "archived svelte-coder" {
+		t.Fatalf("message = %q", m.install.Message)
+	}
 	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
 		t.Fatalf("archive state = %q, want archived", got)
 	}

@@ -568,9 +568,11 @@ func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
 
 func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) {
 	if msg.token != m.install.previewToken || m.view != ViewInstall {
+		m.clearPendingInstallUseForIdentity(installArchiveIdentityFromResult(msg.row.Result))
 		return
 	}
 	if msg.err != nil {
+		m.clearPendingInstallUseForIdentity(installArchiveIdentityFromResult(msg.row.Result))
 		m.status = msg.err.Error()
 		m.install.Message = m.status
 		return
@@ -957,6 +959,12 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 
 func (m Model) pendingInstallUseMatches(identity installArchiveIdentity) bool {
 	return m.install.pendingUse != nil && installArchiveIdentityFromResult(m.install.pendingUse.row.Result) == identity
+}
+
+func (m *Model) clearPendingInstallUseForIdentity(identity installArchiveIdentity) {
+	if m.pendingInstallUseMatches(identity) {
+		m.install.pendingUse = nil
+	}
 }
 
 func (m *Model) clearPendingInstallUseOnModalClose(closed modal) {

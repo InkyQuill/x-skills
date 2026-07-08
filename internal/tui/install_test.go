@@ -1999,6 +1999,126 @@ func TestInstallAndUseUpdateQClearsPendingUse(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseUpdateStaleDiffClearsPendingUse(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("install-use update diff cmd is nil")
+	}
+	m.setView(ViewRepo)
+	diffMsg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	if m.install.pendingUse != nil {
+		t.Fatal("pending install-use remained after stale update diff")
+	}
+
+	m.setView(ViewInstall)
+	updated, cmd = m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive-only update diff cmd is nil")
+	}
+	diffMsg = cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive-only accept incoming cmd is nil")
+	}
+	archiveMsg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(archiveMsg)
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("stale pending install-use opened modal after stale update diff:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+	if m.status != "archived svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallAndUseUpdateDiffErrorClearsPendingUse(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = filepath.Join(t.TempDir(), "missing")
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}}
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("install-use update diff cmd is nil")
+	}
+	diffMsg := cmd().(installUpdateDiffMsg)
+	if diffMsg.err == nil {
+		t.Fatal("diff msg err is nil")
+	}
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	if m.install.pendingUse != nil {
+		t.Fatal("pending install-use remained after update diff error")
+	}
+
+	m.install.testCloneURL = repoDir
+	updated, cmd = m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive-only update diff cmd is nil")
+	}
+	diffMsg = cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive-only accept incoming cmd is nil")
+	}
+	archiveMsg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(archiveMsg)
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("stale pending install-use opened modal after update diff error:\n%s", plain(m.modal.View(120, 35, m)))
+	}
+	if m.status != "archived svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
 func TestInstallAndUseArchivedRowDiscoveredUpdateRoutesToDiff(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")

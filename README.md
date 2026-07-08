@@ -32,11 +32,12 @@ go run ./cmd/x-skills tui
 ```
 
 The Go prototype currently covers cwd-based active scanning, local repo listing,
-`link`, `migrate`, `unlink`, `doctor`, and a Bubble Tea guided manager at
-`x-skills tui`. The TUI has active, repo, and doctor views; active rows are
-merged by directory SHA fingerprint so identical linked copies appear as one
-item while changed copies remain separate. The fingerprint is internal and is
-not shown in the UI.
+`link`, `migrate`, `unlink`, `doctor`, `skills.sh` search/archive/install, and
+a Bubble Tea guided manager at `go run ./cmd/x-skills tui`. The TUI has Active,
+Repo, Doctor, and Install pages; Install can search, preview, archive, and link
+remote skills. Active rows are merged by directory SHA fingerprint so identical
+linked copies appear as one item while changed copies remain separate. The
+fingerprint is internal and is not shown in the UI.
 
 ## Usage
 

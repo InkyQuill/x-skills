@@ -66,6 +66,35 @@ func TestPlanArchiveDetectsNameConflictWithoutSourceIdentity(t *testing.T) {
 	}
 }
 
+func TestPlanArchiveIgnoresSourceMetadataWhenContentMatches(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	incoming := writeIncomingSkill(t, "svelte-coder", "Svelte help.")
+	meta := SourceMetadata{
+		SourceType: SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}
+	if _, err := ApplyArchive(AddRequest{
+		Config:      cfg,
+		IncomingDir: incoming,
+		ArchiveName: "svelte-coder",
+		Metadata:    meta,
+		Conflict:    ConflictReplaceArchive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	nextIncoming := writeIncomingSkill(t, "svelte-coder", "Svelte help.")
+	plan, err := PlanArchive(cfg, nextIncoming, "svelte-coder", meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.State != ArchiveStateArchived {
+		t.Fatalf("state = %q, want archived", plan.State)
+	}
+}
+
 func writeIncomingSkill(t *testing.T, name, desc string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)

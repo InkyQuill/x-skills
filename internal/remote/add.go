@@ -1,15 +1,17 @@
 package remote
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
-	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
@@ -70,11 +72,11 @@ func PlanArchive(
 		return ArchivePlan{State: ArchiveStateNameConflict, ArchivePath: archivePath}, nil
 	}
 
-	incomingFP, err := fingerprint.Directory(incomingDir)
+	incomingFP, err := archiveContentFingerprint(incomingDir)
 	if err != nil {
 		return ArchivePlan{}, fmt.Errorf("fingerprint incoming: %w", err)
 	}
-	archiveFP, err := fingerprint.Directory(archivePath)
+	archiveFP, err := archiveContentFingerprint(archivePath)
 	if err != nil {
 		return ArchivePlan{}, fmt.Errorf("fingerprint archive: %w", err)
 	}
@@ -136,6 +138,87 @@ func hasArchivedSkill(cfg config.Config, name string) bool {
 		return false
 	}
 	return skills.IsDir(path)
+}
+
+func archiveContentFingerprint(root string) (string, error) {
+	var entries []contentFingerprintEntry
+	if err := filepath.WalkDir(root, func(path string, dirEntry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == MetadataFile {
+			return nil
+		}
+		entries = append(entries, contentFingerprintEntry{
+			path: rel,
+			info: dirEntry,
+		})
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("walk directory: %w", err)
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].path < entries[j].path
+	})
+
+	hash := sha256.New()
+	for _, entry := range entries {
+		if err := hashContentFingerprintEntry(hash, root, entry); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+type contentFingerprintEntry struct {
+	path string
+	info fs.DirEntry
+}
+
+func hashContentFingerprintEntry(hash io.Writer, root string, entry contentFingerprintEntry) error {
+	mode := entry.info.Type()
+	switch {
+	case mode&os.ModeSymlink != 0:
+		target, err := os.Readlink(filepath.Join(root, filepath.FromSlash(entry.path)))
+		if err != nil {
+			return fmt.Errorf("read symlink %q: %w", entry.path, err)
+		}
+		writeContentFingerprint(hash, "symlink", entry.path, target)
+	case entry.info.IsDir():
+		writeContentFingerprint(hash, "dir", entry.path, "")
+	default:
+		file, err := os.Open(filepath.Join(root, filepath.FromSlash(entry.path)))
+		if err != nil {
+			return fmt.Errorf("read file %q: %w", entry.path, err)
+		}
+		defer func() {
+			_ = file.Close()
+		}()
+		writeContentFingerprintFilePrefix(hash, "file", entry.path)
+		if _, err := io.Copy(hash, file); err != nil {
+			return fmt.Errorf("hash file %q: %w", entry.path, err)
+		}
+		_, _ = hash.Write([]byte{0})
+	}
+	return nil
+}
+
+func writeContentFingerprint(hash io.Writer, kind, path, value string) {
+	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%d\x00%s\x00", kind, path, len(value), value)
+}
+
+func writeContentFingerprintFilePrefix(hash io.Writer, kind, path string) {
+	_, _ = fmt.Fprintf(hash, "%s\x00%s\x00", kind, path)
 }
 
 func copyDir(src, dst string) error {

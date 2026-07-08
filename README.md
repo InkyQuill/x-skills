@@ -154,8 +154,12 @@ to the repo.
 ## TUI Mode
 
 `x-skills tui` opens the Bubble Tea maintenance manager for longer maintenance
-sessions. It has Active, Repo, and Doctor views: press `A` for Active, `R` for
-Repo, and `D` for Doctor. Refresh is `ctrl+r`.
+sessions. The TUI has Active, Repo, Doctor, and Install pages: press `A` for
+Active, `R` for Repo, `D` for Doctor, and `I` for Install. Refresh is `ctrl+r`.
+
+Use Install to search `skills.sh`, preview remote `SKILL.md`, archive a skill,
+or install and link it into the current project. Manual generic Git installs
+remain CLI-first through `x-skills add --git`.
 
 Use Active to inspect current project/global skills, preview `SKILL.md`, migrate
 unmanaged directories into the archive, and unlink active copies. Use Repo to

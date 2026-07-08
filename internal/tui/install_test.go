@@ -1047,12 +1047,9 @@ func TestInstallAndUseLinkErrorClosesModalAndShowsStatus(t *testing.T) {
 	m = mustModel(t, updated)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	if cmd == nil {
-		t.Fatal("cmd is nil")
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil after destination preflight failure", cmd)
 	}
-	msg := cmd().(installUseMsg)
-	updated, _ = m.Update(msg)
-	m = mustModel(t, updated)
 
 	if m.modal != nil {
 		t.Fatal("modal reopened after link error")
@@ -1060,8 +1057,11 @@ func TestInstallAndUseLinkErrorClosesModalAndShowsStatus(t *testing.T) {
 	if !strings.Contains(m.status, "destination exists") {
 		t.Fatalf("status = %q, want link error", m.status)
 	}
-	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("archive exists after destination preflight failure or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); err != nil {
+		t.Fatalf("existing active destination changed unexpectedly: %v", err)
 	}
 }
 
@@ -1218,12 +1218,9 @@ func TestInstallAndUsePreflightsAllDestinationsBeforeLinking(t *testing.T) {
 	m = mustModel(t, updated)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	if cmd == nil {
-		t.Fatal("cmd is nil")
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil after destination preflight failure", cmd)
 	}
-	msg := cmd().(installUseMsg)
-	updated, _ = m.Update(msg)
-	m = mustModel(t, updated)
 
 	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")); !os.IsNotExist(err) {
 		t.Fatalf(".Ag link was created before .Cl preflight failure: %v", err)
@@ -1231,8 +1228,104 @@ func TestInstallAndUsePreflightsAllDestinationsBeforeLinking(t *testing.T) {
 	if !strings.Contains(m.status, "destination exists") || !strings.Contains(m.status, ".claude") {
 		t.Fatalf("status = %q, want existing .Cl destination", m.status)
 	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("archive exists after destination preflight failure or unexpected error: %v", err)
+	}
+}
+
+func TestInstallArchiveOnlyBlocksInstallAndUseWhileInFlightAndCompletes(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, archiveCmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if archiveCmd == nil {
+		t.Fatal("archive cmd is nil")
+	}
+	useToken := m.install.useToken
+
+	updated, installCmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if installCmd != nil {
+		t.Fatalf("install cmd = %#v, want nil", installCmd)
+	}
+	if m.modal != nil {
+		t.Fatal("destination modal opened while archive-only was in flight")
+	}
+	if m.install.useToken != useToken {
+		t.Fatalf("use token = %d, want %d", m.install.useToken, useToken)
+	}
+	if m.status != "install already running" {
+		t.Fatalf("status = %q", m.status)
+	}
+	if m.install.Message != "install already running" {
+		t.Fatalf("message = %q", m.install.Message)
+	}
+
+	msg := archiveCmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.status != "archived svelte-coder" {
+		t.Fatalf("status = %q", m.status)
+	}
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
+		t.Fatalf("archive state = %q, want archived", got)
+	}
 	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstallArchiveOnlyStaleResultClearsInFlightWithoutApplying(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, archiveCmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if archiveCmd == nil {
+		t.Fatal("archive cmd is nil")
+	}
+	m.install.archiveToken++
+	m.status = "newer state"
+	m.install.Message = "newer state"
+
+	msg := archiveCmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.status != "newer state" {
+		t.Fatalf("status = %q, want stale archive result ignored", m.status)
+	}
+
+	updated, installCmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if installCmd != nil {
+		t.Fatalf("install cmd = %#v, want nil", installCmd)
+	}
+	if m.modal == nil {
+		t.Fatal("destination modal did not open after stale archive result cleared in-flight state")
 	}
 }
 

@@ -28,22 +28,24 @@ const (
 )
 
 type installState struct {
-	Query            string
-	Owner            string
-	Searching        bool
-	Results          []installResultView
-	Message          string
-	InputMode        installInputMode
-	searchToken      int
-	previewToken     int
-	archiveToken     int
-	useToken         int
-	useGeneration    *installUseGeneration
-	useInFlight      bool
-	useInFlightToken int
-	searchClient     remote.SearchClient
-	checkouts        *remote.CheckoutCache
-	testCloneURL     string
+	Query                string
+	Owner                string
+	Searching            bool
+	Results              []installResultView
+	Message              string
+	InputMode            installInputMode
+	searchToken          int
+	previewToken         int
+	archiveToken         int
+	archiveInFlight      bool
+	archiveInFlightToken int
+	useToken             int
+	useGeneration        *installUseGeneration
+	useInFlight          bool
+	useInFlightToken     int
+	searchClient         remote.SearchClient
+	checkouts            *remote.CheckoutCache
+	testCloneURL         string
 }
 
 type installUseGeneration struct {
@@ -246,12 +248,18 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if m.install.useInFlight {
+	if m.install.useInFlight || m.install.archiveInFlight {
 		m.status = "install already running"
 		m.install.Message = m.status
 		return nil
 	}
-	return m.archiveInstallRow(row)
+	cmd := m.archiveInstallRow(row)
+	if cmd == nil {
+		return nil
+	}
+	m.install.archiveInFlight = true
+	m.install.archiveInFlightToken = m.install.archiveToken
+	return cmd
 }
 
 func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
@@ -343,6 +351,16 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	}
 	if m.install.useInFlight {
 		m.status = "install already running"
+		m.install.Message = m.status
+		return nil
+	}
+	if m.install.archiveInFlight {
+		m.status = "install already running"
+		m.install.Message = m.status
+		return nil
+	}
+	if err := preflightInstallUseDestinations(m.cfg, row.Result.Name, destinations); err != nil {
+		m.status = err.Error()
 		m.install.Message = m.status
 		return nil
 	}
@@ -463,7 +481,7 @@ func newInstallDestinationModal(row installResultView) modal {
 }
 
 func (m *Model) openInstallDestinationModal(row installResultView) {
-	if m.install.useInFlight {
+	if m.install.useInFlight || m.install.archiveInFlight {
 		m.status = "install already running"
 		m.install.Message = m.status
 		return
@@ -596,6 +614,10 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) {
 }
 
 func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
+	if msg.token != 0 && msg.token == m.install.archiveInFlightToken {
+		m.install.archiveInFlight = false
+		m.install.archiveInFlightToken = 0
+	}
 	if msg.token == 0 || msg.token != m.install.archiveToken {
 		return
 	}

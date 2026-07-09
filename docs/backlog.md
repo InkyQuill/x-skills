@@ -22,3 +22,7 @@
 ## Testing
 
 - Investigate a mock or virtual filesystem layer for mutation and error-path tests. Context: current tests use real syscalls in `t.TempDir`, which is simple and reliable, but permission failures and platform-specific filesystem errors remain hard to exercise directly. Evidence: code quality review of filesystem-heavy packages such as `internal/repo`, `internal/actions`, and `internal/symlinkcheck`.
+
+## Strange things to investigate
+
+If migration asks you to overwrite skill, then after the migration finishes - the list of active skills doesn't autoupdate.

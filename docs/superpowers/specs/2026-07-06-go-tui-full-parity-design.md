@@ -33,12 +33,19 @@ Out of scope for this pass:
 - Mouse support.
 - Fuzzy filtering.
 - Theme switching.
-- Remote `skills.sh` search/install in the TUI.
-- Repo update checks in the TUI.
 - Command palette.
 - Per-file/per-conflict merge choices in archive conflicts.
 
-Deferred items are tracked in `docs/backlog.md`.
+Remote `skills.sh` search/install and Repo update checks were deferred when this
+spec was first written, but a later design session decided to build them as a
+top-level `I:Install` page and a background Repo update-check pipeline. See
+[Go TUI Install And Repo Updates Design](./2026-07-06-go-tui-install-and-repo-updates-design.md),
+ADR 0007, ADR 0009, ADR 0011, ADR 0012, and ADR 0015 for the current, authoritative
+scope. This file's Active/Repo/Doctor content remains accurate; treat any
+remaining "out of scope"/"deferred" language about Install/search/update checks
+elsewhere in this file as superseded.
+
+Deferred items still tracked in `docs/backlog.md`.
 
 ## Product Shape
 

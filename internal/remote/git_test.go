@@ -180,6 +180,27 @@ func TestFindSkillUsesValidPreferredPath(t *testing.T) {
 	}
 }
 
+func TestFindSkillReturnsMissingSkillErrorForStalePreferredPath(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "skills/other", "other", "Other.")
+	checkout := Checkout{
+		Path:   root,
+		Source: GitSource{CloneURL: "https://github.com/example/skills.git"},
+	}
+
+	_, err := checkout.FindSkill("next-best-practices", "next-best-practices")
+	var missing *MissingSkillError
+	if !errors.As(err, &missing) {
+		t.Fatalf("err = %T %[1]v, want MissingSkillError", err)
+	}
+	if missing.Name != "next-best-practices" {
+		t.Fatalf("Name = %q, want next-best-practices", missing.Name)
+	}
+	if missing.RepoURL != "https://github.com/example/skills.git" {
+		t.Fatalf("RepoURL = %q", missing.RepoURL)
+	}
+}
+
 func TestFindSkillContextStopsWhenCanceled(t *testing.T) {
 	root := t.TempDir()
 	writeRemoteSkill(t, root, "skills/svelte-coder", "svelte-coder", "Svelte help.")

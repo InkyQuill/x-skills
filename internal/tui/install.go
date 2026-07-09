@@ -582,6 +582,9 @@ func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) {
 	}
 	if msg.err != nil {
 		m.clearPendingInstallUseForUpdateDiff(msg.row, msg.token)
+		if m.showMissingSkillInRepoModal(msg.err) {
+			return
+		}
 		m.status = msg.err.Error()
 		m.install.Message = m.status
 		return
@@ -1002,6 +1005,12 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 		m.reload()
 		m.refreshInstallArchiveStates()
 		m.updateInstallArchiveState(msg.identity, msg.archiveState)
+		if m.showMissingSkillInRepoModal(msg.err) {
+			if m.pendingInstallUseMatches(msg.identity) {
+				m.install.pendingUse = nil
+			}
+			return
+		}
 		m.status = msg.err.Error()
 		m.install.Message = m.status
 		if m.pendingInstallUseMatches(msg.identity) {
@@ -1074,6 +1083,9 @@ func (m *Model) applyInstallUseResult(msg installUseMsg) tea.Cmd {
 		m.reload()
 		m.refreshInstallArchiveStates()
 		m.updateInstallArchiveState(msg.identity, msg.archiveState)
+		if m.showMissingSkillInRepoModal(msg.err) {
+			return nil
+		}
 		m.status = msg.err.Error()
 		m.install.Message = m.status
 		return m.openInstallUseArchiveResolution(msg)
@@ -1084,6 +1096,31 @@ func (m *Model) applyInstallUseResult(msg installUseMsg) tea.Cmd {
 	m.status = "installed " + msg.name + " to " + installDestinationLabels(msg.destinations)
 	m.install.Message = m.status
 	return nil
+}
+
+func (m *Model) showMissingSkillInRepoModal(err error) bool {
+	var missing *remote.MissingSkillError
+	if !errors.As(err, &missing) {
+		return false
+	}
+	repoURL := missing.RepoURL
+	if repoURL == "" {
+		repoURL = "unknown repo"
+	}
+	m.status = "couldn't find " + missing.Name + " in repo"
+	m.install.Message = m.status
+	m.modal = newResultModal("Uh-oh...", []string{
+		"Couldn't find the requested skill in repo.",
+		"You might want to check the repo contents.",
+		"",
+		"Repo",
+		"  " + repoURL,
+		"",
+		"Remember that this sometimes happens with skills.sh - it's stale data.",
+		"",
+		"[ OK ]",
+	})
+	return true
 }
 
 func (m *Model) openInstallUseArchiveResolution(msg installUseMsg) tea.Cmd {

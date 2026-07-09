@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,11 +12,12 @@ import (
 )
 
 type UnlinkRequest struct {
-	Name            string
-	Scope           string
-	Target          string
-	Confirmed       bool
-	DeleteUnmanaged bool
+	Name               string
+	Scope              string
+	Target             string
+	Confirmed          bool
+	DeleteUnmanaged    bool
+	ConflictResolution string
 }
 
 func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
@@ -38,7 +40,8 @@ func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		classification := classifySymlink(cfg, paths.active, req.Name)
 		if classification.status == StatusUnmanaged && !req.DeleteUnmanaged {
-			if err := archiveResolvedSymlinkTarget(classification.resolvedPath, paths.archived, ConflictResolutionAsk); err != nil {
+			if _, err := copySkillToArchive(classification.resolvedPath, paths.archived, req.conflictResolution()); err != nil {
+				annotateArchiveConflictName(err, req.Name)
 				return MutationResult{}, err
 			}
 			if err := os.Remove(paths.active); err != nil {
@@ -65,59 +68,83 @@ func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
 		return MutationResult{Name: req.Name, Path: paths.active, Status: ResultRemovedUnmanaged}, nil
 	}
 
-	if _, err := migrateActiveDirectory(paths.active, paths.archived, false, ConflictResolutionAsk); err != nil {
+	if _, err := migrateActiveDirectory(paths.active, paths.archived, false, req.conflictResolution()); err != nil {
+		annotateArchiveConflictName(err, req.Name)
 		return MutationResult{}, err
 	}
 	return MutationResult{Name: req.Name, Path: paths.archived, Status: ResultMigratedUnlinked}, nil
 }
 
-func archiveResolvedSymlinkTarget(active, archived, conflictResolution string) error {
-	if _, err := os.Lstat(archived); err == nil {
-		return handleExistingSymlinkArchive(active, archived, conflictResolution)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect archive destination %q: %w", archived, err)
+func (req UnlinkRequest) conflictResolution() string {
+	if req.ConflictResolution == "" {
+		return ConflictResolutionAsk
 	}
-	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
-		return fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
-	}
-	if err := copySkillDirectory(active, archived); err != nil {
-		return err
-	}
-	return nil
+	return req.ConflictResolution
 }
 
-func handleExistingSymlinkArchive(active, archived, conflictResolution string) error {
+func annotateArchiveConflictName(err error, name string) {
+	var conflict *ArchiveConflictError
+	if errors.As(err, &conflict) && conflict.Name == "" {
+		conflict.Name = name
+	}
+}
+
+type archiveCopyOutcome string
+
+const (
+	archiveCopyCreated  archiveCopyOutcome = "created"
+	archiveCopyMatched  archiveCopyOutcome = "matched"
+	archiveCopyKept     archiveCopyOutcome = "kept"
+	archiveCopyReplaced archiveCopyOutcome = "replaced"
+)
+
+func copySkillToArchive(active, archived, conflictResolution string) (archiveCopyOutcome, error) {
+	if _, err := os.Lstat(archived); err == nil {
+		return handleExistingArchiveCopy(active, archived, conflictResolution)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect archive destination %q: %w", archived, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
+		return "", fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
+	}
+	if err := copySkillDirectory(active, archived); err != nil {
+		return "", err
+	}
+	return archiveCopyCreated, nil
+}
+
+func handleExistingArchiveCopy(active, archived, conflictResolution string) (archiveCopyOutcome, error) {
 	activeFingerprint, err := fingerprint.Directory(active)
 	if err != nil {
-		return fmt.Errorf("fingerprint active skill %q: %w", active, err)
+		return "", fmt.Errorf("fingerprint active skill %q: %w", active, err)
 	}
 	archivedFingerprint, err := fingerprint.Directory(archived)
 	if err != nil {
-		return fmt.Errorf("fingerprint archived skill %q: %w", archived, err)
+		return "", fmt.Errorf("fingerprint archived skill %q: %w", archived, err)
 	}
 	if activeFingerprint == archivedFingerprint {
-		return nil
+		return archiveCopyMatched, nil
 	}
 
 	switch conflictResolution {
 	case ConflictResolutionKeepArchive:
-		return nil
+		return archiveCopyKept, nil
 	case ConflictResolutionUseActive:
 		if err := os.RemoveAll(archived); err != nil {
-			return fmt.Errorf("discard archived skill %q: %w", archived, err)
+			return "", fmt.Errorf("discard archived skill %q: %w", archived, err)
 		}
 		if err := copySkillDirectory(active, archived); err != nil {
-			return err
+			return "", err
 		}
-		return nil
+		return archiveCopyReplaced, nil
 	case ConflictResolutionAsk:
-		return &ArchiveConflictError{
+		return "", &ArchiveConflictError{
 			ActivePath:   active,
 			ArchivedPath: archived,
 			Summary:      directoryDiffSummary(active, archived),
 		}
 	default:
-		return fmt.Errorf("unknown conflict resolution %q", conflictResolution)
+		return "", fmt.Errorf("unknown conflict resolution %q", conflictResolution)
 	}
 }
 

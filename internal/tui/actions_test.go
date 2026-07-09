@@ -424,6 +424,58 @@ func TestActiveUnlinkUnmanagedAliasChoosesLocationThenArchivesSelectedLink(t *te
 	}
 }
 
+func TestActiveUnlinkUnmanagedAliasConflictOpensDiffAndContinues(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	source := makeSkill(t, filepath.Join(home, "external"), "code-review", "Review.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "code-review", "Archived.")
+	activePath := filepath.Join(cfg.MustActiveRoot("project", "codex"), "code-review")
+	if err := os.MkdirAll(filepath.Dir(activePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, activePath); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if m.modal == nil {
+		t.Fatal("conflict modal is nil")
+	}
+	view := m.modal.View(120, 40, m)
+	if !strings.Contains(view, "Archive conflict: code-review") {
+		t.Fatalf("expected archive conflict diff modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	info, err := skills.Read(archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Review." {
+		t.Fatalf("archive description = %q, want Review.", info.Description)
+	}
+	if _, err := os.Lstat(activePath); !os.IsNotExist(err) {
+		t.Fatalf("active link still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("external source should remain: %v", err)
+	}
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after resolved unlink", m.modal)
+	}
+}
+
 func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

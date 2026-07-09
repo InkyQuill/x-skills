@@ -47,15 +47,10 @@ func (m *Model) applyMigrateTargetsWithResults(targets []actions.ActiveSkill, re
 		if err != nil {
 			var conflict *actions.ArchiveConflictError
 			if errors.As(err, &conflict) {
-				diff, diffErr := buildDirectoryDiff(conflict.ActivePath, conflict.ArchivedPath)
-				if diffErr != nil {
-					m.modal = newResultModal("Migration Results", []string{fmt.Sprintf("failed to build conflict diff: %v", diffErr)})
-					return
-				}
 				tail := append([]actions.ActiveSkill(nil), targets[i+1:]...)
 				successesBeforeConflict := append([]string(nil), successes...)
 				failuresBeforeConflict := append([]string(nil), failures...)
-				m.modal = newConflictDiffModalWithModelApply(conflict.Name, diff, "Incoming active", func(current *Model, chosen string) {
+				m.openArchiveConflictModal(conflict, "Migration Results", func(current *Model, chosen string) {
 					current.applyResolvedMigrateConflict(skill, tail, chosen, successesBeforeConflict, failuresBeforeConflict)
 				})
 				return
@@ -82,6 +77,15 @@ func (m *Model) applyResolvedMigrateConflict(skill actions.ActiveSkill, remainin
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
 	}
 	m.applyMigrateTargetsWithResults(remaining, actions.ConflictResolutionAsk, successes, failures)
+}
+
+func (m *Model) openArchiveConflictModal(conflict *actions.ArchiveConflictError, resultTitle string, apply func(*Model, string)) {
+	diff, err := buildDirectoryDiff(conflict.ActivePath, conflict.ArchivedPath)
+	if err != nil {
+		m.modal = newResultModal(resultTitle, []string{fmt.Sprintf("failed to build conflict diff: %v", err)})
+		return
+	}
+	m.modal = newConflictDiffModalWithModelApply(conflict.Name, diff, "Incoming active", apply)
 }
 
 func (m *Model) finishMigrateTargets(successes, failures []string) {
@@ -638,23 +642,63 @@ func usageTargetsContainUnmanaged(targets []repoUsageTarget) bool {
 }
 
 func (m *Model) applyUsageTargets(targets []repoUsageTarget, deleteUnmanaged bool) {
-	var lines []string
-	var successes []string
-	for _, target := range targets {
-		result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{Name: target.Name, Scope: target.Scope, Target: target.Target, Confirmed: true, DeleteUnmanaged: deleteUnmanaged})
+	m.applyUsageTargetsWithResults(targets, deleteUnmanaged, actions.ConflictResolutionAsk, nil, nil)
+}
+
+func (m *Model) applyUsageTargetsWithResults(targets []repoUsageTarget, deleteUnmanaged bool, resolution string, successes, failures []string) {
+	for i, target := range targets {
+		result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{
+			Name:               target.Name,
+			Scope:              target.Scope,
+			Target:             target.Target,
+			Confirmed:          true,
+			DeleteUnmanaged:    deleteUnmanaged,
+			ConflictResolution: resolution,
+		})
 		if err != nil {
-			lines = append(lines, "x "+target.Path+": "+err.Error())
+			var conflict *actions.ArchiveConflictError
+			if errors.As(err, &conflict) {
+				tail := append([]repoUsageTarget(nil), targets[i+1:]...)
+				successesBeforeConflict := append([]string(nil), successes...)
+				failuresBeforeConflict := append([]string(nil), failures...)
+				m.openArchiveConflictModal(conflict, "Unlink Results", func(current *Model, chosen string) {
+					current.applyResolvedUsageConflict(target, tail, deleteUnmanaged, chosen, successesBeforeConflict, failuresBeforeConflict)
+				})
+				return
+			}
+			failures = append(failures, "x "+target.Path+": "+err.Error())
 			continue
 		}
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
 	}
+	m.finishUsageTargets(successes, failures)
+}
+
+func (m *Model) applyResolvedUsageConflict(target repoUsageTarget, remaining []repoUsageTarget, deleteUnmanaged bool, resolution string, successes, failures []string) {
+	result, err := actions.Unlink(m.cfg, actions.UnlinkRequest{
+		Name:               target.Name,
+		Scope:              target.Scope,
+		Target:             target.Target,
+		Confirmed:          true,
+		DeleteUnmanaged:    deleteUnmanaged,
+		ConflictResolution: resolution,
+	})
+	if err != nil {
+		failures = append(failures, "x "+target.Path+": "+err.Error())
+	} else {
+		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
+	}
+	m.applyUsageTargetsWithResults(remaining, deleteUnmanaged, actions.ConflictResolutionAsk, successes, failures)
+}
+
+func (m *Model) finishUsageTargets(successes, failures []string) {
 	m.reload()
-	if len(lines) == 0 {
+	if len(failures) == 0 {
 		m.modal = nil
 		m.status = unlinkSuccessStatus(successes)
 		return
 	}
-	lines = append(successes, lines...)
+	lines := append(successes, failures...)
 	m.modal = newResultModal("Unlink Results", lines)
 }
 

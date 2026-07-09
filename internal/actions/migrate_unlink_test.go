@@ -278,6 +278,58 @@ func TestUnlinkUnmanagedExternalSymlinkPreservesMatchingArchive(t *testing.T) {
 	}
 }
 
+func TestUnlinkUnmanagedExternalSymlinkConflictCanUseActive(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	source := makeSkill(t, filepath.Join(home, "external"), "external-only", "External.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "external-only", "Archived.")
+	root := cfg.MustActiveRoot("project", "codex")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(root, "external-only")
+	if err := os.Symlink(source, active); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Unlink(cfg, UnlinkRequest{Name: "external-only", Scope: "project", Target: "codex", Confirmed: true})
+	var conflict *ArchiveConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %[1]v, want ArchiveConflictError", err)
+	}
+	if conflict.Name != "external-only" {
+		t.Fatalf("conflict name = %q, want external-only", conflict.Name)
+	}
+	if _, err := os.Lstat(active); err != nil {
+		t.Fatalf("active link should remain until conflict is resolved: %v", err)
+	}
+
+	result, err := Unlink(cfg, UnlinkRequest{
+		Name:               "external-only",
+		Scope:              "project",
+		Target:             "codex",
+		Confirmed:          true,
+		ConflictResolution: ConflictResolutionUseActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != ResultMigratedUnlinked {
+		t.Fatalf("Status = %q, want %q", result.Status, ResultMigratedUnlinked)
+	}
+	info, err := skills.Read(archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "External." {
+		t.Fatalf("archive description = %q, want External.", info.Description)
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("active link still exists or unexpected err: %v", err)
+	}
+}
+
 func TestUnlinkUnmanagedSymlinkArchivesResolvedSkillAndRemovesOnlyLink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

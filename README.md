@@ -6,22 +6,11 @@ skills you currently need into project or global agent directories.
 The CLI is working-directory based: `x-skills list` inspects the current project
 plus global skill roots. To inspect another project, `cd` there first.
 
-## Install
+## Go Rewrite
 
-Requires `uv` and `git`. Install `uv` from
-<https://docs.astral.sh/uv/> before running the one-liner.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/InkyQuill/x-skills/main/install.sh | sh
-```
-
-The installer checks for `git` and `uv`, then installs the CLI from
-`https://github.com/InkyQuill/x-skills.git` with `uv tool install`.
-
-## Go Rewrite Prototype
-
-This branch also contains an experimental Go rewrite. It is not wired into the
-`uv` one-liner yet; build or run it directly while evaluating the new CLI/TUI:
+This branch is the Go implementation of `x-skills`, replacing the earlier
+Python/Textual prototype (Python source remains in `src/x_skills` only as a
+historical reference; it is not the active implementation).
 
 ```bash
 go run ./cmd/x-skills list
@@ -31,13 +20,18 @@ go run ./cmd/x-skills doctor --fix -y
 go run ./cmd/x-skills tui
 ```
 
-The Go prototype currently covers cwd-based active scanning, local repo listing,
-`link`, `migrate`, `unlink`, `doctor`, `skills.sh` search/archive/install, and
-a Bubble Tea guided manager at `go run ./cmd/x-skills tui`. The TUI has Active,
-Repo, Doctor, and Install pages; Install can search, preview, archive, and link
-remote skills. Active rows are merged by directory SHA fingerprint so identical
-linked copies appear as one item while changed copies remain separate. The
-fingerprint is internal and is not shown in the UI.
+Shipped today: cwd-based active scanning, local repo listing, `link`,
+`migrate`, `unlink`, `doctor` (with `--fix`), and the `x-skills tui` Bubble Tea
+guided manager (Active, Repo, and Doctor pages). Active rows are merged by
+directory SHA fingerprint so identical linked copies appear as one item while
+changed copies remain separate; the fingerprint is internal and not shown in
+the UI.
+
+Not yet implemented (designed, tracked in `docs/adr/` and
+`docs/superpowers/specs/2026-07-06-go-tui-install-and-repo-updates-design.md`):
+remote `skills.sh` search/install (`add`), Repo update checks, and the TUI
+Install page. See that design doc and the backlog for current status before
+relying on any of it.
 
 ## Usage
 
@@ -50,11 +44,6 @@ x-skills list --global
 x-skills repo
 x-skills repo --used
 x-skills repo --unused
-x-skills repo --check-updates
-
-x-skills search svelte
-x-skills search react --owner vercel-labs
-x-skills search react --install 1 -y
 
 x-skills link svelte-coder --target codex --project
 x-skills link typescript-expert --target codex --global
@@ -64,13 +53,9 @@ x-skills migrate next-best-practices --target codex --project
 x-skills unlink opentui-react --target agents --global
 x-skills unlink supergoal --target claude --global --delete-unmanaged
 
-x-skills repo add-github owner/repo path/to/skill
-x-skills repo add-github https://github.com/owner/repo/tree/main/skills/foo
-x-skills repo add-url https://example.com/skill.zip
-x-skills repo remove old-skill
-
 x-skills tui
 x-skills doctor
+x-skills doctor --fix -y
 ```
 
 `x-skills list` answers "what am I currently working with?" It shows active
@@ -88,15 +73,6 @@ directory without `SKILL.md`.
 
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
-`--check-updates` checks archived skills installed from GitHub and shows whether
-the upstream default branch has moved since the stored commit.
-
-`x-skills search` answers "what can I install?" It lists local repo matches
-first, then queries the official `skills.sh` search API and prints installable
-`owner/repo@skill` packages. Use `--install <name-or-index> -y` to install a
-selected result. Local repo results are linked into an active root, defaulting
-to project `agents`; remote `skills.sh` results are copied into the local repo
-archive first.
 
 `link`, `migrate`, `unlink`, and `repo remove` accept multiple skill names and
 print a summary for batch runs. Batch operations run in order and do not roll
@@ -141,8 +117,7 @@ Global prompt flags:
 
 - `-y`, `--yes`: answer yes to yes/no confirmations;
 - `-n`, `--no`: answer no to yes/no confirmations;
-- `--no-input`: never prompt;
-- `--json`: machine-readable output for data commands.
+- `--no-input`: never prompt.
 
 `-y` and `-n` do not choose among ambiguous locations. Use explicit flags such as
 `--target codex --project` or answer the interactive selection prompt.
@@ -154,13 +129,13 @@ to the repo.
 
 ## TUI Mode
 
-`go run ./cmd/x-skills tui` opens the Bubble Tea maintenance manager for longer maintenance
+`x-skills tui` opens the Bubble Tea maintenance manager for longer maintenance
 sessions. The TUI has Active, Repo, Doctor, and Install pages: press `A` for
 Active, `R` for Repo, `D` for Doctor, and `I` for Install. Refresh is `ctrl+r`.
 
 Use Install to search `skills.sh`, preview remote `SKILL.md`, archive a skill,
-or install and link it into the current project. Generic Git and URL install
-sources remain outside the TUI Install page for now.
+or install and link it into the current project. Manual generic Git installs
+remain CLI-first through `x-skills add --git`.
 
 Use Active to inspect current project/global skills, preview `SKILL.md`, migrate
 unmanaged directories into the archive, and unlink active copies. Use Repo to
@@ -168,26 +143,15 @@ preview archived skills, link them into a selected destination, unlink visible
 current usages, or delete archives after visible usages are removed. Use Doctor
 to review and fix current issues.
 
-## Install Sources
+## Design Decisions
 
-`x-skills repo add-github` clones a GitHub repository and copies one skill into
-the repo. Pass `path/to/skill` when the repository contains more than one
-`SKILL.md`. GitHub installs store source metadata in `.x-skills.json` inside the
-archived skill, including source repo, skill path, and installed commit.
-
-`x-skills repo add-url` accepts:
-
-- a `.zip` archive containing exactly one skill;
-- a `.tar`/`.tar.gz` archive containing exactly one skill;
-- a direct `SKILL.md` URL with a `name:` frontmatter field.
-
-Install community skills only from trusted sources. Skills can contain scripts
-and instructions that affect future agent behavior.
+Significant, non-obvious decisions are recorded as ADRs in `docs/adr/`. When a
+choice needs weighing trade-offs (not just implementing an agreed spec), write
+or update an ADR rather than only changing code/docs.
 
 ## Development
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+go build ./...
+go test ./...
 ```

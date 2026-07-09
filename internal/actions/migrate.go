@@ -12,10 +12,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/InkyQuill/x-skills/internal/config"
-	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
@@ -108,89 +106,23 @@ func migrateActiveDirectory(active, archived string, linkBack bool, conflictReso
 	if err := ensureUnmanagedSkillDirectory(active, archived); err != nil {
 		return "", err
 	}
-	if _, err := os.Lstat(archived); err == nil {
-		return handleExistingArchive(active, archived, linkBack, conflictResolution)
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("inspect archive destination %q: %w", archived, err)
+	outcome, err := copySkillToArchive(active, archived, conflictResolution)
+	if err != nil {
+		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
-		return "", fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
-	}
-	if err := os.Rename(active, archived); err != nil {
-		if errors.Is(err, syscall.EXDEV) {
-			return "", fmt.Errorf("move %q to %q: active and archive roots are on different filesystems", active, archived)
-		}
-		return "", fmt.Errorf("move %q to %q: %w", active, archived, err)
+	if err := os.RemoveAll(active); err != nil {
+		return "", fmt.Errorf("remove active skill %q: %w", active, err)
 	}
 	if !linkBack {
 		return ResultMigratedUnlinked, nil
 	}
 	if err := os.Symlink(archived, active); err != nil {
-		if restoreErr := os.Rename(archived, active); restoreErr != nil {
-			return "", fmt.Errorf("link %q to %q: %w (restore failed: %w)", archived, active, err, restoreErr)
-		}
 		return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
 	}
+	if outcome == archiveCopyMatched || outcome == archiveCopyKept {
+		return ResultRelinked, nil
+	}
 	return ResultMigrated, nil
-}
-
-func handleExistingArchive(active, archived string, linkBack bool, conflictResolution string) (string, error) {
-	activeFingerprint, err := fingerprint.Directory(active)
-	if err != nil {
-		return "", fmt.Errorf("fingerprint active skill %q: %w", active, err)
-	}
-	archivedFingerprint, err := fingerprint.Directory(archived)
-	if err != nil {
-		return "", fmt.Errorf("fingerprint archived skill %q: %w", archived, err)
-	}
-	if activeFingerprint == archivedFingerprint {
-		if err := os.RemoveAll(active); err != nil {
-			return "", fmt.Errorf("remove duplicate active skill %q: %w", active, err)
-		}
-		if !linkBack {
-			return ResultMigratedUnlinked, nil
-		}
-		if err := os.Symlink(archived, active); err != nil {
-			return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
-		}
-		return ResultRelinked, nil
-	}
-
-	switch conflictResolution {
-	case ConflictResolutionKeepArchive:
-		if err := os.RemoveAll(active); err != nil {
-			return "", fmt.Errorf("discard active skill %q: %w", active, err)
-		}
-		if !linkBack {
-			return ResultMigratedUnlinked, nil
-		}
-		if err := os.Symlink(archived, active); err != nil {
-			return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
-		}
-		return ResultRelinked, nil
-	case ConflictResolutionUseActive:
-		if err := os.RemoveAll(archived); err != nil {
-			return "", fmt.Errorf("discard archived skill %q: %w", archived, err)
-		}
-		if err := os.Rename(active, archived); err != nil {
-			return "", fmt.Errorf("move %q to %q: %w", active, archived, err)
-		}
-		if !linkBack {
-			return ResultMigratedUnlinked, nil
-		}
-		if err := os.Symlink(archived, active); err != nil {
-			return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
-		}
-		return ResultMigrated, nil
-	case ConflictResolutionAsk:
-		return "", &ArchiveConflictError{
-			ActivePath:   active,
-			ArchivedPath: archived,
-			Summary:      directoryDiffSummary(active, archived),
-		}
-	default:
-		return "", fmt.Errorf("unknown conflict resolution %q", conflictResolution)
-	}
 }
 
 func directoryDiffSummary(active, archived string) string {

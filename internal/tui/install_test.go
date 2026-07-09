@@ -535,6 +535,49 @@ func TestInstallPreviewMissingSourceRepository(t *testing.T) {
 	}
 }
 
+func TestInstallPreviewMissingSkillInRepoShowsStaleRegistryModal(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/other", "other", "Other.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "next-best-practices", Description: "Next help.", Path: "next-best-practices"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	m.install.testCloneURL = repoDir
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	msg := cmd().(installPreviewMsg)
+	if msg.err == nil {
+		t.Fatal("preview error is nil")
+	}
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("stale registry modal is nil")
+	}
+	view := plain(m.modal.View(120, 35, m))
+	for _, want := range []string{
+		"Uh-oh...",
+		"Couldn't find the requested skill in repo.",
+		"You might want to check the repo contents.",
+		repoDir,
+		"Remember that this sometimes happens with skills.sh - it's stale data.",
+		"[ OK ]",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(m.status, "lstat") || strings.Contains(m.install.Message, "lstat") {
+		t.Fatalf("raw lstat leaked into status=%q message=%q", m.status, m.install.Message)
+	}
+}
+
 func TestInstallPreviewIgnoresStaleAndNonInstallMessages(t *testing.T) {
 	skillDir := filepath.Join(t.TempDir(), "skill")
 	writeTUITestRemoteSkill(t, filepath.Dir(skillDir), filepath.Base(skillDir), "skill", "Skill help.")

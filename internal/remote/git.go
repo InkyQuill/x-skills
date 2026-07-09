@@ -51,6 +51,24 @@ type FoundSkill struct {
 	Metadata SourceMetadata
 }
 
+type MissingSkillError struct {
+	Name          string
+	PreferredPath string
+	RepoURL       string
+	Err           error
+}
+
+func (e *MissingSkillError) Error() string {
+	if e.PreferredPath == "" {
+		return fmt.Sprintf("skill %q not found in repo", e.Name)
+	}
+	return fmt.Sprintf("skill %q not found at %q in repo", e.Name, e.PreferredPath)
+}
+
+func (e *MissingSkillError) Unwrap() error {
+	return e.Err
+}
+
 func NewCheckoutCache(root string) *CheckoutCache {
 	return &CheckoutCache{
 		root:      root,
@@ -133,6 +151,14 @@ func (c Checkout) FindSkillContext(ctx context.Context, name, preferredPath stri
 	if preferredPath != "" {
 		skillDir, rel, err := c.resolvePreferredSkillPath(preferredPath)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return FoundSkill{}, &MissingSkillError{
+					Name:          name,
+					PreferredPath: preferredPath,
+					RepoURL:       c.Source.CloneURL,
+					Err:           err,
+				}
+			}
 			return FoundSkill{}, err
 		}
 		if err := ctx.Err(); err != nil {
@@ -168,7 +194,7 @@ func (c Checkout) FindSkillContext(ctx context.Context, name, preferredPath stri
 		return FoundSkill{}, fmt.Errorf("find skill: %w", err)
 	}
 	if len(matches) == 0 {
-		return FoundSkill{}, fmt.Errorf("skill %q not found in checkout", name)
+		return FoundSkill{}, &MissingSkillError{Name: name, RepoURL: c.Source.CloneURL}
 	}
 	if len(matches) > 1 {
 		return FoundSkill{}, fmt.Errorf("ambiguous skill %q: %s", name, strings.Join(matches, ", "))

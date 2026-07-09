@@ -98,6 +98,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
+			if m.showMissingSkillInRepoModal(msg.err) {
+				return m, nil
+			}
 			m.status = msg.err.Error()
 			return m, nil
 		}

@@ -1,6 +1,8 @@
 package roots
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -18,7 +20,7 @@ func TestActiveRootsCanBeFiltered(t *testing.T) {
 	if len(filtered) != 1 {
 		t.Fatalf("len(filtered) = %d, want 1", len(filtered))
 	}
-	if filtered[0].Label != "./.codex" {
+	if filtered[0].Label != ".Cd" {
 		t.Fatalf("Label = %q", filtered[0].Label)
 	}
 }
@@ -59,5 +61,43 @@ func TestActiveRootsRejectInvalidFilter(t *testing.T) {
 	}
 	if roots := ActiveRoots(cfg, Filter{Target: "cursor"}); len(roots) != 0 {
 		t.Fatalf("roots = %#v, want none", roots)
+	}
+}
+
+func TestActiveRootsIncludesConfiguredRootsAndSkipsDisabled(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	configPath := filepath.Join(home, ".x-skills", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("active_roots:\n  - scope: project\n    target: opencode\n    path: .opencode/skills\n    label: .Oc\n  - scope: global\n    target: claude\n    enabled: false\n")
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all := ActiveRoots(loaded, Filter{})
+	if len(all) != 6 {
+		t.Fatalf("len(all) = %d, want 6", len(all))
+	}
+	var foundOpenCode bool
+	for _, root := range all {
+		if root.Target == "opencode" {
+			foundOpenCode = true
+			if root.Label != ".Oc" || root.Path != filepath.Join(project, ".opencode", "skills") {
+				t.Fatalf("opencode root = %#v", root)
+			}
+		}
+		if root.Scope == config.ScopeGlobal && root.Target == config.TargetClaude {
+			t.Fatalf("disabled global claude root was returned: %#v", root)
+		}
+	}
+	if !foundOpenCode {
+		t.Fatal("opencode root missing")
 	}
 }

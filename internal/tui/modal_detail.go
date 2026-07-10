@@ -13,8 +13,9 @@ import (
 )
 
 type detailModal struct {
-	title string
-	lines []string
+	title  string
+	lines  []string
+	scroll int
 }
 
 func newDetailModal(title string, lines []string) modal {
@@ -30,7 +31,7 @@ func activeDetailModal(group ActiveGroup, symbols symbols) modal {
 		"Active members",
 	}
 	for _, member := range group.Members {
-		lines = append(lines, fmt.Sprintf("  %s  %s", renderRootChip(symbols, rootChip(member.Root.Scope, member.Root.Target), lipgloss.NoColor{}), member.Path))
+		lines = append(lines, fmt.Sprintf("  %s  %s", renderRootChip(symbols, rootLabel(member.Root), lipgloss.NoColor{}), member.Path))
 	}
 	lines = append(lines, "", "Debug", "  fingerprint: "+group.Fingerprint)
 	return newDetailModal("Detail: "+group.Name+" (Active)", lines)
@@ -71,15 +72,29 @@ func (d detailModal) Title() string {
 }
 
 func (d detailModal) View(width, height int, m Model) string {
-	body := append([]string{accentStyle.Render(d.title), ""}, d.lines...)
-	body = append(body, "", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-		{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
-		{ASCII: "esc", Unicode: "Esc", Label: "close"},
-		{ASCII: "q", Label: "close"},
-	})))
-	return modalStyle(width, height).Render(strings.Join(body, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: d.title,
+		Body:  d.lines,
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+			{ASCII: "esc", Unicode: "Esc", Label: "close"},
+			{ASCII: "q", Label: "close"},
+		}))},
+		Scroll:    d.scroll,
+		UseScroll: true,
+	})
 }
 
 func (d detailModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
-	return closeOnEscapeOrQuit(msg), nil
+	if closeOnEscapeOrQuit(msg) {
+		return true, nil
+	}
+	if delta := modalMoveDelta(msg); delta != 0 {
+		d.scroll += delta
+		if d.scroll < 0 {
+			d.scroll = 0
+		}
+		m.modal = d
+	}
+	return false, nil
 }

@@ -249,6 +249,46 @@ func TestActiveMigrateContinuesBatchAfterUseActiveConflictResolution(t *testing.
 	}
 }
 
+func TestActiveMigrateConflictResolutionReloadsActiveList(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Active alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Archived alpha.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 40
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected conflict modal")
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+
+	if len(m.active) != 1 {
+		t.Fatalf("active groups = %d, want 1", len(m.active))
+	}
+	group := m.active[0]
+	if group.Name != "alpha-skill" || len(group.Members) != 1 {
+		t.Fatalf("active group = %#v", group)
+	}
+	member := group.Members[0]
+	if member.Status != actions.StatusManaged {
+		t.Fatalf("active status = %q, want managed", member.Status)
+	}
+	if member.Description != "Active alpha." {
+		t.Fatalf("active description = %q, want reloaded active description", member.Description)
+	}
+}
+
 func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -281,7 +321,7 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 		t.Fatal("unlink modal is nil")
 	}
 	view := m.modal.View(110, 35, m)
-	for _, want := range []string{"Unlink usages:", "■ .Ag", "Unlink selected"} {
+	for _, want := range []string{"Unlink usages:", "◆ .Ag", "Unlink selected"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("unlink modal missing %q:\n%s", want, view)
 		}
@@ -489,8 +529,8 @@ func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	if m.modal == nil {
 		t.Fatal("repo link modal is nil")
 	}
-	view := m.modal.View(100, 30, m)
-	for _, want := range []string{"Link repo skill", "scope", "project", "target", ".Ag", "Will create"} {
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"Link repo skill", "Destination", ".Ag", "project:agents", "Will create"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("link modal missing %q:\n%s", want, view)
 		}
@@ -509,7 +549,7 @@ func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	}
 }
 
-func TestRepoLinkModalShowsFocusedFieldAndSelectedChoices(t *testing.T) {
+func TestRepoLinkModalShowsFocusedDestinationAndSelectedChoice(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := config.Default(project, home)
@@ -525,25 +565,19 @@ func TestRepoLinkModalShowsFocusedFieldAndSelectedChoices(t *testing.T) {
 		t.Fatal("selected choice background style is not configured")
 	}
 	view := plain(raw)
-	if !strings.Contains(view, "› scope   ● project    ○ global") {
-		t.Fatalf("link modal missing focused scope row and selected scope:\n%s", view)
+	if !strings.Contains(view, "› ● .Ag  project:agents") {
+		t.Fatalf("link modal missing focused selected destination:\n%s", view)
 	}
-	if !strings.Contains(view, "  target  ● .Ag        ○ .Cl        ○ .Cd") {
-		t.Fatalf("link modal missing selected target:\n%s", view)
+	if !strings.Contains(view, "  ○ .Cl  project:claude") {
+		t.Fatalf("link modal missing configured destination list:\n%s", view)
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = mustModel(t, updated)
 	raw = m.modal.View(100, 30, m)
-	if colorAvailableForTest() && !selectedBackgroundConfigured() {
-		t.Fatal("selected choice background style is not configured after tab")
-	}
 	view = plain(raw)
-	if !strings.Contains(view, "  scope   ● project    ○ global") {
-		t.Fatalf("link modal should keep selected scope after tab:\n%s", view)
-	}
-	if !strings.Contains(view, "› target  ● .Ag        ○ .Cl        ○ .Cd") {
-		t.Fatalf("link modal missing focused target row after tab:\n%s", view)
+	if !strings.Contains(view, "› ● .Cl  project:claude") {
+		t.Fatalf("link modal missing focused destination after moving:\n%s", view)
 	}
 }
 
@@ -558,21 +592,38 @@ func TestRepoLinkModalCanChangeDestination(t *testing.T) {
 	updated, _ = m.Update(keyRunes("l"))
 	m = mustModel(t, updated)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = mustModel(t, updated)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	m = mustModel(t, updated)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	m = mustModel(t, updated)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = mustModel(t, updated)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	m = mustModel(t, updated)
+	for i := 0; i < 5; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	mustModel(t, updated)
 
 	if _, err := os.Lstat(filepath.Join(cfg.GlobalCodexRoot, "zen-of-go")); err != nil {
 		t.Fatalf("global codex link was not created: %v", err)
+	}
+}
+
+func TestRepoLinkModalUsesConfiguredRoots(t *testing.T) {
+	cfg := customRootConfig(t)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.setView(ViewRepo)
+
+	updated, _ := m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("repo link modal is nil")
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, ".Oc") || strings.Contains(view, ".Ag") {
+		t.Fatalf("repo link modal should use configured custom root only:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(cfg.ProjectRoot, ".opencode", "skills", "zen-of-go")); err != nil {
+		t.Fatalf("custom root link was not created: %v", err)
 	}
 }
 
@@ -639,7 +690,7 @@ func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
 		t.Fatal("usage chooser selected row background style is not configured")
 	}
 	view := plain(raw)
-	for _, want := range []string{"Unlink usages: zen-of-go", "■ .Ag", "■ ~Cl", "Unlink selected"} {
+	for _, want := range []string{"Unlink usages: zen-of-go", "◆ .Ag", "◆ ~Cl", "Unlink selected"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("usage chooser missing %q:\n%s", want, view)
 		}
@@ -652,6 +703,48 @@ func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(globalRoot, "zen-of-go")); !os.IsNotExist(err) {
 		t.Fatalf("global usage still exists or unexpected error: %v", err)
+	}
+}
+
+func TestRepoUsageModalConstrainsLongTargetList(t *testing.T) {
+	targets := make([]repoUsageTarget, 0, 24)
+	selected := map[int]bool{}
+	for i := 0; i < 24; i++ {
+		targets = append(targets, repoUsageTarget{
+			Name:   fmt.Sprintf("skill-%02d", i),
+			Chip:   ".Ag",
+			Path:   fmt.Sprintf("/very/long/path/to/active/root/skill-%02d", i),
+			Status: actions.StatusManaged,
+		})
+		selected[i] = true
+	}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 90
+	m.height = 14
+	m.modal = repoUsageModal{name: "zen-of-go", targets: targets, selected: selected, index: 18}
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 14 {
+		t.Fatalf("view height = %d, want 14:\n%s", len(lines), view)
+	}
+	plainView := plain(view)
+	for _, want := range []string{"Unlink usages: zen-of-go", "skill-18", "Unlink selected", "↑/↓ move"} {
+		if !strings.Contains(plainView, want) {
+			t.Fatalf("constrained usage modal missing %q:\n%s", want, plainView)
+		}
+	}
+	if strings.Contains(plainView, "skill-00") {
+		t.Fatalf("usage modal did not scroll long target list:\n%s", plainView)
+	}
+
+	for i := 0; i < 5; i++ {
+		updated, _ := m.Update(keyRunes("j"))
+		m = mustModel(t, updated)
+	}
+	plainView = plain(m.View())
+	if !strings.Contains(plainView, "skill-23") {
+		t.Fatalf("usage modal did not scroll with j key:\n%s", plainView)
 	}
 }
 

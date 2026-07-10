@@ -1,16 +1,15 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 type resultModal struct {
-	title string
-	lines []string
+	title  string
+	lines  []string
+	scroll int
 }
 
 func newResultModal(title string, lines []string) modal {
@@ -22,13 +21,18 @@ func (r resultModal) Title() string {
 }
 
 func (r resultModal) View(width, height int, m Model) string {
-	body := append([]string{accentStyle.Render(r.title), ""}, r.lines...)
-	body = append(body, "", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-		{ASCII: "enter", Unicode: "↵", Label: "close"},
-		{ASCII: "esc", Unicode: "Esc", Label: "close"},
-		{ASCII: "q", Label: "close"},
-	})))
-	return modalStyle(width, height).Render(strings.Join(body, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: r.title,
+		Body:  r.lines,
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+			{ASCII: "enter", Unicode: "↵", Label: "close"},
+			{ASCII: "esc", Unicode: "Esc", Label: "close"},
+			{ASCII: "q", Label: "close"},
+		}))},
+		Scroll:    r.scroll,
+		UseScroll: true,
+	})
 }
 
 func (r resultModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
@@ -36,6 +40,14 @@ func (r resultModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	case "enter", "esc", "q":
 		return true, nil
 	default:
+		if delta := modalMoveDelta(msg); delta != 0 {
+			r.scroll += delta
+			if r.scroll < 0 {
+				r.scroll = 0
+			}
+			m.modal = r
+			return false, nil
+		}
 		return false, nil
 	}
 }

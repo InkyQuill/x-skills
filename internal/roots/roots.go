@@ -1,8 +1,6 @@
 package roots
 
 import (
-	"slices"
-
 	"github.com/InkyQuill/x-skills/internal/config"
 )
 
@@ -19,33 +17,27 @@ type Filter struct {
 }
 
 func ActiveRoots(cfg config.Config, filter Filter) []ActiveRoot {
-	if filter.Scope != "" && !slices.Contains(config.Scopes, filter.Scope) {
-		return nil
-	}
-	if filter.Target != "" && !slices.Contains(config.Targets, filter.Target) {
+	if filter.Scope != "" && filter.Scope != config.ScopeProject && filter.Scope != config.ScopeGlobal {
 		return nil
 	}
 
 	var roots []ActiveRoot
-	for _, scope := range config.Scopes {
-		if filter.Scope != "" && scope != filter.Scope {
+	for _, managed := range cfg.ManagedRoots() {
+		if !managed.Enabled {
 			continue
 		}
-		for _, target := range config.Targets {
-			if filter.Target != "" && target != filter.Target {
-				continue
-			}
-			path, err := cfg.ActiveRoot(scope, target)
-			if err != nil {
-				continue
-			}
-			roots = append(roots, ActiveRoot{
-				Scope:  scope,
-				Target: target,
-				Path:   path,
-				Label:  config.LocationLabel(scope, target),
-			})
+		if filter.Scope != "" && managed.Scope != filter.Scope {
+			continue
 		}
+		if filter.Target != "" && managed.Target != filter.Target {
+			continue
+		}
+		roots = append(roots, ActiveRoot{
+			Scope:  managed.Scope,
+			Target: managed.Target,
+			Path:   managed.Path,
+			Label:  managed.Label,
+		})
 	}
 
 	return roots

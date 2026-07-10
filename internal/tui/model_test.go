@@ -27,6 +27,49 @@ func makeSkill(t *testing.T, root, name, description string) string {
 	return dir
 }
 
+func customRootConfig(t *testing.T) config.Config {
+	t.Helper()
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	configPath := filepath.Join(home, ".x-skills", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`active_roots:
+  - scope: project
+    target: agents
+    enabled: false
+  - scope: project
+    target: claude
+    enabled: false
+  - scope: project
+    target: codex
+    enabled: false
+  - scope: global
+    target: agents
+    enabled: false
+  - scope: global
+    target: claude
+    enabled: false
+  - scope: global
+    target: codex
+    enabled: false
+  - scope: project
+    target: opencode
+    path: .opencode/skills
+    label: .Oc
+`)
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
 func mustModel(t *testing.T, updated tea.Model) Model {
 	t.Helper()
 	m, ok := updated.(Model)
@@ -145,22 +188,6 @@ func TestCtrlRRefreshesWithoutTakingRepoKey(t *testing.T) {
 	}
 }
 
-func TestReloadResultIgnoresStaleToken(t *testing.T) {
-	cfg := config.Default(t.TempDir(), t.TempDir())
-	m := New(cfg)
-	m.reloadToken = 2
-	m.active = []ActiveGroup{{Name: "current"}}
-
-	updated, _ := m.Update(reloadResultMsg{
-		token:  1,
-		active: []ActiveGroup{{Name: "stale"}},
-	})
-	m = mustModel(t, updated)
-	if len(m.active) != 1 || m.active[0].Name != "current" {
-		t.Fatalf("stale reload result applied: %#v", m.active)
-	}
-}
-
 func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
@@ -169,7 +196,7 @@ func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
 	m = mustModel(t, updated)
 
 	view := plain(m.View())
-	if strings.Contains(view, "◆") || strings.Contains(view, "□") || strings.Contains(view, "■") {
+	if strings.Contains(view, "◆") || strings.Contains(view, "◇") {
 		t.Fatalf("view contains unicode symbols in ASCII mode:\n%s", view)
 	}
 	if !strings.Contains(view, "* x-skills") {
@@ -196,7 +223,7 @@ func TestRowsScrollToKeepCursorVisible(t *testing.T) {
 	}
 
 	view := plain(m.View())
-	if !strings.Contains(view, "› □ skill-09") {
+	if !strings.Contains(view, "› ◇ skill-09") {
 		t.Fatalf("view does not show selected last row:\n%s", view)
 	}
 	if strings.Contains(view, "skill-00") {

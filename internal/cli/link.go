@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/repo"
+	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +24,7 @@ func newLinkCommand(rootOptions *options) *cobra.Command {
 			}
 
 			results, failures := linkNames(cmd, rootOptions, args, opts)
-			if len(args) == 1 && len(failures) == 0 {
+			if len(results) == 1 && len(failures) == 0 {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "linked: %s\n", results[0].Name)
 				return nil
 			}
@@ -50,6 +52,7 @@ func linkNames(
 	opts activeRootOptions,
 ) ([]actions.MutationResult, []mutationFailure) {
 	cfg := rootOptions.config()
+	locations, locationErr := resolveLinkLocations(cfg, opts.at)
 	var results []actions.MutationResult
 	var failures []mutationFailure
 	for _, name := range names {
@@ -57,19 +60,35 @@ func linkNames(
 			failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("repo skill %q not found", name)})
 			continue
 		}
-		root, err := chooseDestination(cmd, rootOptions, cfg, name, "link", opts)
-		if err != nil {
-			failures = append(failures, mutationFailure{name: name, err: err})
+		if locationErr != nil {
+			failures = append(failures, mutationFailure{name: name, err: locationErr})
 			continue
 		}
-		result, err := actions.Link(cfg, actions.LinkRequest{Name: name, Scope: root.Scope, Target: root.Target})
-		if err != nil {
-			failures = append(failures, mutationFailure{name: name, err: err})
-			continue
+		if len(locations) == 0 {
+			root, err := chooseDestination(cmd, rootOptions, cfg, name, "link", nil)
+			if err != nil {
+				failures = append(failures, mutationFailure{name: name, err: err})
+				continue
+			}
+			locations = append(locations, root)
 		}
-		results = append(results, result)
+		for _, root := range locations {
+			result, err := actions.Link(cfg, actions.LinkRequest{Name: name, Scope: root.Scope, Target: root.Target})
+			if err != nil {
+				failures = append(failures, mutationFailure{name: name, err: err})
+				continue
+			}
+			results = append(results, result)
+		}
 	}
 	return results, failures
+}
+
+func resolveLinkLocations(cfg config.Config, selectors []string) ([]roots.ActiveRoot, error) {
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+	return resolveLocations(cfg, selectors)
 }
 
 func writeLinkSummary(

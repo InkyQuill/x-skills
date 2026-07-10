@@ -18,6 +18,8 @@ import (
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/skills"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestInstallTabSwitchesAndRendersShell(t *testing.T) {
@@ -30,7 +32,7 @@ func TestInstallTabSwitchesAndRendersShell(t *testing.T) {
 		t.Fatalf("view = %q, want install", m.view)
 	}
 	view := plain(m.View())
-	for _, want := range []string{"I:Install", "Install: search", "type at least 2 characters", "/ search", "i install & use", "a archive only"} {
+	for _, want := range []string{"I:Install", "Install: search", "type at least 2 characters", "space select", "/ search", "i install & use", "a archive only", "c clear"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("install shell missing %q:\n%s", want, view)
 		}
@@ -40,7 +42,7 @@ func TestInstallTabSwitchesAndRendersShell(t *testing.T) {
 func TestInstallHelpShowsRealInstallKeys(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	view := plain(newHelpModal().View(100, 40, m))
-	for _, want := range []string{"switch to Install view", "Install: / search", "Install: i install and use", "Install: a archive only"} {
+	for _, want := range []string{"switch to Install view", "Install: / search", "Install: i install and use", "Install: a archive only", "Install too"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("help missing %q:\n%s", want, view)
 		}
@@ -84,14 +86,13 @@ func TestInstallSearchRunsAfterEnterAndKeepsResults(t *testing.T) {
 	}), http.DefaultClient)
 	m.setView(ViewInstall)
 
-	updated, cmd := m.Update(keyRunes("/"))
+	updated, _ := m.Update(keyRunes("/"))
 	m = mustModel(t, updated)
 	for _, key := range []string{"s", "v", "e", "l", "t", "e"} {
-		updated, cmd = m.Update(keyRunes(key))
+		updated, _ = m.Update(keyRunes(key))
 		m = mustModel(t, updated)
-		_ = cmd
 	}
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 	if !m.install.Searching {
 		t.Fatal("searching = false")
@@ -172,6 +173,152 @@ func TestInstallSearchResultRendersAuditPillInASCIIMode(t *testing.T) {
 	}
 }
 
+func TestInstallRowsRenderRichStateSourceAndDescription(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.cursor = 0
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:        "svelte-coder",
+			Description: "Svelte help.",
+			Owner:       "vercel-labs",
+			Repo:        "skills",
+			Path:        "skills/svelte-coder",
+			Installs:    812,
+		},
+		ArchiveState: remote.ArchiveStateArchived,
+	}}
+
+	rows := renderInstallRows(m, 120)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	got := strings.TrimRight(ansi.Strip(rows[0]), " ")
+	for _, want := range []string{"› ◇", "svelte-coder", "vercel-labs/skills", "812 installs", "archived", "Svelte help."} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("install row missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "  0 installs") {
+		t.Fatalf("install row rendered empty count:\n%s", got)
+	}
+	if colorAvailableForTest() {
+		requireInstallRowStyledSegment(t, rows[0], installSourceStyle, cursorBg.GetBackground(), "vercel-labs/skills")
+		requireInstallRowStyledSegment(t, rows[0], installCountStyle, cursorBg.GetBackground(), "812 installs")
+		requireInstallRowStyledSegment(t, rows[0], okStyle, cursorBg.GetBackground(), remote.ArchiveStateArchived)
+	}
+}
+
+func TestInstallRowsRenderAuditAndArchiveStatePills(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.cursor = 0
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:        "svelte-coder",
+			Description: "Svelte help.",
+			Owner:       "vercel-labs",
+			Repo:        "skills",
+			Path:        "skills/svelte-coder",
+		},
+		ArchiveState: remote.ArchiveStateNameConflict,
+		AuditPill:    "⚠ warn",
+	}}
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+
+	rows := renderInstallRows(m, 120)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	got := strings.TrimRight(ansi.Strip(rows[0]), " ")
+	for _, want := range []string{"› ◆", "svelte-coder", "vercel-labs/skills", "name conflict", "⚠ warn", "Svelte help."} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("install row missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "installs") {
+		t.Fatalf("install row rendered zero install count:\n%s", got)
+	}
+	if colorAvailableForTest() {
+		requireInstallRowStyledSegment(t, rows[0], dangerStyle, cursorBg.GetBackground(), remote.ArchiveStateNameConflict)
+		requireInstallRowStyledSegment(t, rows[0], archiveStyle, cursorBg.GetBackground(), "⚠ warn")
+	}
+}
+
+func TestInstallRowsPreserveHighlightBackgroundAcrossRichSegments(t *testing.T) {
+	if colorAvailableForTest() && (!selectedBackgroundConfigured() || !cursorBackgroundConfigured()) {
+		t.Fatal("row background styles are not configured")
+	}
+	if !colorAvailableForTest() {
+		t.Skip("color disabled")
+	}
+
+	tests := []struct {
+		name       string
+		cursor     int
+		selected   bool
+		background lipgloss.TerminalColor
+	}{
+		{
+			name:       "cursor",
+			cursor:     0,
+			background: cursorBg.GetBackground(),
+		},
+		{
+			name:       "selected",
+			cursor:     -1,
+			selected:   true,
+			background: selectedBg.GetBackground(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New(config.Default(t.TempDir(), t.TempDir()))
+			m.setView(ViewInstall)
+			m.cursor = tt.cursor
+			m.install.Results = []installResultView{{
+				Result: remote.SearchResult{
+					Name:        "svelte-coder",
+					Description: "Svelte help.",
+					Owner:       "vercel-labs",
+					Repo:        "skills",
+					Path:        "skills/svelte-coder",
+					Installs:    812,
+				},
+				ArchiveState: remote.ArchiveStateArchived,
+				AuditPill:    "⚠ warn",
+			}}
+			if tt.selected {
+				m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+			}
+
+			rows := renderInstallRows(m, 120)
+			if len(rows) != 1 {
+				t.Fatalf("rows = %d, want 1", len(rows))
+			}
+			requireInstallRowStyledSegment(t, rows[0], installSourceStyle, tt.background, "vercel-labs/skills")
+			requireInstallRowStyledSegment(t, rows[0], installCountStyle, tt.background, "812 installs")
+			requireInstallRowStyledSegment(t, rows[0], okStyle, tt.background, remote.ArchiveStateArchived)
+			requireInstallRowStyledSegment(t, rows[0], archiveStyle, tt.background, "⚠ warn")
+			requireInstallRowStyledSegment(t, rows[0], mutedStyle, tt.background, "Svelte help.")
+		})
+	}
+}
+
+func requireInstallRowStyledSegment(
+	t *testing.T,
+	row string,
+	style lipgloss.Style,
+	background lipgloss.TerminalColor,
+	text string,
+) {
+	t.Helper()
+	styled := style.Background(background).Render(text)
+	if !strings.Contains(row, styled) {
+		t.Fatalf("install row missing styled segment %q:\n%q", styled, row)
+	}
+}
+
 func TestInstallSearchResultCachesAuditFromResult(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)
@@ -199,6 +346,534 @@ func TestInstallSearchResultCachesAuditFromResult(t *testing.T) {
 	}
 	if got := m.install.Audit[installAuditKey(result)]; !got.Available || got.Critical != 1 {
 		t.Fatalf("cached audit = %#v", got)
+	}
+}
+
+func TestInstallSpaceTogglesResultSelection(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder"}},
+		{Result: remote.SearchResult{Name: "react-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/react-coder"}},
+	}
+
+	firstID := installID(m.install.Results[0].Result)
+	updated, _ := m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+	if !m.selected[ViewInstall][firstID] {
+		t.Fatalf("selected[%q] = false, want true", firstID)
+	}
+
+	updated, _ = m.Update(keyRunes("j"))
+	m = mustModel(t, updated)
+	secondID := installID(m.install.Results[1].Result)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+	if !m.selected[ViewInstall][firstID] || !m.selected[ViewInstall][secondID] {
+		t.Fatalf("selected = %#v, want both install rows selected", m.selected[ViewInstall])
+	}
+
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+	if m.selected[ViewInstall][secondID] {
+		t.Fatalf("selected[%q] = true after second toggle", secondID)
+	}
+	rows := m.selectedInstallRows()
+	if len(rows) != 1 || rows[0].Result.Name != "svelte-coder" {
+		t.Fatalf("selected rows = %#v, want first row only", rows)
+	}
+}
+
+func TestInstallClearKeyClearsResultSelection(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/svelte-coder"}},
+		{Result: remote.SearchResult{Name: "react-coder", Owner: "vercel-labs", Repo: "skills", Path: "skills/react-coder"}},
+	}
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+	m.selected[ViewInstall][installID(m.install.Results[1].Result)] = true
+
+	updated, _ := m.Update(keyRunes("c"))
+	m = mustModel(t, updated)
+
+	if len(m.selected[ViewInstall]) != 0 {
+		t.Fatalf("selected install rows = %#v, want none", m.selected[ViewInstall])
+	}
+	if m.status != "selection cleared" {
+		t.Fatalf("status = %q, want selection cleared", m.status)
+	}
+}
+
+func TestInstallSearchResetsSelectionOnSubmitAndCurrentResult(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.Query = "svelte"
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}},
+	}
+	m.cursor = 1
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+
+	if cmd := m.startInstallSearch(); cmd == nil {
+		t.Fatal("search cmd is nil")
+	}
+	if len(m.selected[ViewInstall]) != 0 {
+		t.Fatalf("selection after search submit = %#v, want empty", m.selected[ViewInstall])
+	}
+	if rows := m.installActionRows(); len(rows) != 1 || rows[0].Result.Name != "react-coder" {
+		t.Fatalf("action rows after submit = %#v, want cursor row only", rows)
+	}
+
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+	updated, _ := m.Update(installSearchResultMsg{
+		token:   m.install.searchToken,
+		query:   "svelte",
+		results: []remote.SearchResult{{Name: "vue-coder", Path: "skills/vue-coder"}},
+	})
+	m = mustModel(t, updated)
+	if len(m.selected[ViewInstall]) != 0 {
+		t.Fatalf("selection after current search result = %#v, want empty", m.selected[ViewInstall])
+	}
+}
+
+func TestInstallStaleSearchResultPreservesSelection(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.searchToken = 2
+	result := remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}
+	m.install.Results = []installResultView{{Result: result}}
+	m.selected[ViewInstall][installID(result)] = true
+
+	updated, _ := m.Update(installSearchResultMsg{
+		token:   1,
+		query:   "stale",
+		results: []remote.SearchResult{{Name: "react-coder", Path: "skills/react-coder"}},
+	})
+	m = mustModel(t, updated)
+	if !m.selected[ViewInstall][installID(result)] {
+		t.Fatalf("stale search result cleared selection: %#v", m.selected[ViewInstall])
+	}
+}
+
+func TestInstallArchiveUsesSelectedRows(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "React help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	m.cursor = 2
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("fallback archive cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.status != "archived vue-coder" {
+		t.Fatalf("fallback status = %q, want cursor row archived", m.status)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "vue-coder")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("unselected first archive exists or unexpected error: %v", err)
+	}
+
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+	m.selected[ViewInstall][installID(m.install.Results[1].Result)] = true
+	m.cursor = 2
+	updated, cmd = m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("selected archive cmd is nil")
+	}
+	msg = cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.status != "archived 2 skills" {
+		t.Fatalf("selected status = %q, want batch status", m.status)
+	}
+	for _, name := range []string{"svelte-coder", "react-coder", "vue-coder"} {
+		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); err != nil {
+			t.Fatalf("archive %s missing: %v", name, err)
+		}
+	}
+}
+
+func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "Incoming React help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateNameConflict},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("initial archive batch cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "Name conflict: react-coder") {
+		t.Fatalf("archive batch did not pause on middle conflict:\n%s", installTestModalView(m, 120, 35))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("rename existing archive cmd is nil")
+	}
+	msg = cmd().(installArchiveMsg)
+	updated, cmd = m.Update(msg)
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail archive cmd is nil after resolving middle conflict")
+	}
+	msg = cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	for _, name := range []string{"svelte-coder", "react-coder", "react-coder-local", "vue-coder"} {
+		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); err != nil {
+			t.Fatalf("archive %s missing after continuation: %v", name, err)
+		}
+	}
+	if m.status != "archived 3 skills" {
+		t.Fatalf("status = %q, want archived 3 skills", m.status)
+	}
+}
+
+func TestInstallArchiveBatchContinuesAfterMiddleUpdate(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "Incoming React help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGit,
+		CloneURL:   repoDir,
+		SkillPath:  "skills/react-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateUpdateAvailable},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("initial archive batch cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, cmd = m.Update(msg)
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("middle update diff cmd is nil")
+	}
+	diffMsg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 40, m)), "Archive conflict: react-coder") {
+		t.Fatalf("archive batch did not pause on middle update:\n%s", installTestModalView(m, 120, 40))
+	}
+
+	updated, cmd = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("accept incoming archive cmd is nil")
+	}
+	msg = cmd().(installArchiveMsg)
+	updated, cmd = m.Update(msg)
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail archive cmd is nil after resolving middle update")
+	}
+	msg = cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	for _, name := range []string{"svelte-coder", "react-coder", "vue-coder"} {
+		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); err != nil {
+			t.Fatalf("archive %s missing after update continuation: %v", name, err)
+		}
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "react-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Incoming React help." {
+		t.Fatalf("react archive description = %q, want incoming update", info.Description)
+	}
+	if m.status != "archived 3 skills" {
+		t.Fatalf("status = %q, want archived 3 skills", m.status)
+	}
+}
+
+func TestInstallArchiveBatchMissingSkillContinuesWithTail(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.archiveToken = 1
+
+	missing := remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}
+	tail := installResultView{
+		Result:       remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}
+	m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+		identity:  installArchiveIdentityFromResult(missing),
+		total:     2,
+		remaining: []installResultView{tail},
+	}
+
+	updated, cmd := m.Update(installArchiveMsg{
+		token:    1,
+		name:     missing.Name,
+		identity: installArchiveIdentityFromResult(missing),
+		err:      &remote.MissingSkillError{Name: missing.Name, PreferredPath: missing.Path},
+	})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail archive cmd is nil after missing skill")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "vue-coder")); err != nil {
+		t.Fatalf("tail archive missing after continuation: %v", err)
+	}
+	if m.status != "archived 1 of 2 skills" {
+		t.Fatalf("status = %q, want partial archive status", m.status)
+	}
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), `skill "react-coder" not found`) {
+		t.Fatalf("result modal missing failed row:\n%s", installTestModalView(m, 120, 35))
+	}
+	if strings.Contains(plain(m.modal.View(120, 35, m)), "Couldn't find the requested skill in repo") {
+		t.Fatalf("batch missing skill opened single-row stale registry modal:\n%s", installTestModalView(m, 120, 35))
+	}
+}
+
+func TestInstallArchiveBatchMixedFailuresShowsResults(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "missing-coder", Path: "skills/missing-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive batch cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.status != "archived 1 of 2 skills" {
+		t.Fatalf("status = %q, want archived 1 of 2 skills", m.status)
+	}
+	view := installTestModalView(m, 120, 40)
+	for _, want := range []string{"Archive Results", "archived svelte-coder", "missing-coder"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("archive result modal missing %q:\n%s", want, view)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallUseUsesSelectedRows(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateArchived},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateArchived},
+	}
+	m.cursor = 2
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("fallback install-use cmd = %#v, want nil while modal opens", cmd)
+	}
+	single, ok := m.modal.(installDestinationModal)
+	if !ok {
+		t.Fatalf("fallback modal = %T, want installDestinationModal", m.modal)
+	}
+	if single.name != "vue-coder" {
+		t.Fatalf("fallback modal name = %q, want cursor row", single.name)
+	}
+
+	m.modal = nil
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+	m.selected[ViewInstall][installID(m.install.Results[1].Result)] = true
+	m.cursor = 2
+	updated, cmd = m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("selected install-use cmd = %#v, want nil while modal opens", cmd)
+	}
+	batch, ok := m.modal.(installBatchDestinationModal)
+	if !ok {
+		t.Fatalf("selected modal = %T, want installBatchDestinationModal", m.modal)
+	}
+	if len(batch.rows) != 2 || batch.rows[0].Result.Name != "svelte-coder" || batch.rows[1].Result.Name != "react-coder" {
+		t.Fatalf("batch rows = %#v, want selected rows in row order", batch.rows)
+	}
+	view := plain(batch.View(120, 35, m))
+	if !strings.Contains(view, "Install and use 2 skills") || strings.Contains(view, "vue-coder") {
+		t.Fatalf("batch destination modal did not use selected rows:\n%s", view)
+	}
+}
+
+func TestInstallInspectorShowsDescriptionAndSourceDetails(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 30
+	m.install.Results = []installResultView{
+		{
+			Result: remote.SearchResult{
+				Name:        "svelte-coder",
+				Description: "Svelte help.",
+				Owner:       "vl",
+				Repo:        "skills",
+				Path:        "svelte",
+				Installs:    812,
+			},
+			ArchiveState: remote.ArchiveStateArchived,
+			AuditPill:    "⚠ warn",
+		},
+	}
+
+	view := plain(m.View())
+	for _, want := range []string{
+		"Inspector",
+		"svelte-coder",
+		"Description",
+		"Svelte help.",
+		"Source",
+		"vl/skills",
+		"Installs",
+		"812",
+		"Archive",
+		"archived",
+		"Audit",
+		"⚠ warn",
+		"Owner",
+		"vl",
+		"Repo",
+		"skills",
+		"Path",
+		"svelte",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("install inspector missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestInstallInspectorShowsAvailableActions(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 30
+	m.install.Results = []installResultView{
+		{
+			Result: remote.SearchResult{
+				Name:        "svelte-coder",
+				Description: "Svelte help.",
+				Owner:       "vercel-labs",
+				Repo:        "skills",
+				Path:        "skills/svelte-coder",
+			},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		},
+	}
+
+	view := plain(m.View())
+	for _, want := range []string{"Actions", "enter preview", "i install & use", "a archive only"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("install inspector missing action %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -846,6 +1521,49 @@ func TestInstallArchiveOnlyArchivesRemoteSkillAndStaysOnInstall(t *testing.T) {
 	}
 }
 
+func TestInstallArchiveOnlyFallsBackWhenRegistryPathIsStale(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/golang-cli", "golang-cli", "Go CLI help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:        "golang-cli",
+			Description: "Go CLI help.",
+			Path:        "golang-cli",
+		},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, cmd := m.Update(keyRunes("a"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.status != "archived golang-cli" {
+		t.Fatalf("status = %q", m.status)
+	}
+	meta, ok, err := remote.ReadSourceMetadata(filepath.Join(cfg.ArchiveSkillsRoot(), "golang-cli"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("source metadata missing")
+	}
+	if meta.SkillPath != "skills/golang-cli" {
+		t.Fatalf("SkillPath = %q, want skills/golang-cli", meta.SkillPath)
+	}
+}
+
 func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
@@ -897,6 +1615,48 @@ func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
 	}
 	if m.status != "installed svelte-coder to .Ag" {
 		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallDestinationModalUsesConfiguredRoots(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := customRootConfig(t)
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("destination modal is nil")
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, "[x] .Oc") || strings.Contains(view, ".Ag") {
+		t.Fatalf("destination modal should use configured custom root only:\n%s", view)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if m.status != "installed svelte-coder to .Oc" {
+		t.Fatalf("status = %q, want installed svelte-coder to .Oc", m.status)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.ProjectRoot, ".opencode", "skills", "svelte-coder")); err != nil {
+		t.Fatalf("custom root link was not created: %v", err)
 	}
 }
 
@@ -957,7 +1717,7 @@ func TestInstallAndUseIgnoresStaleSuccess(t *testing.T) {
 		},
 	}
 	m.install.useToken = 2
-	m.modal = newInstallDestinationModal(m.install.Results[1])
+	m.modal = newInstallDestinationModal(cfg, m.install.Results[1])
 	m.status = "new install pending"
 	m.install.Message = "new install pending"
 
@@ -1198,6 +1958,73 @@ func TestInstallDestinationChecklistNavigationAndToggle(t *testing.T) {
 	}
 }
 
+func TestInstallBatchDestinationModalUsesConfiguredRoots(t *testing.T) {
+	cfg := customRootConfig(t)
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateArchived},
+	}
+	m.selected[ViewInstall][installID(m.install.Results[0].Result)] = true
+	m.selected[ViewInstall][installID(m.install.Results[1].Result)] = true
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("batch destination modal is nil")
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, "[x] .Oc") || strings.Contains(view, ".Ag") {
+		t.Fatalf("batch destination modal should use configured custom root only:\n%s", view)
+	}
+}
+
+func TestInstallDestinationModalRequiresSelectionWhenNoRootsConfigured(t *testing.T) {
+	cfg := customRootConfig(t)
+	configPath := filepath.Join(cfg.HomeDir, ".x-skills", "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`active_roots:
+  - scope: project
+    target: agents
+    enabled: false
+  - scope: project
+    target: claude
+    enabled: false
+  - scope: project
+    target: codex
+    enabled: false
+  - scope: global
+    target: agents
+    enabled: false
+  - scope: global
+    target: claude
+    enabled: false
+  - scope: global
+    target: codex
+    enabled: false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadGlobal(config.Default(cfg.ProjectRoot, cfg.HomeDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.Results = []installResultView{{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateArchived,
+	}}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.status != "select at least one destination" {
+		t.Fatalf("status = %q, want select at least one destination", m.status)
+	}
+}
+
 func TestInstallAndUseRequiresDestination(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)
@@ -1317,6 +2144,72 @@ func TestInstallAndUseRollsBackPartialLinksAfterLateFailure(t *testing.T) {
 	}
 	if m.status != "late link failure" {
 		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallAndUseBatchRollsBackFailedRowPartialLinks(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "React help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+
+	originalLink := installUseLink
+	calls := 0
+	installUseLink = func(cfg config.Config, req actions.LinkRequest) (actions.MutationResult, error) {
+		calls++
+		if calls == 4 {
+			return actions.MutationResult{}, errors.New("late batch link failure")
+		}
+		return originalLink(cfg, req)
+	}
+	t.Cleanup(func() {
+		installUseLink = originalLink
+	})
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("batch install-use cmd is nil")
+	}
+	msg := cmd().(installUseMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if calls != 4 {
+		t.Fatalf("link calls = %d, want 4", calls)
+	}
+	for _, target := range []string{config.TargetAgents, config.TargetClaude} {
+		if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, target), "svelte-coder")); err != nil {
+			t.Fatalf("successful row link %s missing: %v", target, err)
+		}
+	}
+	for _, target := range []string{config.TargetAgents, config.TargetClaude} {
+		if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, target), "react-coder")); !os.IsNotExist(err) {
+			t.Fatalf("failed row link %s remains or unexpected error: %v", target, err)
+		}
+	}
+	if m.status != "installed 1 of 2 skills" {
+		t.Fatalf("status = %q, want partial batch status", m.status)
 	}
 }
 
@@ -1963,6 +2856,289 @@ func TestInstallAndUseNameConflictReplaceThenContinuesToDestinations(t *testing.
 	m = mustModel(t, updated)
 	if m.status != "installed svelte-coder to .Ag" {
 		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "Incoming React help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateNameConflict},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil while batch destination modal opens", cmd)
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("initial batch install-use cmd is nil")
+	}
+	useMsg := cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "Name conflict: react-coder") {
+		t.Fatalf("install-use batch did not pause on middle conflict:\n%s", installTestModalView(m, 120, 35))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("rename existing archive cmd is nil")
+	}
+	archiveMsg := cmd().(installArchiveMsg)
+	updated, cmd = m.Update(archiveMsg)
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail install-use cmd is nil after resolving middle conflict")
+	}
+	useMsg = cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+
+	for _, name := range []string{"svelte-coder", "react-coder", "vue-coder"} {
+		if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), name)); err != nil {
+			t.Fatalf("active link %s missing after continuation: %v", name, err)
+		}
+	}
+	if m.status != "installed 3 skills to .Ag" {
+		t.Fatalf("status = %q, want installed 3 skills", m.status)
+	}
+}
+
+func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "Incoming React help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateNameConflict},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, _ := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("initial batch install-use cmd is nil")
+	}
+	updated, _ = m.Update(cmd().(installUseMsg))
+	m = mustModel(t, updated)
+	for range 2 {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("rename incoming archive cmd is nil")
+	}
+	updated, cmd = m.Update(cmd().(installArchiveMsg))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail install-use cmd is nil after renaming incoming archive")
+	}
+	updated, _ = m.Update(cmd().(installUseMsg))
+	m = mustModel(t, updated)
+
+	activeRoot := cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents)
+	for _, name := range []string{"react-coder-remote", "vue-coder"} {
+		if _, err := os.Lstat(filepath.Join(activeRoot, name)); err != nil {
+			t.Fatalf("active link %s missing after continuation: %v", name, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(activeRoot, "react-coder")); !os.IsNotExist(err) {
+		t.Fatalf("active link used unresolved archive name or unexpected error: %v", err)
+	}
+	if m.status != "installed 2 skills to .Ag" {
+		t.Fatalf("status = %q, want installed 2 skills", m.status)
+	}
+}
+
+func TestInstallAndUseBatchContinuesAfterMiddleUpdate(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "Incoming React help.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGit,
+		CloneURL:   repoDir,
+		SkillPath:  "skills/react-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 40
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.Results = []installResultView{
+		{Result: remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}, ArchiveState: remote.ArchiveStateUpdateAvailable},
+		{Result: remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	for _, row := range m.install.Results {
+		m.selected[ViewInstall][installID(row.Result)] = true
+	}
+
+	updated, cmd := m.Update(keyRunes("i"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil while batch destination modal opens", cmd)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes(" "))
+	m = mustModel(t, updated)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("initial batch install-use cmd is nil")
+	}
+	useMsg := cmd().(installUseMsg)
+	updated, cmd = m.Update(useMsg)
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("middle update diff cmd is nil")
+	}
+	diffMsg := cmd().(installUpdateDiffMsg)
+	updated, _ = m.Update(diffMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 40, m)), "Archive conflict: react-coder") {
+		t.Fatalf("install-use batch did not pause on middle update:\n%s", installTestModalView(m, 120, 40))
+	}
+
+	updated, cmd = m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail install-use cmd is nil after resolving middle update")
+	}
+	useMsg = cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+
+	for _, target := range []string{config.TargetAgents, config.TargetClaude} {
+		for _, name := range []string{"svelte-coder", "react-coder", "vue-coder"} {
+			if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, target), name)); err != nil {
+				t.Fatalf("active link %s/%s missing after update continuation: %v", target, name, err)
+			}
+		}
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "react-coder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Existing React help." {
+		t.Fatalf("react archive description = %q, want kept archive", info.Description)
+	}
+	if m.status != "installed 3 skills to .Ag, .Cl" {
+		t.Fatalf("status = %q, want installed 3 skills to .Ag, .Cl", m.status)
+	}
+}
+
+func TestInstallAndUseBatchMissingSkillContinuesWithTail(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.archiveToken = 1
+
+	missing := installResultView{
+		Result:       remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}
+	tail := installResultView{
+		Result:       remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}
+	destinations := []installDestination{{
+		Scope:   config.ScopeProject,
+		Target:  config.TargetAgents,
+		Label:   ".Ag",
+		Checked: true,
+	}}
+	m.install.pendingUseBatch = &installUseBatchContinuation{
+		identity:     installArchiveIdentityFromResult(missing.Result),
+		row:          missing,
+		total:        2,
+		remaining:    []installResultView{tail},
+		destinations: destinations,
+	}
+
+	updated, cmd := m.Update(installArchiveMsg{
+		token:    1,
+		name:     missing.Result.Name,
+		identity: installArchiveIdentityFromResult(missing.Result),
+		err:      &remote.MissingSkillError{Name: missing.Result.Name, PreferredPath: missing.Result.Path},
+	})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail install-use cmd is nil after missing skill")
+	}
+	useMsg := cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "vue-coder")); err != nil {
+		t.Fatalf("tail active link missing after continuation: %v", err)
+	}
+	if m.status != "installed 1 of 2 skills" {
+		t.Fatalf("status = %q, want partial install status", m.status)
+	}
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), `react-coder: skill "react-coder" not found`) {
+		t.Fatalf("result modal missing failed row:\n%s", installTestModalView(m, 120, 35))
 	}
 }
 
@@ -2757,6 +3933,242 @@ func TestInstallSameSourceUpdateDiffIgnoresStaleResult(t *testing.T) {
 	}
 	if m.status != "newer selection" {
 		t.Fatalf("status = %q, want stale update diff ignored", m.status)
+	}
+}
+
+func TestInstallArchiveBatchStaleUpdateDiffDoesNotClearNewerPendingBatch(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	row := installResultView{
+		Result:       remote.SearchResult{Name: "svelte-coder", Owner: "owner", Repo: "repo", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.previewToken = 2
+	m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+		identity:    installArchiveIdentityFromResult(row.Result),
+		updateToken: 2,
+		total:       2,
+		remaining: []installResultView{{
+			Result:       remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		}},
+	}
+
+	updated, _ := m.Update(installUpdateDiffMsg{token: 1, row: row})
+	m = mustModel(t, updated)
+
+	if m.install.pendingArchiveBatch == nil {
+		t.Fatal("stale update diff cleared newer pending archive batch")
+	}
+	if got := m.install.pendingArchiveBatch.updateToken; got != 2 {
+		t.Fatalf("pending archive batch updateToken = %d, want 2", got)
+	}
+}
+
+func TestInstallUseBatchStaleUpdateDiffDoesNotClearNewerPendingBatch(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	row := installResultView{
+		Result:       remote.SearchResult{Name: "svelte-coder", Owner: "owner", Repo: "repo", Path: "skills/svelte-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.previewToken = 2
+	m.install.pendingUseBatch = &installUseBatchContinuation{
+		identity:     installArchiveIdentityFromResult(row.Result),
+		row:          row,
+		updateToken:  2,
+		total:        2,
+		destinations: []installDestination{{Scope: config.ScopeProject, Target: config.TargetAgents, Label: ".Ag", Checked: true}},
+		remaining: []installResultView{{
+			Result:       remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"},
+			ArchiveState: remote.ArchiveStateNotArchived,
+		}},
+	}
+
+	updated, _ := m.Update(installUpdateDiffMsg{token: 1, row: row})
+	m = mustModel(t, updated)
+
+	if m.install.pendingUseBatch == nil {
+		t.Fatal("stale update diff cleared newer pending install-use batch")
+	}
+	if got := m.install.pendingUseBatch.updateToken; got != 2 {
+		t.Fatalf("pending install-use batch updateToken = %d, want 2", got)
+	}
+}
+
+func TestInstallBatchContinuationPreservesResolvedArchiveName(t *testing.T) {
+	row := installResultView{Result: remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"}}
+	identity := installArchiveIdentityFromResult(row.Result)
+
+	t.Run("archive error", func(t *testing.T) {
+		m := New(config.Default(t.TempDir(), t.TempDir()))
+		m.setView(ViewInstall)
+		m.install.archiveToken = 1
+		m.install.pendingArchiveBatch = &installArchiveBatchContinuation{identity: identity, total: 1}
+
+		updated, _ := m.Update(installArchiveMsg{
+			token: 1, name: "react-coder-remote", identity: identity, err: errors.New("archive failed"),
+		})
+		m = mustModel(t, updated)
+		if view := installTestModalView(m, 120, 35); !strings.Contains(view, "react-coder-remote: archive failed") {
+			t.Fatalf("archive batch result lost resolved name:\n%s", view)
+		}
+	})
+
+	t.Run("install error", func(t *testing.T) {
+		m := New(config.Default(t.TempDir(), t.TempDir()))
+		m.setView(ViewInstall)
+		m.install.useToken = 1
+		m.install.pendingUseBatch = &installUseBatchContinuation{
+			identity: identity, row: row, total: 1,
+		}
+
+		updated, _ := m.Update(installUseMsg{
+			token: 1, name: "react-coder-remote", row: row, identity: identity, err: errors.New("archive failed"),
+		})
+		m = mustModel(t, updated)
+		if view := installTestModalView(m, 120, 35); !strings.Contains(view, "react-coder-remote: archive failed") {
+			t.Fatalf("install batch result lost resolved name:\n%s", view)
+		}
+	})
+
+	t.Run("keep existing", func(t *testing.T) {
+		m := New(config.Default(t.TempDir(), t.TempDir()))
+		m.setView(ViewInstall)
+		m.width = 120
+		m.height = 40
+		m.install.previewToken = 1
+		m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+			identity: identity, updateToken: 1, total: 1,
+		}
+
+		updated, _ := m.Update(installUpdateDiffMsg{token: 1, row: row})
+		m = mustModel(t, updated)
+		updated, _ = m.Update(keyRunes("k"))
+		m = mustModel(t, updated)
+		if m.status != "archived 1 skills" {
+			t.Fatalf("status = %q, want kept archive counted in completed batch", m.status)
+		}
+	})
+}
+
+func TestInstallArchiveBatchUpdateDiffMissingSkillContinuesWithTail(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.previewToken = 1
+
+	missing := installResultView{
+		Result:       remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}
+	tail := installResultView{
+		Result:       remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}
+	m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+		identity:    installArchiveIdentityFromResult(missing.Result),
+		updateToken: 1,
+		total:       2,
+		remaining:   []installResultView{tail},
+	}
+
+	updated, cmd := m.Update(installUpdateDiffMsg{
+		token: 1,
+		row:   missing,
+		err:   &remote.MissingSkillError{Name: missing.Result.Name, PreferredPath: missing.Result.Path},
+	})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail archive cmd is nil after missing skill update diff")
+	}
+	if m.modal != nil {
+		t.Fatalf("missing skill update diff opened modal before tail command:\n%s", installTestModalView(m, 120, 35))
+	}
+
+	msg := cmd().(installArchiveMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "vue-coder")); err != nil {
+		t.Fatalf("tail archive missing after update diff continuation: %v", err)
+	}
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), `skill "react-coder" not found`) {
+		t.Fatalf("result modal missing failed row:\n%s", installTestModalView(m, 120, 35))
+	}
+	if strings.Contains(plain(m.modal.View(120, 35, m)), "Couldn't find the requested skill in repo") {
+		t.Fatalf("batch update diff missing skill opened single-row stale registry modal:\n%s", installTestModalView(m, 120, 35))
+	}
+}
+
+func TestInstallUseBatchUpdateDiffMissingSkillContinuesWithTail(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/vue-coder", "vue-coder", "Vue help.")
+	gitTUITestCommit(t, repoDir, "initial")
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	m.install.previewToken = 1
+
+	missing := installResultView{
+		Result:       remote.SearchResult{Name: "react-coder", Path: "skills/react-coder"},
+		ArchiveState: remote.ArchiveStateUpdateAvailable,
+	}
+	tail := installResultView{
+		Result:       remote.SearchResult{Name: "vue-coder", Path: "skills/vue-coder"},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}
+	destinations := []installDestination{{
+		Scope:   config.ScopeProject,
+		Target:  config.TargetAgents,
+		Label:   ".Ag",
+		Checked: true,
+	}}
+	m.install.pendingUseBatch = &installUseBatchContinuation{
+		identity:     installArchiveIdentityFromResult(missing.Result),
+		row:          missing,
+		updateToken:  1,
+		total:        2,
+		remaining:    []installResultView{tail},
+		destinations: destinations,
+	}
+
+	updated, cmd := m.Update(installUpdateDiffMsg{
+		token: 1,
+		row:   missing,
+		err:   &remote.MissingSkillError{Name: missing.Result.Name, PreferredPath: missing.Result.Path},
+	})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("tail install-use cmd is nil after missing skill update diff")
+	}
+	if m.modal != nil {
+		t.Fatalf("missing skill update diff opened modal before tail command:\n%s", installTestModalView(m, 120, 35))
+	}
+
+	useMsg := cmd().(installUseMsg)
+	updated, _ = m.Update(useMsg)
+	m = mustModel(t, updated)
+
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "vue-coder")); err != nil {
+		t.Fatalf("tail active link missing after update diff continuation: %v", err)
+	}
+	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), `react-coder: skill "react-coder" not found`) {
+		t.Fatalf("result modal missing failed row:\n%s", installTestModalView(m, 120, 35))
+	}
+	if strings.Contains(plain(m.modal.View(120, 35, m)), "Couldn't find the requested skill in repo") {
+		t.Fatalf("batch update diff missing skill opened single-row stale registry modal:\n%s", installTestModalView(m, 120, 35))
 	}
 }
 

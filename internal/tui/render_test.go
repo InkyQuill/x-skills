@@ -7,6 +7,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestWideShellRendersListInspectorStatusAndFooter(t *testing.T) {
@@ -25,6 +26,44 @@ func TestWideShellRendersListInspectorStatusAndFooter(t *testing.T) {
 	}
 }
 
+func TestActiveViewRendersConfiguredRootLabel(t *testing.T) {
+	cfg := customRootConfig(t)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, "opencode"), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 34
+
+	view := plain(m.View())
+	if !strings.Contains(view, ".Oc") {
+		t.Fatalf("active view missing configured label:\n%s", view)
+	}
+	if strings.Contains(view, ".Ag") {
+		t.Fatalf("active view should not show disabled built-in label:\n%s", view)
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("detail modal is nil")
+	}
+	detail := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(detail, ".Oc") {
+		t.Fatalf("active detail missing configured label:\n%s", detail)
+	}
+}
+
+func TestHelpModalRendersConfiguredRootLabels(t *testing.T) {
+	cfg := customRootConfig(t)
+	m := New(cfg)
+	view := plain(newHelpModal().View(120, 40, m))
+	if !strings.Contains(view, ".Oc") || !strings.Contains(view, "project:opencode") {
+		t.Fatalf("help modal missing configured root:\n%s", view)
+	}
+	if strings.Contains(view, ".Ag  project agents") || strings.Contains(view, ".Cl  project claude") {
+		t.Fatalf("help modal shows stale built-in root inventory:\n%s", view)
+	}
+}
+
 func TestActiveInspectorShowsBrokenReason(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)
@@ -40,9 +79,111 @@ func TestActiveInspectorShowsBrokenReason(t *testing.T) {
 	}
 
 	view := plain(m.View())
-	for _, want := range []string{"Inspector", "broken-skill", "reason", "symlink target missing"} {
+	for _, want := range []string{"Inspector", "broken-skill", "Reason", "symlink target missing"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("active inspector missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestActiveInspectorUsesKeyValueRows(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.width = 120
+	m.height = 30
+	m.active = []ActiveGroup{
+		{
+			ID:          "active:zen-of-go",
+			Name:        "zen-of-go",
+			Aliases:     []string{"go", "pro"},
+			Status:      actions.StatusManaged,
+			Description: "Go style.",
+			Chips:       []string{".Ag", "~Cl"},
+		},
+	}
+
+	view := plain(m.View())
+	for _, want := range []string{
+		"Inspector",
+		"zen-of-go",
+		"Aliases",
+		"go, pro",
+		"Repo/Status",
+		"managed",
+		"Description",
+		"Go style.",
+		"Locations",
+		".Ag",
+		"~Cl",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("active inspector missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRepoInspectorUsesKeyValueRowsAndUsageChips(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 30
+	m.repoUsage["zen-of-go"] = []string{".Ag", "~Cl"}
+	m.setView(ViewRepo)
+
+	view := plain(m.View())
+	for _, want := range []string{
+		"Inspector",
+		"zen-of-go",
+		"Description",
+		"Go style.",
+		"Usages",
+		".Ag",
+		"~Cl",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("repo inspector missing %q:\n%s", want, view)
+		}
+	}
+
+	raw := m.View()
+	for _, want := range []string{".Ag", "~Cl"} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("repo inspector missing rich usage chip %q:\n%s", want, raw)
+		}
+	}
+}
+
+func TestDoctorInspectorUsesKeyValueRows(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.width = 120
+	m.height = 30
+	m.issues = []doctor.Issue{
+		{
+			Kind:     doctor.KindBrokenSymlink,
+			Name:     "zen-of-go",
+			Location: ".Ag",
+			Path:     "/tmp/zen",
+			Reason:   "missing target",
+			SafeFix:  "unlink stale",
+		},
+	}
+	m.setView(ViewDoctor)
+
+	view := plain(m.View())
+	for _, want := range []string{
+		"Inspector",
+		string(doctor.KindBrokenSymlink),
+		"Path",
+		"/tmp/zen",
+		"Reason",
+		"missing target",
+		"Fix",
+		"unlink stale",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("doctor inspector missing %q:\n%s", want, view)
 		}
 	}
 }

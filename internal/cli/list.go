@@ -6,15 +6,12 @@ import (
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
-	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/spf13/cobra"
 )
 
 type listOptions struct {
-	project bool
-	global  bool
-	target  string
+	at []string
 }
 
 func newListCommand(rootOptions *options) *cobra.Command {
@@ -24,53 +21,48 @@ func newListCommand(rootOptions *options) *cobra.Command {
 		Short: "List active skills",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opts.validate(); err != nil {
-				return err
-			}
-			filter := opts.scanFilter()
-			skills, err := actions.ScanActive(rootOptions.config(), filter)
+			cfg := rootOptions.config()
+			locations, err := resolveOptionalLocations(cfg, opts.at)
 			if err != nil {
 				return err
 			}
+			filter := scanFilterForLocations(locations)
+			skills, err := actions.ScanActive(cfg, filter)
+			if err != nil {
+				return err
+			}
+			skills = filterSkillsByLocations(skills, locations)
 			return writeList(cmd.OutOrStdout(), skills, filter)
 		},
 	}
 
-	cmd.Flags().BoolVar(&opts.project, "project", false, "show project active skills")
-	cmd.Flags().BoolVar(&opts.global, "global", false, "show global active skills")
-	cmd.Flags().StringVar(&opts.target, "target", "", "filter by target: agents, claude, or codex")
+	cmd.Flags().StringArrayVar(&opts.at, "at", nil, "managed root location; repeat for multiple locations")
 
 	return cmd
 }
 
-func (o listOptions) validate() error {
-	if o.project && o.global {
-		return fmt.Errorf("choose at most one of --project or --global")
+func scanFilterForLocations(locations []roots.ActiveRoot) actions.ScanFilter {
+	if len(locations) != 1 {
+		return actions.ScanFilter{}
 	}
-	if o.target == "" {
-		return nil
+	return actions.ScanFilter{
+		Scope:  locations[0].Scope,
+		Target: locations[0].Target,
 	}
-	for _, target := range config.Targets {
-		if o.target == target {
-			return nil
-		}
-	}
-	return fmt.Errorf("unknown target %q", o.target)
 }
 
-func (o listOptions) scanFilter() actions.ScanFilter {
-	var scope string
-	switch {
-	case o.project && !o.global:
-		scope = config.ScopeProject
-	case o.global && !o.project:
-		scope = config.ScopeGlobal
+func filterSkillsByLocations(skills []actions.ActiveSkill, locations []roots.ActiveRoot) []actions.ActiveSkill {
+	if len(locations) <= 1 {
+		return skills
 	}
-
-	return actions.ScanFilter{
-		Scope:  scope,
-		Target: o.target,
+	allowed := locationSet(locations)
+	filtered := make([]actions.ActiveSkill, 0, len(skills))
+	for _, skill := range skills {
+		if allowed[locationKey(skill.Root)] {
+			filtered = append(filtered, skill)
+		}
 	}
+	return filtered
 }
 
 func writeList(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanFilter) error {

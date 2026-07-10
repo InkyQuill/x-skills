@@ -38,9 +38,12 @@ func chooseDestination(
 	cfg config.Config,
 	name string,
 	action string,
-	filter activeRootOptions,
+	location *roots.ActiveRoot,
 ) (roots.ActiveRoot, error) {
-	candidates := roots.ActiveRoots(cfg, roots.Filter{Scope: filter.scopeFilter(), Target: filter.target})
+	if location != nil {
+		return *location, nil
+	}
+	candidates := roots.ActiveRoots(cfg, roots.Filter{})
 	if len(candidates) == 1 {
 		return candidates[0], nil
 	}
@@ -65,9 +68,14 @@ func chooseActiveSkill(
 	cfg config.Config,
 	name string,
 	action string,
-	filter activeRootOptions,
+	location *roots.ActiveRoot,
 ) (actions.ActiveSkill, error) {
-	candidates, err := matchingActiveSkills(cfg, name, actions.ScanFilter{Scope: filter.scopeFilter(), Target: filter.target})
+	filter := actions.ScanFilter{}
+	if location != nil {
+		filter.Scope = location.Scope
+		filter.Target = location.Target
+	}
+	candidates, err := matchingActiveSkills(cfg, name, filter)
 	if err != nil {
 		return actions.ActiveSkill{}, err
 	}
@@ -146,7 +154,7 @@ func matchingActiveSkills(cfg config.Config, name string, filter actions.ScanFil
 func destinationCommands(action, name string, candidates []roots.ActiveRoot) []string {
 	commands := make([]string, 0, len(candidates))
 	for _, root := range candidates {
-		commands = append(commands, fmt.Sprintf("x-skills %s %s --target %s --%s", action, name, root.Target, root.Scope))
+		commands = append(commands, fmt.Sprintf("x-skills %s %s --at %s:%s", action, name, root.Scope, root.Target))
 	}
 	return commands
 }
@@ -154,7 +162,7 @@ func destinationCommands(action, name string, candidates []roots.ActiveRoot) []s
 func activeSkillCommands(action, name string, candidates []actions.ActiveSkill) []string {
 	commands := make([]string, 0, len(candidates))
 	for _, skill := range candidates {
-		commands = append(commands, fmt.Sprintf("x-skills %s %s --target %s --%s", action, name, skill.Root.Target, skill.Root.Scope))
+		commands = append(commands, fmt.Sprintf("x-skills %s %s --at %s:%s", action, name, skill.Root.Scope, skill.Root.Target))
 	}
 	return commands
 }

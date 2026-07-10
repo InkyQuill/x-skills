@@ -145,6 +145,109 @@ func TestCheckoutCacheConcurrentCheckoutReusesClone(t *testing.T) {
 	}
 }
 
+func TestCheckoutListSkillsFindsStandardAndNestedSkills(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "skills/alpha-skill", "alpha-skill", "Alpha.")
+	writeRemoteSkill(t, root, "packs/beta-skill", "beta-skill", "Beta.")
+	writeRemoteSkill(t, root, "packs/beta-skill/references/nested-skill", "nested-skill", "Nested.")
+	checkout := Checkout{
+		Path: root,
+		Source: GitSource{
+			CloneURL: "https://github.com/vercel-labs/skills.git",
+			Owner:    "vercel-labs",
+			Repo:     "skills",
+			Ref:      "main",
+		},
+		Commit: "abc123",
+	}
+
+	found, err := checkout.ListSkillsContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 2 {
+		t.Fatalf("len(found) = %d, want 2: %#v", len(found), found)
+	}
+	if found[0].Info.Name != "alpha-skill" || found[0].Metadata.SkillPath != "skills/alpha-skill" {
+		t.Fatalf("first found = %#v", found[0])
+	}
+	if found[1].Info.Name != "beta-skill" || found[1].Metadata.SkillPath != "packs/beta-skill" {
+		t.Fatalf("second found = %#v", found[1])
+	}
+	meta := found[0].Metadata
+	if meta.SourceType != SourceTypeGitHub ||
+		meta.Owner != "vercel-labs" ||
+		meta.Repo != "skills" ||
+		meta.Ref != "main" ||
+		meta.Commit != "abc123" ||
+		meta.UpstreamName != "alpha-skill" {
+		t.Fatalf("metadata = %#v", meta)
+	}
+}
+
+func TestCheckoutListSkillsSortsByName(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "zeta/path", "same-name", "Zeta.")
+	writeRemoteSkill(t, root, "alpha/path", "same-name", "Alpha.")
+	writeRemoteSkill(t, root, "middle/path", "aaa-skill", "Middle.")
+	checkout := Checkout{
+		Path:   root,
+		Source: GitSource{CloneURL: "https://gitlab.com/acme/skills.git"},
+		Commit: "def456",
+	}
+
+	found, err := checkout.ListSkillsContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 3 {
+		t.Fatalf("len(found) = %d, want 3: %#v", len(found), found)
+	}
+	got := []string{
+		found[0].Info.Name + " " + found[0].Metadata.SkillPath,
+		found[1].Info.Name + " " + found[1].Metadata.SkillPath,
+		found[2].Info.Name + " " + found[2].Metadata.SkillPath,
+	}
+	want := []string{
+		"aaa-skill middle/path",
+		"same-name alpha/path",
+		"same-name zeta/path",
+	}
+	if !sameStrings(got, want) {
+		t.Fatalf("order = %#v, want %#v", got, want)
+	}
+	if found[0].Metadata.SourceType != SourceTypeGit ||
+		found[0].Metadata.CloneURL != "https://gitlab.com/acme/skills.git" ||
+		found[0].Metadata.Commit != "def456" {
+		t.Fatalf("metadata = %#v", found[0].Metadata)
+	}
+}
+
+func TestCheckoutFindSkillWithoutPreferredPathReturnsAmbiguousWhenDuplicateNames(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "packs/one", "dup-skill", "One.")
+	writeRemoteSkill(t, root, "packs/two", "dup-skill", "Two.")
+	checkout := Checkout{Path: root}
+
+	_, err := checkout.FindSkill("dup-skill", "")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous skill") {
+		t.Fatalf("err = %v, want ambiguous skill", err)
+	}
+}
+
+func TestCheckoutListSkillsContextStopsWhenCanceled(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "skills/svelte-coder", "svelte-coder", "Svelte help.")
+	checkout := Checkout{Path: root}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := checkout.ListSkillsContext(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
 func TestFindSkillReportsAmbiguousName(t *testing.T) {
 	repo := makeGitRepo(t)
 	writeRemoteSkill(t, repo, "packs/one", "dup-skill", "One.")
@@ -180,7 +283,66 @@ func TestFindSkillUsesValidPreferredPath(t *testing.T) {
 	}
 }
 
-func TestFindSkillReturnsMissingSkillErrorForStalePreferredPath(t *testing.T) {
+func TestFindSkillPreferredPathValidatesName(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "packs/actual-skill", "manifest-name", "Actual.")
+	checkout := Checkout{
+		Path:   root,
+		Source: GitSource{CloneURL: "https://github.com/example/skills.git"},
+	}
+
+	found, err := checkout.FindSkill("actual-skill", "packs/actual-skill")
+	if err != nil {
+		t.Fatalf("path basename match returned error: %v", err)
+	}
+	if found.Info.Name != "manifest-name" {
+		t.Fatalf("Info.Name = %q, want manifest-name", found.Info.Name)
+	}
+
+	_, err = checkout.FindSkill("requested-skill", "packs/actual-skill")
+	var missing *MissingSkillError
+	if !errors.As(err, &missing) {
+		t.Fatalf("err = %T %[1]v, want MissingSkillError", err)
+	}
+	if missing.Name != "requested-skill" || missing.PreferredPath != "packs/actual-skill" {
+		t.Fatalf("missing = %#v", missing)
+	}
+}
+
+func TestFindSkillFallsBackToRepoSearchWhenPreferredPathIsStale(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "skills/golang-cli", "golang-cli", "Go CLI help.")
+	checkout := Checkout{
+		Path:   root,
+		Source: GitSource{CloneURL: "https://github.com/samber/cc-skills-golang.git"},
+		Commit: "abc123",
+	}
+
+	found, err := checkout.FindSkill("golang-cli", "golang-cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Metadata.SkillPath != "skills/golang-cli" {
+		t.Fatalf("SkillPath = %q, want skills/golang-cli", found.Metadata.SkillPath)
+	}
+}
+
+func TestFindSkillFallsBackToRepoSearchWhenPreferredPathNameDiffers(t *testing.T) {
+	root := t.TempDir()
+	writeRemoteSkill(t, root, "skills/other", "other", "Other.")
+	writeRemoteSkill(t, root, "skills/golang-cli", "golang-cli", "Go CLI help.")
+	checkout := Checkout{Path: root}
+
+	found, err := checkout.FindSkill("golang-cli", "skills/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Metadata.SkillPath != "skills/golang-cli" {
+		t.Fatalf("SkillPath = %q, want skills/golang-cli", found.Metadata.SkillPath)
+	}
+}
+
+func TestFindSkillReturnsMissingSkillErrorWhenPreferredPathAndRepoSearchMiss(t *testing.T) {
 	root := t.TempDir()
 	writeRemoteSkill(t, root, "skills/other", "other", "Other.")
 	checkout := Checkout{

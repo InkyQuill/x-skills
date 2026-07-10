@@ -50,8 +50,8 @@ func TestActiveGroupRowsShowRootChipsAliasesAndCount(t *testing.T) {
 	if !containsString(groups[0].Aliases, "go-style") {
 		t.Fatalf("Aliases = %#v, want go-style", groups[0].Aliases)
 	}
-	if !containsString(groups[0].Chips, ".Ag") || !containsString(groups[0].Chips, "~Cl") {
-		t.Fatalf("Chips = %#v, want .Ag and ~Cl", groups[0].Chips)
+	if !containsString(groups[0].Chips, ".agents") || !containsString(groups[0].Chips, "~/.claude") {
+		t.Fatalf("Chips = %#v, want .agents and ~/.claude", groups[0].Chips)
 	}
 }
 
@@ -76,9 +76,14 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 
 	rows := renderActiveRows(m, 100)
 	got := strings.Join(rows, "\n")
-	for _, want := range []string{"› □", "zen-of-go", ".Ag", "~Cl", "◆ unmanaged", "×2", "Go style."} {
+	for _, want := range []string{"› ◇ ● zen-of-go", ".Ag", "~Cl", "Go style."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("row missing %q:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{"◆ unmanaged", "unmanaged", "×2"} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("row should not contain %q:\n%s", unexpected, got)
 		}
 	}
 	if strings.Contains(got, "2 linked locations") {
@@ -114,7 +119,7 @@ func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 		t.Fatal("root badge background styles are not configured")
 	}
 	plain := strings.TrimRight(ansi.Strip(got), " ")
-	want := "› ■ zen-of-go .Ag ~Cl Go style guide"
+	want := "› ◆ zen-of-go .Ag ~Cl Go style guide"
 	if plain != want {
 		t.Fatalf("repo row = %q, want %q", plain, want)
 	}
@@ -187,7 +192,7 @@ func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
 	}
 
 	got := strings.Join(renderDoctorRows(m, 100), "\n")
-	for _, want := range []string{"›", "▲", "broken-symlink", "zen-of-go", ".Ag", "symlink target missing"} {
+	for _, want := range []string{"›", "●", "broken-symlink", "zen-of-go", ".Ag", "symlink target missing"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor row missing %q:\n%s", want, got)
 		}

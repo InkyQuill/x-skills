@@ -1,14 +1,17 @@
 package tui
 
 import (
-	"strings"
+	"fmt"
 
+	"github.com/InkyQuill/x-skills/internal/roots"
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
-type helpModal struct{}
+type helpModal struct {
+	scroll int
+}
 
 func newHelpModal() modal {
 	return helpModal{}
@@ -20,7 +23,6 @@ func (h helpModal) Title() string {
 
 func (h helpModal) View(width, height int, m Model) string {
 	lines := []string{
-		accentStyle.Render("Help"),
 		"Keyboard Shortcuts",
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "A", Label: "switch to Active view"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "R", Label: "switch to Repo view"}),
@@ -32,8 +34,8 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "o", Label: "Install: edit owner filter"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "i", Label: "Install: i install and use"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "a", Label: "Install: a archive only"}),
-		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "space", Label: "toggle Active/Repo row selection"}),
-		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "c", Label: "clear Active/Repo selection"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "space", Label: "toggle Active/Repo row selection (Install too)"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "c", Label: "clear Active/Repo selection (Install too)"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "p", Label: "preview SKILL.md"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "l", Label: "link repo skill"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "u", Label: "unlink active/repo usages"}),
@@ -50,15 +52,31 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  " + m.symbols.Checked + "  selected item",
 		"  " + m.symbols.CountPrefix + "N group count badge",
 		"",
-		"Root Chip Legend",
-		"  .Ag  project agents",
-		"  .Cl  project claude",
-		"  .Cd  project codex",
-		"  ~Ag  global agents",
-		"  ~Cl  global claude",
-		"  ~Cd  global codex",
 	}
-	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+	lines = append(lines, helpRootLines(m)...)
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: "Help",
+		Body:  lines,
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+			{ASCII: "esc", Unicode: "Esc", Label: "close"},
+			{ASCII: "q", Label: "close"},
+		}))},
+		Scroll:    h.scroll,
+		UseScroll: true,
+	})
+}
+
+func helpRootLines(m Model) []string {
+	activeRoots := roots.ActiveRoots(m.cfg, roots.Filter{})
+	lines := []string{"Root Chip Legend"}
+	if len(activeRoots) == 0 {
+		return append(lines, "  no active roots configured")
+	}
+	for _, root := range activeRoots {
+		lines = append(lines, fmt.Sprintf("  %s  %s:%s", rootLabel(root), root.Scope, root.Target))
+	}
+	return lines
 }
 
 func helpCommand(ascii bool, command tuiui.Shortcut) string {
@@ -66,5 +84,15 @@ func helpCommand(ascii bool, command tuiui.Shortcut) string {
 }
 
 func (h helpModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
-	return closeOnEscapeOrQuit(msg), nil
+	if closeOnEscapeOrQuit(msg) {
+		return true, nil
+	}
+	if delta := modalMoveDelta(msg); delta != 0 {
+		h.scroll += delta
+		if h.scroll < 0 {
+			h.scroll = 0
+		}
+		m.modal = h
+	}
+	return false, nil
 }

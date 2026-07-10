@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/remote"
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
@@ -46,7 +48,7 @@ func renderHeader(m Model, width int) string {
 		tabLabel(m.view == ViewDoctor, "D", "Doctor"),
 		tabLabel(m.view == ViewInstall, "I", "Install"),
 	}
-	title := titleStyle.Render(m.symbols.ProductMark+" x-skills") + "  " + strings.Join(tabs, " ")
+	title := titleStyle.Render(m.pulseDiamond()+" x-skills") + "  " + strings.Join(tabs, " ")
 	return truncate(title, width)
 }
 
@@ -98,47 +100,222 @@ func renderInspector(m Model, width, height int) string {
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
-	lines := []string{"Inspector", ""}
+	contentWidth := width - 4
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+
+	var sections []inspectorSection
 	switch m.view {
 	case ViewActive:
-		groups := m.visibleActiveGroups()
-		if m.cursor >= 0 && m.cursor < len(groups) {
-			group := groups[m.cursor]
-			lines = append(lines, "◇ "+group.Name, "aliases", "  "+strings.Join(group.Aliases, ", "), "repo", "  "+group.Status)
-			if group.Status == actions.StatusBroken && group.Reason != "" {
-				lines = append(lines, "reason", "  "+group.Reason)
-			}
-		}
+		sections = activeInspectorSections(m)
 	case ViewRepo:
-		skills := m.visibleRepoSkills()
-		if m.cursor >= 0 && m.cursor < len(skills) {
-			skill := skills[m.cursor]
-			lines = append(lines, "◇ "+skill.Name, "description", skill.Description, "usages", "  "+renderRootChips(m.symbols, m.repoUsage[skill.Name], lipgloss.NoColor{}))
-		}
+		sections = repoInspectorSections(m)
 	case ViewDoctor:
-		if m.cursor >= 0 && m.cursor < len(m.issues) {
-			issue := m.issues[m.cursor]
-			lines = append(lines, "◇ "+issue.Kind, "path", issue.Path, "reason", issue.Reason, "fix", issue.SafeFix)
-		}
+		sections = doctorInspectorSections(m)
 	case ViewInstall:
-		if m.cursor >= 0 && m.cursor < len(m.install.Results) {
-			result := m.install.Results[m.cursor]
-			lines = append(lines,
-				"◇ "+result.Result.Name,
-				result.Result.Source(),
-				"skill", "  "+result.Result.Name,
-				"installs", fmt.Sprintf("  %d", result.Result.Installs),
-				"status", "  "+result.ArchiveState,
-			)
-			if result.AuditPill != "" {
-				lines = append(lines, "audit", "  "+result.AuditPill)
-			}
-		}
+		sections = installInspectorSections(m)
 	}
-	if len(lines) > contentHeight {
-		lines = lines[:contentHeight]
+	content := renderInspectorDocument("Inspector", sections, contentWidth, contentHeight)
+	return panelStyle.Width(width - 2).Render(content)
+}
+
+func activeInspectorSections(m Model) []inspectorSection {
+	groups := m.visibleActiveGroups()
+	if m.cursor < 0 || m.cursor >= len(groups) {
+		return nil
 	}
-	return panelStyle.Width(width - 2).Render(strings.Join(lines, "\n"))
+
+	group := groups[m.cursor]
+	rows := []inspectorRow{
+		{Key: "Aliases", Value: strings.Join(group.Aliases, ", ")},
+		{
+			Key: "Repo/Status",
+			Render: func(width int) string {
+				return truncate(renderStatusChip(m, group.Status), width)
+			},
+		},
+		{Key: "Description", Value: group.Description, Block: true},
+	}
+	if len(group.Chips) > 0 {
+		rows = append(rows, inspectorRow{
+			Key: "Locations",
+			Render: func(width int) string {
+				return truncate(renderRootChips(m.symbols, group.Chips, lipgloss.NoColor{}), width)
+			},
+		})
+	}
+	if group.Status == actions.StatusBroken {
+		rows = append(rows, inspectorRow{Key: "Reason", Value: group.Reason})
+	}
+
+	return []inspectorSection{{
+		Title: group.Name,
+		Rows:  rows,
+	}}
+}
+
+func repoInspectorSections(m Model) []inspectorSection {
+	skills := m.visibleRepoSkills()
+	if m.cursor < 0 || m.cursor >= len(skills) {
+		return nil
+	}
+
+	skill := skills[m.cursor]
+	usages := m.repoUsage[skill.Name]
+	rows := []inspectorRow{
+		{Key: "Description", Value: skill.Description, Block: true},
+		{
+			Key: "Usages",
+			Render: func(width int) string {
+				return truncate(renderRootChips(m.symbols, usages, lipgloss.NoColor{}), width)
+			},
+		},
+	}
+
+	return []inspectorSection{{
+		Title: skill.Name,
+		Rows:  rows,
+	}}
+}
+
+func doctorInspectorSections(m Model) []inspectorSection {
+	if m.cursor < 0 || m.cursor >= len(m.issues) {
+		return nil
+	}
+
+	issue := m.issues[m.cursor]
+	rows := []inspectorRow{
+		{Key: "Path", Value: issue.Path},
+		{Key: "Reason", Value: issue.Reason},
+		{Key: "Fix", Value: issue.SafeFix},
+	}
+
+	return []inspectorSection{{
+		Title: string(issue.Kind),
+		Rows:  rows,
+	}}
+}
+
+func installInspectorSections(m Model) []inspectorSection {
+	if m.cursor < 0 || m.cursor >= len(m.install.Results) {
+		return nil
+	}
+
+	row := m.install.Results[m.cursor]
+	result := row.Result
+	overviewRows := []inspectorRow{}
+	overviewRows = appendTextInspectorRow(overviewRows, "Description", result.Description)
+	overviewRows = appendRichTextInspectorRow(overviewRows, "Source", result.Source(), installSourceStyle)
+	if result.Installs > 0 {
+		overviewRows = appendRichTextInspectorRow(overviewRows, "Installs", strconv.Itoa(result.Installs), installCountStyle)
+	}
+
+	stateRows := []inspectorRow{}
+	stateRows = appendInstallArchiveInspectorRow(stateRows, row.ArchiveState)
+	stateRows = appendInstallAuditInspectorRow(stateRows, row.AuditPill)
+
+	repoRows := []inspectorRow{}
+	repoRows = appendTextInspectorRow(repoRows, "Owner", result.Owner)
+	repoRows = appendTextInspectorRow(repoRows, "Repo", result.Repo)
+	repoRows = appendTextInspectorRow(repoRows, "Path", result.Path)
+
+	sections := []inspectorSection{{
+		Title: result.Name,
+		Rows:  overviewRows,
+	}}
+	sections = appendInspectorSection(sections, "State", stateRows)
+	sections = appendInspectorSection(sections, "Repository", repoRows)
+	sections = appendInspectorSection(sections, "Actions", []inspectorRow{
+		{Key: "Preview", Value: "enter preview"},
+		{Key: "Install", Value: "i install & use"},
+		{Key: "Archive", Value: "a archive only"},
+	})
+	return sections
+}
+
+func appendTextInspectorRow(rows []inspectorRow, key, value string) []inspectorRow {
+	if value == "" {
+		return rows
+	}
+	return append(rows, inspectorRow{Key: key, Value: value, Block: key == "Description"})
+}
+
+func appendRichTextInspectorRow(rows []inspectorRow, key, value string, style lipgloss.Style) []inspectorRow {
+	if value == "" {
+		return rows
+	}
+	return append(rows, inspectorRow{
+		Key: key,
+		Render: func(width int) string {
+			return style.Render(truncate(value, width))
+		},
+	})
+}
+
+func appendInspectorSection(sections []inspectorSection, title string, rows []inspectorRow) []inspectorSection {
+	if len(rows) == 0 {
+		return sections
+	}
+	return append(sections, inspectorSection{Title: title, Rows: rows})
+}
+
+func appendInstallArchiveInspectorRow(rows []inspectorRow, state string) []inspectorRow {
+	if state == "" {
+		return rows
+	}
+	return append(rows, inspectorRow{
+		Key: "Archive",
+		Render: func(width int) string {
+			return truncate(renderInstallArchiveState(state), width)
+		},
+	})
+}
+
+func appendInstallAuditInspectorRow(rows []inspectorRow, audit string) []inspectorRow {
+	if audit == "" {
+		return rows
+	}
+	return append(rows, inspectorRow{
+		Key: "Audit",
+		Render: func(width int) string {
+			return truncate(renderInstallAuditState(audit), width)
+		},
+	})
+}
+
+func renderInstallArchiveState(state string) string {
+	return renderInstallArchiveStateWithBackground(state, lipgloss.NoColor{})
+}
+
+func renderInstallArchiveStateWithBackground(state string, background lipgloss.TerminalColor) string {
+	switch state {
+	case remote.ArchiveStateArchived:
+		return renderWithOptionalBackground(okStyle, state, background)
+	case remote.ArchiveStateUpdateAvailable:
+		return renderWithOptionalBackground(incomingStyle, state, background)
+	case remote.ArchiveStateNameConflict:
+		return renderWithOptionalBackground(dangerStyle, state, background)
+	default:
+		return renderWithOptionalBackground(mutedStyle, state, background)
+	}
+}
+
+func renderInstallAuditState(audit string) string {
+	return renderInstallAuditStateWithBackground(audit, lipgloss.NoColor{})
+}
+
+func renderInstallAuditStateWithBackground(audit string, background lipgloss.TerminalColor) string {
+	switch {
+	case strings.Contains(audit, "risky"):
+		return renderWithOptionalBackground(dangerStyle, audit, background)
+	case strings.Contains(audit, "warn"):
+		return renderWithOptionalBackground(archiveStyle, audit, background)
+	case strings.Contains(audit, "safe"):
+		return renderWithOptionalBackground(okStyle, audit, background)
+	default:
+		return renderWithOptionalBackground(inspectorValueStyle, audit, background)
+	}
 }
 
 func visibleStart(cursor, count, maxRows int) int {
@@ -165,18 +342,17 @@ func renderActiveRows(m Model, width int) []string {
 	var rows []string
 	for i, group := range m.visibleActiveGroups() {
 		prefix := rowPrefix(m, i, group.ID)
-		status := renderStatusChip(m, group.Status)
-		count := ""
-		if len(group.Members) > 1 {
-			count = " " + mutedStyle.Render(fmt.Sprintf("%s%d", m.symbols.CountPrefix, len(group.Members)))
-		}
 		rows = append(rows, selectableRow(
 			[]rowSegment{
-				{text: fmt.Sprintf("%s %s ", prefix, group.Name)},
+				{text: prefix + " "},
+				{render: func(background lipgloss.TerminalColor) string {
+					return renderStatusDotWithBackground(m, group.Status, background)
+				}},
+				{text: " " + group.Name + " "},
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderRootChips(m.symbols, group.Chips, background)
 				}},
-				{text: fmt.Sprintf(" %s%s  %s", status, count, activeDetail(group))},
+				{text: " " + activeDetail(group)},
 			},
 			i == m.cursor,
 			m.selected[ViewActive][group.ID],
@@ -213,7 +389,11 @@ func renderDoctorRows(m Model, width int) []string {
 		prefix := cursorPrefix(m, i)
 		rows = append(rows, selectableRow(
 			[]rowSegment{
-				{text: fmt.Sprintf("%s %s %s ", prefix, dangerStyle.Render(m.symbols.Broken), issue.Kind)},
+				{text: prefix + " "},
+				{render: func(background lipgloss.TerminalColor) string {
+					return renderStatusDotWithBackground(m, actions.StatusBroken, background)
+				}},
+				{text: fmt.Sprintf(" %s ", issue.Kind)},
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderRootChip(m.symbols, issue.Location, background)
 				}},
@@ -263,17 +443,105 @@ func renderInstallRows(m Model, width int) []string {
 		return nil
 	}
 	var rows []string
-	for i, result := range m.install.Results {
-		prefix := cursorPrefix(m, i)
-		pill := result.AuditPill
-		if pill != "" {
-			pill = " " + pill
+	for i, row := range m.install.Results {
+		result := row.Result
+		id := installID(result)
+		segments := []rowSegment{
+			{text: fmt.Sprintf("%s %s", rowPrefix(m, i, id), result.Name)},
 		}
-		rows = append(rows, selectableRow([]rowSegment{
-			{text: fmt.Sprintf("%s %s  %s  %s%s  %s", prefix, result.Result.Name, result.Result.Source(), result.ArchiveState, pill, result.Result.Description)},
-		}, i == m.cursor, false, width-6))
+		if source := result.Source(); source != "" {
+			segments = append(segments, rowSegment{
+				text: "  ",
+			}, rowSegment{
+				render: func(background lipgloss.TerminalColor) string {
+					return renderWithOptionalBackground(installSourceStyle, source, background)
+				},
+			})
+		}
+		if count := renderInstallCount(result.Installs); count != "" {
+			segments = append(segments, rowSegment{
+				text: "  ",
+			}, rowSegment{
+				render: func(background lipgloss.TerminalColor) string {
+					return renderInstallCountWithBackground(result.Installs, background)
+				},
+			})
+		}
+		if state := renderInstallStatePill(row.ArchiveState); state != "" {
+			segments = append(segments, rowSegment{
+				text: "  ",
+			}, rowSegment{
+				render: func(background lipgloss.TerminalColor) string {
+					return renderInstallStatePillWithBackground(row.ArchiveState, background)
+				},
+			})
+		}
+		if row.AuditPill != "" {
+			audit := row.AuditPill
+			segments = append(segments, rowSegment{
+				text: "  ",
+			}, rowSegment{
+				render: func(background lipgloss.TerminalColor) string {
+					return renderInstallAuditStateWithBackground(audit, background)
+				},
+			})
+		}
+		if result.Description != "" {
+			description := result.Description
+			segments = append(segments, rowSegment{
+				text: "  ",
+			}, rowSegment{
+				render: func(background lipgloss.TerminalColor) string {
+					return renderWithOptionalBackground(mutedStyle, description, background)
+				},
+			})
+		}
+		rows = append(rows, selectableRow(segments, i == m.cursor, m.selected[ViewInstall][id], width-6))
 	}
 	return rows
+}
+
+func installID(result remote.SearchResult) string {
+	if result.ID != "" {
+		return "install:" + result.ID
+	}
+	if result.Owner != "" || result.Repo != "" || result.Path != "" {
+		return "install:" + installAuditKey(result)
+	}
+	return "install:" + result.Name
+}
+
+func renderInstallStatePill(state string) string {
+	return renderInstallStatePillWithBackground(state, lipgloss.NoColor{})
+}
+
+func renderInstallStatePillWithBackground(state string, background lipgloss.TerminalColor) string {
+	if state == "" {
+		return ""
+	}
+	return renderInstallArchiveStateWithBackground(state, background)
+}
+
+func renderInstallCount(count int) string {
+	return renderInstallCountWithBackground(count, lipgloss.NoColor{})
+}
+
+func renderInstallCountWithBackground(count int, background lipgloss.TerminalColor) string {
+	if count <= 0 {
+		return ""
+	}
+	return renderWithOptionalBackground(installCountStyle, fmt.Sprintf("%d installs", count), background)
+}
+
+func renderWithOptionalBackground(
+	style lipgloss.Style,
+	text string,
+	background lipgloss.TerminalColor,
+) string {
+	if _, noColor := background.(lipgloss.NoColor); noColor {
+		return style.Render(text)
+	}
+	return style.Background(background).Render(text)
 }
 
 func renderRootChips(symbols symbols, chips []string, background lipgloss.TerminalColor) string {
@@ -429,10 +697,12 @@ func commandPalette(m Model) string {
 	case ViewInstall:
 		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "preview"},
+			{ASCII: "space", Label: "select"},
 			{ASCII: "/", Label: "search"},
 			{ASCII: "o", Label: "owner"},
 			{ASCII: "i", Label: "install & use"},
 			{ASCII: "a", Label: "archive only"},
+			{ASCII: "c", Label: "clear"},
 			{ASCII: "^R", Label: "refresh"},
 			{ASCII: "?", Label: "help"},
 			{ASCII: "q", Label: "quit"},
@@ -498,6 +768,7 @@ func renderOverlay(base, layer string, width, height int) string {
 			right = 0
 		}
 		lines[row] = strings.Repeat(" ", left) + line + strings.Repeat(" ", right)
+		lines[row] = truncate(lines[row], width)
 	}
 	return strings.Join(lines, "\n")
 }

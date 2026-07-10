@@ -7,6 +7,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/roots"
 )
 
 type ActiveGroup struct {
@@ -41,7 +42,7 @@ func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
 			order = append(order, key)
 		}
 		group.Members = append(group.Members, skill)
-		group.Chips = appendUnique(group.Chips, rootChip(skill.Root.Scope, skill.Root.Target))
+		group.Chips = appendUnique(group.Chips, rootLabel(skill.Root))
 		if alias := filepath.Base(skill.Path); alias != "" && alias != group.Name {
 			group.Aliases = appendUnique(group.Aliases, alias)
 		}
@@ -123,7 +124,7 @@ func usageByRepoName(groups []ActiveGroup) map[string][]string {
 			if member.Status != actions.StatusManaged {
 				continue
 			}
-			chip := rootChip(member.Root.Scope, member.Root.Target)
+			chip := rootLabel(member.Root)
 			usage[member.Name] = appendUnique(usage[member.Name], chip)
 		}
 	}
@@ -131,4 +132,11 @@ func usageByRepoName(groups []ActiveGroup) map[string][]string {
 		sort.Strings(usage[name])
 	}
 	return usage
+}
+
+func rootLabel(root roots.ActiveRoot) string {
+	if root.Label != "" {
+		return root.Label
+	}
+	return rootChip(root.Scope, root.Target)
 }

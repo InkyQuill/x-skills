@@ -507,7 +507,7 @@ func TestArchiveContentFingerprintRejectsRootSymlink(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected root symlink error")
 	}
-	if !strings.Contains(err.Error(), "unsupported file type in archive content: .") {
+	if !strings.Contains(err.Error(), "unsupported file type in archive content: root") {
 		t.Fatalf("error = %q", err)
 	}
 }

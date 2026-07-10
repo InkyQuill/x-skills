@@ -3,18 +3,14 @@ package cli
 import (
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
-	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/spf13/cobra"
 )
 
 type activeRootOptions struct {
-	project bool
-	global  bool
-	target  string
+	at []string
 }
 
 type mutationFailure struct {
@@ -67,30 +63,11 @@ func newMigrateCommand(rootOptions *options) *cobra.Command {
 }
 
 func addActiveRootFlags(cmd *cobra.Command, opts *activeRootOptions) {
-	cmd.Flags().BoolVar(&opts.project, "project", false, "use the project active root")
-	cmd.Flags().BoolVar(&opts.global, "global", false, "use the global active root")
-	cmd.Flags().StringVar(&opts.target, "target", "", "target to use: agents, claude, or codex")
+	cmd.Flags().StringArrayVar(&opts.at, "at", nil, "managed root location; repeat for multiple locations")
 }
 
 func (o activeRootOptions) validateFilter() error {
-	if o.project && o.global {
-		return fmt.Errorf("choose at most one of --project or --global")
-	}
-	if o.target != "" && !slices.Contains(config.Targets, o.target) {
-		return fmt.Errorf("unknown target %q", o.target)
-	}
 	return nil
-}
-
-func (o activeRootOptions) scopeFilter() string {
-	switch {
-	case o.project:
-		return config.ScopeProject
-	case o.global:
-		return config.ScopeGlobal
-	default:
-		return ""
-	}
 }
 
 func migrateNames(
@@ -100,11 +77,16 @@ func migrateNames(
 	opts activeRootOptions,
 ) ([]actions.MutationResult, []mutationFailure, []mutationSkipped) {
 	cfg := rootOptions.config()
+	location, locationErr := optionalOneLocation(cfg, opts.at)
 	var results []actions.MutationResult
 	var failures []mutationFailure
 	var skipped []mutationSkipped
 	for _, name := range names {
-		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "migrate", opts)
+		if locationErr != nil {
+			failures = append(failures, mutationFailure{name: name, err: locationErr})
+			continue
+		}
+		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "migrate", location)
 		if err != nil {
 			failures = append(failures, mutationFailure{name: name, err: err})
 			continue

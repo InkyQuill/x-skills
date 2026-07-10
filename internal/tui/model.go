@@ -22,16 +22,16 @@ const (
 )
 
 type Model struct {
-	cfg         config.Config
-	opts        Options
-	symbols     symbols
-	view        ViewName
-	width       int
-	height      int
-	cursor      int
-	reloadToken int
-	selected    map[ViewName]map[string]bool
-	filter      filterState
+	cfg            config.Config
+	opts           Options
+	symbols        symbols
+	view           ViewName
+	width          int
+	height         int
+	cursor         int
+	animationFrame int
+	selected       map[ViewName]map[string]bool
+	filter         filterState
 
 	active    []ActiveGroup
 	repo      []repo.Skill
@@ -42,15 +42,6 @@ type Model struct {
 	modal  modal
 	status string
 	err    error
-}
-
-type reloadResultMsg struct {
-	active    []ActiveGroup
-	repo      []repo.Skill
-	issues    []doctor.Issue
-	repoUsage map[string][]string
-	err       error
-	token     int
 }
 
 func New(cfg config.Config, opts ...Options) Model {
@@ -77,6 +68,9 @@ func New(cfg config.Config, opts ...Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
+	if m.animationsEnabled() {
+		return animationTick()
+	}
 	return nil
 }
 
@@ -88,9 +82,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
-	case reloadResultMsg:
-		m.applyReloadResult(msg)
-		return m, nil
+	case animationTickMsg:
+		if !m.animationsEnabled() {
+			return m, nil
+		}
+		m.animationFrame++
+		return m, animationTick()
 	case installSearchResultMsg:
 		return m, m.applyInstallSearchResult(msg)
 	case installPreviewMsg:
@@ -107,11 +104,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = newPreviewModal("Preview: "+msg.name, msg.path)
 		return m, nil
 	case installUpdateDiffMsg:
-		m.applyInstallUpdateDiffResult(msg)
-		return m, nil
+		return m, m.applyInstallUpdateDiffResult(msg)
 	case installArchiveMsg:
-		m.applyInstallArchiveResult(msg)
-		return m, nil
+		return m, m.applyInstallArchiveResult(msg)
 	case installArchiveStateMsg:
 		m.applyInstallArchiveStateResult(msg)
 		return m, nil
@@ -173,15 +168,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		m.toggleSelection()
 	case "c":
-		if m.view == ViewActive || m.view == ViewRepo {
+		if m.view == ViewActive || m.view == ViewRepo || m.view == ViewInstall {
 			m.selected[m.view] = map[string]bool{}
 			m.status = "selection cleared"
 		}
 	case "/":
-		if m.view == ViewInstall {
+		switch m.view {
+		case ViewInstall:
 			m.install.InputMode = installInputQuery
 			m.status = ""
-		} else if m.view == ViewActive || m.view == ViewRepo {
+		case ViewActive, ViewRepo:
 			m.filter = newFilterState()
 			m.filter.Active = true
 			m.filter.input.Focus()
@@ -202,9 +198,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "i":
 		if m.view == ViewInstall {
-			if row, ok := m.selectedInstallResult(); ok {
-				return m, m.openInstallDestinationModal(row)
-			}
+			return m, m.openInstallDestinationModalForRows(m.installActionRows())
 		}
 	case keyHelp:
 		m.modal = newHelpModal()
@@ -219,9 +213,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openMigrateModal()
 		}
 	case "u":
-		if m.view == ViewRepo {
+		switch m.view {
+		case ViewRepo:
 			m.openRepoUnlinkModal()
-		} else if m.view == ViewActive {
+		case ViewActive:
 			m.openUnlinkModal()
 		}
 	case "d":
@@ -318,36 +313,6 @@ func loadTUIData(cfg config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue
 
 func (m *Model) reload() {
 	m.active, m.repo, m.issues, m.repoUsage, m.err = loadTUIData(m.cfg)
-	m.clampCursor()
-}
-
-func (m *Model) reloadCmd() tea.Cmd {
-	m.reloadToken++
-	token := m.reloadToken
-	cfg := m.cfg
-
-	return func() tea.Msg {
-		active, repoSkills, issues, repoUsage, err := loadTUIData(cfg)
-		return reloadResultMsg{
-			active:    active,
-			repo:      repoSkills,
-			issues:    issues,
-			repoUsage: repoUsage,
-			err:       err,
-			token:     token,
-		}
-	}
-}
-
-func (m *Model) applyReloadResult(msg reloadResultMsg) {
-	if msg.token != m.reloadToken {
-		return
-	}
-	m.active = msg.active
-	m.repo = msg.repo
-	m.issues = msg.issues
-	m.repoUsage = msg.repoUsage
-	m.err = msg.err
 	m.clampCursor()
 }
 
@@ -448,6 +413,11 @@ func (m *Model) currentID() (string, bool) {
 			return "", false
 		}
 		return repoID(skills[m.cursor].Name), true
+	case ViewInstall:
+		if m.cursor < 0 || m.cursor >= len(m.install.Results) {
+			return "", false
+		}
+		return installID(m.install.Results[m.cursor].Result), true
 	case ViewDoctor:
 		if m.cursor < 0 || m.cursor >= len(m.issues) {
 			return "", false

@@ -25,13 +25,13 @@ func TestListShowsStatuses(t *testing.T) {
 	err := Execute([]string{
 		"--project-root", project,
 		"--home", home,
-		"list", "--project", "--target", "codex",
+		"list", "--at", "project:codex",
 	}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"PROJECT codex", "./.codex", "managed-codex", "managed", "Managed codex skill."} {
+	for _, want := range []string{"PROJECT codex", ".Cd", "managed-codex", "managed", "Managed codex skill."} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("list output missing %q:\n%s", want, text)
 		}
@@ -50,29 +50,39 @@ func TestListRejectsUnexpectedArgs(t *testing.T) {
 	}
 }
 
-func TestListRejectsUnknownTarget(t *testing.T) {
+func TestListRejectsInvalidGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	configPath := filepath.Join(home, ".x-skills", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	var out bytes.Buffer
 	var stderr bytes.Buffer
-	err := Execute([]string{"list", "--target", "bogus"}, strings.NewReader(""), &out, &stderr)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "unknown target") {
-		t.Fatalf("error = %q, want unknown target", err)
+	err := Execute([]string{"--home", home, "--project-root", project, "list"}, strings.NewReader(""), &out, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unsupported version 0") {
+		t.Fatalf("err = %v, want unsupported version 0", err)
 	}
 	if out.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", out.String())
 	}
 }
 
-func TestListRejectsProjectAndGlobalTogether(t *testing.T) {
+func TestListRejectsUnknownLocation(t *testing.T) {
 	var out bytes.Buffer
 	var stderr bytes.Buffer
-	err := Execute([]string{"list", "--project", "--global"}, strings.NewReader(""), &out, &stderr)
+	err := Execute([]string{"list", "--at", "project:bogus"}, strings.NewReader(""), &out, &stderr)
 	if err == nil {
-		t.Fatal("expected scope conflict error")
+		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "choose at most one") {
-		t.Fatalf("error = %q, want scope conflict", err)
+	if !strings.Contains(err.Error(), "unknown --at location") {
+		t.Fatalf("error = %q, want unknown --at location", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
 	}
 }

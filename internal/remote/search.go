@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -53,7 +54,7 @@ func NewSearchClient(endpoint string, httpClient *http.Client) SearchClient {
 	return SearchClient{endpoint: endpoint, http: httpClient}
 }
 
-func (c SearchClient) Search(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+func (c SearchClient) Search(ctx context.Context, req SearchRequest) (results []SearchResult, err error) {
 	query := strings.TrimSpace(req.Query)
 	if len([]rune(query)) < 2 {
 		return nil, fmt.Errorf("search query must be at least 2 characters")
@@ -81,7 +82,11 @@ func (c SearchClient) Search(ctx context.Context, req SearchRequest) ([]SearchRe
 	if err != nil {
 		return nil, fmt.Errorf("search skills: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close search response: %w", closeErr))
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("search skills: HTTP %d", resp.StatusCode)
 	}
@@ -93,7 +98,7 @@ func (c SearchClient) Search(ctx context.Context, req SearchRequest) ([]SearchRe
 		return nil, fmt.Errorf("decode search results: %w", err)
 	}
 	if len(payload.Skills) > 0 {
-		results := make([]SearchResult, 0, len(payload.Skills))
+		results = make([]SearchResult, 0, len(payload.Skills))
 		for _, result := range payload.Skills {
 			normalized, ok := normalizeSkillsAPIResult(result)
 			if ok {

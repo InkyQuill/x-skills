@@ -323,7 +323,7 @@ func archiveContentFingerprint(root string) (string, error) {
 		return "", fmt.Errorf("stat archive content root: %w", err)
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("unsupported file type in archive content: .")
+		return "", fmt.Errorf("unsupported file type in archive content: root")
 	}
 
 	var entries []contentFingerprintEntry

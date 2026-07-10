@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -55,6 +57,58 @@ func TestModalRendersOverShellWithoutRemovingFooter(t *testing.T) {
 	}
 	if got := strings.Count(view, "\n") + 1; got != m.height {
 		t.Fatalf("view height = %d, want %d:\n%s", got, m.height, view)
+	}
+}
+
+func TestConstrainedModalKeepsFooterVisibleWithLongBody(t *testing.T) {
+	body := make([]string, 30)
+	for i := range body {
+		body[i] = "body line"
+	}
+	view := plain(renderConstrainedModal(80, 12, constrainedModalOptions{
+		Title:     "Long modal",
+		Body:      body,
+		Footer:    []string{"footer commands"},
+		Scroll:    20,
+		UseScroll: true,
+	}))
+
+	lines := strings.Split(view, "\n")
+	if len(lines) > 12 {
+		t.Fatalf("modal height = %d, want <= 12:\n%s", len(lines), view)
+	}
+	if !strings.Contains(view, "Long modal") || !strings.Contains(view, "footer commands") {
+		t.Fatalf("constrained modal lost title/footer:\n%s", view)
+	}
+	if !strings.Contains(view, "↑ more") || !strings.Contains(view, "↓ more") {
+		t.Fatalf("constrained modal missing scroll indicators:\n%s", view)
+	}
+}
+
+func TestScrollableModalMovesWithJK(t *testing.T) {
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i)
+	}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 80
+	m.height = 12
+	m.modal = newResultModal("Long result", lines)
+
+	for i := 0; i < 10; i++ {
+		updated, _ := m.Update(keyRunes("j"))
+		m = mustModel(t, updated)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "line-11") || strings.Contains(view, "line-00") {
+		t.Fatalf("result modal did not scroll with j:\n%s", view)
+	}
+
+	updated, _ := m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	view = plain(m.View())
+	if !strings.Contains(view, "line-10") {
+		t.Fatalf("result modal did not scroll with k:\n%s", view)
 	}
 }
 
@@ -152,13 +206,22 @@ func TestQuestionMarkOpensHelpModalWithGlobalKeys(t *testing.T) {
 		"Install: i install and use",
 		"Install: a archive only",
 		"^R",
-		".Ag",
-		"~Cd",
 		"toggle Active/Repo row selection",
 		"clear Active/Repo selection",
+		"↓ more",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("help modal missing %q:\n%s", want, view)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	view = m.modal.View(100, 30, m)
+	for _, want := range []string{".Ag", "~Cd"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("scrolled help modal missing %q:\n%s", want, view)
 		}
 	}
 	for _, unwanted := range []string{"reserved for " + "Install view", "toggle row selection", "clear selection"} {
@@ -211,6 +274,166 @@ func TestPreviewModalTogglesRawAndRendered(t *testing.T) {
 	raw := m.modal.View(100, 30, m)
 	if !strings.Contains(raw, "raw SKILL.md") {
 		t.Fatalf("preview missing raw marker:\n%s", raw)
+	}
+}
+
+func TestPreviewModalRenderedHidesFrontmatterAndShowsBody(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	skill := filepath.Join(cfg.MustActiveRoot("project", "agents"), "focused-preview")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join([]string{
+		"---",
+		"name: focused-preview",
+		"description: Metadata description should stay out of rendered preview.",
+		"---",
+		"# Focused Preview",
+		"",
+		"Use this skill when installing quality checks.",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("focused-preview", skill)
+
+	view := plain(m.modal.View(100, 30, m))
+	for _, unexpected := range []string{"name: focused-preview", "description:"} {
+		if strings.Contains(view, unexpected) {
+			t.Fatalf("rendered preview should hide frontmatter %q:\n%s", unexpected, view)
+		}
+	}
+	for _, want := range []string{"Metadata description", "Focused Preview", "installing quality checks"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("rendered preview missing body content %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestPreviewModalRenderedUsesFoldedBlockDescription(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	skill := filepath.Join(cfg.MustActiveRoot("project", "agents"), "folded-description")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join([]string{
+		"---",
+		"name: folded-description",
+		"description: >",
+		"  Folded description line",
+		"  continues with useful detail.",
+		"---",
+		"# Folded Body",
+		"",
+		"Body content remains visible.",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("folded-description", skill)
+
+	view := plain(m.modal.View(120, 30, m))
+	for _, want := range []string{"Folded description line", "continues with useful detail", "Folded Body", "Body content remains visible"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("rendered preview missing folded description content %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "description:") || strings.Contains(view, " > ") {
+		t.Fatalf("rendered preview leaked raw folded frontmatter:\n%s", view)
+	}
+}
+
+func TestPreviewModalRenderedKeepsIndentedDelimiterInBlockDescription(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	skill := filepath.Join(cfg.MustActiveRoot("project", "agents"), "block-description")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join([]string{
+		"---",
+		"name: block-description",
+		"description: |",
+		"  Intro line before a YAML-looking marker.",
+		"  ---",
+		"  Still part of the description.",
+		"---",
+		"# Block Body",
+		"",
+		"Body content follows the real delimiter.",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("block-description", skill)
+
+	view := plain(m.modal.View(120, 30, m))
+	for _, want := range []string{"Intro line before", "Still part of the description", "Block Body", "Body content follows"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("rendered preview missing block description content %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "description:") {
+		t.Fatalf("rendered preview leaked raw block frontmatter:\n%s", view)
+	}
+}
+
+func TestPreviewModalRawShowsFrontmatter(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	skill := filepath.Join(cfg.MustActiveRoot("project", "agents"), "raw-preview")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: raw-preview\ndescription: Raw metadata remains visible.\n---\n# Raw Preview\n"
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("raw-preview", skill)
+
+	updated, _ := m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"raw SKILL.md", "name: raw-preview", "Raw metadata remains visible"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("raw preview missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestPreviewModalCompactsLongPathHeader(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	root := cfg.MustActiveRoot("project", "agents")
+	longParent := filepath.Join(root, "deeply", "nested", "path", "that", "should", "not", "be", "shown")
+	skillName := "extremely-long-preview-skill-name-that-still-has-readable-body"
+	skill := filepath.Join(longParent, skillName)
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: compact-header\n---\n# Body Starts Here\nReadable install details stay visible.\n"
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.modal = newPreviewModal("Preview: "+strings.Repeat("long-title-", 12), skill)
+
+	const width = 72
+	view := plain(m.modal.View(width, 16, m))
+	if strings.Contains(view, root) || strings.Contains(view, "deeply/nested/path") {
+		t.Fatalf("preview header should not show full path:\n%s", view)
+	}
+	if !strings.Contains(view, "Body Starts Here") || !strings.Contains(view, "Readable install details") {
+		t.Fatalf("long header consumed preview body:\n%s", view)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if gotWidth := lipgloss.Width(line); gotWidth > width {
+			t.Fatalf("line %d width = %d, want <= %d for %q:\n%s", i, gotWidth, width, line, view)
+		}
 	}
 }
 

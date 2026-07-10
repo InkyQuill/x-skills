@@ -83,9 +83,6 @@ func mutationPaths(cfg config.Config, name, scope, target string) (mutationPathS
 	if !slices.Contains(config.Scopes, scope) {
 		return mutationPathSet{}, fmt.Errorf("unknown scope %q", scope)
 	}
-	if !slices.Contains(config.Targets, target) {
-		return mutationPathSet{}, fmt.Errorf("unknown target %q", target)
-	}
 
 	root, err := cfg.ActiveRoot(scope, target)
 	if err != nil {

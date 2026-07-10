@@ -11,17 +11,16 @@ import (
 )
 
 type options struct {
-	projectRoot      string
-	homeDir          string
-	archiveRoot      string
-	globalAgentsRoot string
-	globalClaudeRoot string
-	globalCodexRoot  string
-	yes              bool
-	no               bool
-	noInput          bool
+	projectRoot string
+	homeDir     string
+	archiveRoot string
+	yes         bool
+	no          bool
+	noInput     bool
+	json        bool
 
-	flags *pflag.FlagSet
+	flags  *pflag.FlagSet
+	loaded *config.Config
 }
 
 func Execute(argv []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -45,12 +44,9 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 	cfg := config.Default(projectRoot, homeDir)
 	opts := options{
-		projectRoot:      cfg.ProjectRoot,
-		homeDir:          cfg.HomeDir,
-		archiveRoot:      cfg.ArchiveRoot,
-		globalAgentsRoot: cfg.GlobalAgentsRoot,
-		globalClaudeRoot: cfg.GlobalClaudeRoot,
-		globalCodexRoot:  cfg.GlobalCodexRoot,
+		projectRoot: cfg.ProjectRoot,
+		homeDir:     cfg.HomeDir,
+		archiveRoot: cfg.ArchiveRoot,
 	}
 
 	root := &cobra.Command{
@@ -61,7 +57,8 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 			if opts.yes && opts.no {
 				return fmt.Errorf("--yes and --no are mutually exclusive")
 			}
-			return nil
+			_, err := opts.configE()
+			return err
 		},
 	}
 	root.SetIn(stdin)
@@ -72,19 +69,20 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 	opts.flags = flags
 	flags.StringVar(&opts.projectRoot, "project-root", opts.projectRoot, "project root")
 	flags.StringVar(&opts.archiveRoot, "archive-root", opts.archiveRoot, "archive root")
-	flags.StringVar(&opts.globalAgentsRoot, "global-root", opts.globalAgentsRoot, "global agents skills root")
-	flags.StringVar(&opts.globalClaudeRoot, "claude-global-root", opts.globalClaudeRoot, "global Claude skills root")
-	flags.StringVar(&opts.globalCodexRoot, "codex-global-root", opts.globalCodexRoot, "global Codex skills root")
 	flags.BoolVarP(&opts.yes, "yes", "y", false, "confirm mutating commands")
 	flags.BoolVarP(&opts.no, "no", "n", false, "decline confirmations")
 	flags.BoolVar(&opts.noInput, "no-input", false, "fail instead of prompting")
+	flags.BoolVarP(&opts.json, "json", "j", false, "print JSON output for supported read-only commands")
 	flags.StringVar(&opts.homeDir, "home", opts.homeDir, "home directory")
 	if err := flags.MarkHidden("home"); err != nil {
 		return nil, err
 	}
 
 	root.AddCommand(
+		newAddCommand(&opts),
+		newSearchCommand(&opts),
 		newListCommand(&opts),
+		newListRootsCommand(&opts),
 		newRepoCommand(&opts),
 		newLinkCommand(&opts),
 		newMigrateCommand(&opts),
@@ -96,22 +94,28 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 	return root, nil
 }
 
-func (o options) config() config.Config {
-	cfg := config.Default(o.projectRoot, o.homeDir)
-	if o.flags == nil {
-		return cfg
-	}
-	if o.flags.Changed("archive-root") {
-		cfg.ArchiveRoot = o.archiveRoot
-	}
-	if o.flags.Changed("global-root") {
-		cfg.GlobalAgentsRoot = o.globalAgentsRoot
-	}
-	if o.flags.Changed("claude-global-root") {
-		cfg.GlobalClaudeRoot = o.globalClaudeRoot
-	}
-	if o.flags.Changed("codex-global-root") {
-		cfg.GlobalCodexRoot = o.globalCodexRoot
+func (o *options) config() config.Config {
+	cfg, err := o.configE()
+	if err != nil {
+		panic(err)
 	}
 	return cfg
+}
+
+func (o *options) configE() (config.Config, error) {
+	if o.loaded != nil {
+		return *o.loaded, nil
+	}
+	cfg := config.Default(o.projectRoot, o.homeDir)
+	if o.flags != nil {
+		if o.flags.Changed("archive-root") {
+			cfg.ArchiveRoot = o.archiveRoot
+		}
+	}
+	loaded, err := config.LoadGlobal(cfg)
+	if err != nil {
+		return config.Config{}, err
+	}
+	o.loaded = &loaded
+	return loaded, nil
 }

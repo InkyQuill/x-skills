@@ -10,9 +10,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
-	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
+	"github.com/InkyQuill/x-skills/internal/roots"
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
@@ -115,16 +115,11 @@ func (c migrateConfirmModal) Title() string {
 }
 
 func (c migrateConfirmModal) View(width, height int, m Model) string {
-	targetRows := c.visibleTargetRows(width, height, m)
-	lines := []string{
-		accentStyle.Render("Migrate active skills"),
-		"",
+	targetRows := c.targetRows(width, m)
+	body := []string{
 		fmt.Sprintf("Targets (%d)", len(c.targets)),
 	}
-	lines = append(lines, targetRows...)
-	lines = append(lines,
-		"",
-	)
+	body = append(body, targetRows...)
 	apply := "[ Apply ]"
 	cancel := "Cancel"
 	if c.choice == 1 {
@@ -136,67 +131,41 @@ func (c migrateConfirmModal) View(width, height int, m Model) string {
 	} else {
 		cancel = selectedBg.Render(cancel)
 	}
-	lines = append(lines, apply+"   "+cancel, mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-		{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
-		{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
-		{ASCII: "enter", Unicode: "↵", Label: "apply"},
-		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-	})))
-	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: "Migrate active skills",
+		Body:  body,
+		Footer: []string{
+			apply + "   " + cancel,
+			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+				{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+				{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
+				{ASCII: "enter", Unicode: "↵", Label: "apply"},
+				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+			})),
+		},
+		Scroll:    c.scroll,
+		UseScroll: true,
+	})
 }
 
-func (c migrateConfirmModal) visibleTargetRows(width, height int, m Model) []string {
-	visible := c.visibleTargetCount(height)
-	start := c.scroll
-	maxStart := len(c.targets) - visible
-	if maxStart < 0 {
-		maxStart = 0
-	}
-	if start > maxStart {
-		start = maxStart
-	}
-	end := start + visible
-	if end > len(c.targets) {
-		end = len(c.targets)
-	}
-	rows := make([]string, 0, visible)
-	maxTextWidth := width - 14
-	if maxTextWidth < 20 {
-		maxTextWidth = 20
-	}
-	for _, target := range c.targets[start:end] {
-		row := "  " + filepath.Base(target.Path) + "  " + renderRootChip(m.symbols, rootChip(target.Root.Scope, target.Root.Target), lipgloss.NoColor{})
-		rows = append(rows, truncate(row, maxTextWidth))
+func (c migrateConfirmModal) targetRows(width int, m Model) []string {
+	rows := make([]string, 0, len(c.targets)+1)
+	for _, target := range c.targets {
+		chip := rootLabel(target.Root)
+		rows = append(rows, truncate("  "+filepath.Base(target.Path)+"  "+renderRootChip(m.symbols, chip, lipgloss.NoColor{}), width-16))
 	}
 	return rows
 }
 
-func (c migrateConfirmModal) visibleTargetCount(height int) int {
-	visible := height - 8
-	if visible < 1 {
-		return 1
-	}
-	if visible > len(c.targets) {
-		return len(c.targets)
-	}
-	return visible
-}
-
 func (c migrateConfirmModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 {
+		c.scroll = clampModalIndex(c.scroll+delta, len(c.targets))
+		m.modal = c
+		return false, nil
+	}
 	switch msg.String() {
 	case "esc", "q", "n":
 		return true, nil
-	case "up":
-		if c.scroll > 0 {
-			c.scroll--
-		}
-		m.modal = c
-	case "down":
-		visible := c.visibleTargetCount(m.height)
-		if c.scroll+visible < len(c.targets) {
-			c.scroll++
-		}
-		m.modal = c
 	case "left", "right":
 		if c.choice == 0 {
 			c.choice = 1
@@ -270,7 +239,7 @@ func activeUsageTargets(targets []actions.ActiveSkill) []repoUsageTarget {
 			Name:   filepath.Base(target.Path),
 			Scope:  target.Root.Scope,
 			Target: target.Root.Target,
-			Chip:   rootChip(target.Root.Scope, target.Root.Target),
+			Chip:   rootLabel(target.Root),
 			Path:   target.Path,
 			Status: target.Status,
 		})
@@ -319,9 +288,8 @@ func (m *Model) applyActiveUsageUnlink(r repoUsageModal) {
 
 type repoLinkModal struct {
 	names       []string
-	scope       string
-	target      string
-	field       int
+	locations   []roots.ActiveRoot
+	index       int
 	destination string
 }
 
@@ -357,7 +325,7 @@ func (m *Model) openRepoLinkModal() {
 	if len(names) == 0 {
 		return
 	}
-	linkModal := repoLinkModal{names: names, scope: config.ScopeProject, target: config.TargetAgents}
+	linkModal := repoLinkModal{names: names, locations: roots.ActiveRoots(m.cfg, roots.Filter{})}
 	linkModal.destination = linkModal.destinationPath(m)
 	m.modal = linkModal
 }
@@ -370,24 +338,15 @@ func (r repoLinkModal) destinationPath(m *Model) string {
 	if len(r.names) != 1 {
 		return ""
 	}
-	root, err := m.cfg.ActiveRoot(r.scope, r.target)
-	if err != nil {
-		return err.Error()
+	location, ok := r.selectedLocation()
+	if !ok {
+		return "no active roots configured"
 	}
-	return filepath.Join(root, r.names[0])
+	return filepath.Join(location.Path, r.names[0])
 }
 
 func (r repoLinkModal) View(width, height int, m Model) string {
-	scopeCursor := " "
-	targetCursor := " "
-	if r.field == 0 {
-		scopeCursor = m.symbols.Cursor
-	}
-	if r.field == 1 {
-		targetCursor = m.symbols.Cursor
-	}
 	lines := []string{
-		accentStyle.Render("Link repo skill"),
 		repoSelectionLabel("Skill", len(r.names)),
 	}
 	for _, name := range r.names {
@@ -396,32 +355,44 @@ func (r repoLinkModal) View(width, height int, m Model) string {
 	lines = append(lines,
 		"",
 		"Destination",
-		"  "+scopeCursor+" scope   "+linkChoice(r.scope == config.ScopeProject, "project")+"    "+linkChoice(r.scope == config.ScopeGlobal, "global"),
-		"  "+targetCursor+" target  "+linkChoice(r.target == config.TargetAgents, ".Ag")+"        "+linkChoice(r.target == config.TargetClaude, ".Cl")+"        "+linkChoice(r.target == config.TargetCodex, ".Cd"),
-		"",
-		"Will create",
 	)
+	if len(r.locations) == 0 {
+		lines = append(lines, "  no active roots configured")
+	} else {
+		for i, location := range r.locations {
+			cursor := " "
+			if i == r.index {
+				cursor = m.symbols.Cursor
+			}
+			line := "  " + cursor + " " + linkChoice(i == r.index, rootLabel(location)+"  "+location.Scope+":"+location.Target)
+			lines = append(lines, truncate(line, width-10))
+		}
+	}
+	lines = append(lines, "", "Will create")
 	lines = append(lines, r.linkPreviewLines(m)...)
 	lines = append(lines,
 		"",
-		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-			{ASCII: "left/right", Unicode: "←/→", Label: "change option"},
-			{ASCII: "tab", Unicode: "⇥", Label: "field"},
+	)
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: "Link repo skill",
+		Body:  lines,
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "destination"},
 			{ASCII: "enter", Unicode: "↵", Label: "link"},
 			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-		})),
-	)
-	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+		}))},
+		Focus: 3 + r.index,
+	})
 }
 
 func (r repoLinkModal) linkPreviewLines(m Model) []string {
-	root, err := m.cfg.ActiveRoot(r.scope, r.target)
-	if err != nil {
-		return []string{"  " + err.Error()}
+	location, ok := r.selectedLocation()
+	if !ok {
+		return []string{"  no active roots configured"}
 	}
 	lines := make([]string, 0, len(r.names))
 	for _, name := range r.names {
-		lines = append(lines, "  "+filepath.Join(root, name)+" -> "+filepath.Join(m.cfg.ArchiveSkillsRoot(), name))
+		lines = append(lines, "  "+filepath.Join(location.Path, name)+" -> "+filepath.Join(m.cfg.ArchiveSkillsRoot(), name))
 	}
 	return lines
 }
@@ -434,21 +405,15 @@ func linkChoice(selected bool, label string) string {
 }
 
 func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 {
+		r.index = clampModalIndex(r.index+delta, len(r.locations))
+		r.destination = r.destinationPath(m)
+		m.modal = r
+		return false, nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		return true, nil
-	case "tab":
-		if r.field == 0 {
-			r.field = 1
-		} else {
-			r.field = 0
-		}
-		r.destination = r.destinationPath(m)
-		m.modal = r
-	case "left", "right":
-		r.move(msg.String())
-		r.destination = r.destinationPath(m)
-		m.modal = r
 	case "enter":
 		r.apply(m)
 	}
@@ -456,10 +421,15 @@ func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 
 func (r repoLinkModal) apply(m *Model) {
+	location, ok := r.selectedLocation()
+	if !ok {
+		m.modal = newResultModal("Link Results", []string{"No active roots configured."})
+		return
+	}
 	var lines []string
 	var successes []string
 	for _, name := range r.names {
-		result, err := actions.Link(m.cfg, actions.LinkRequest{Name: name, Scope: r.scope, Target: r.target})
+		result, err := actions.Link(m.cfg, actions.LinkRequest{Name: name, Scope: location.Scope, Target: location.Target})
 		if err != nil {
 			lines = append(lines, "x "+name+": "+err.Error())
 			continue
@@ -471,29 +441,11 @@ func (r repoLinkModal) apply(m *Model) {
 	m.modal = newResultModal("Link Results", lines)
 }
 
-func (r *repoLinkModal) move(direction string) {
-	if r.field == 0 {
-		if r.scope == config.ScopeProject {
-			r.scope = config.ScopeGlobal
-		} else {
-			r.scope = config.ScopeProject
-		}
-		return
+func (r repoLinkModal) selectedLocation() (roots.ActiveRoot, bool) {
+	if r.index < 0 || r.index >= len(r.locations) {
+		return roots.ActiveRoot{}, false
 	}
-	targets := []string{config.TargetAgents, config.TargetClaude, config.TargetCodex}
-	current := 0
-	for i, target := range targets {
-		if target == r.target {
-			current = i
-			break
-		}
-	}
-	if direction == "right" {
-		current = (current + 1) % len(targets)
-	} else {
-		current = (current + len(targets) - 1) % len(targets)
-	}
-	r.target = targets[current]
+	return r.locations[r.index], true
 }
 
 type repoUsageTarget struct {
@@ -543,7 +495,7 @@ func (m Model) repoUsageTargets(names ...string) []repoUsageTarget {
 					Name:   filepath.Base(member.Path),
 					Scope:  member.Root.Scope,
 					Target: member.Root.Target,
-					Chip:   rootChip(member.Root.Scope, member.Root.Target),
+					Chip:   rootLabel(member.Root),
 					Path:   member.Path,
 					Status: member.Status,
 				})
@@ -558,11 +510,8 @@ func (r repoUsageModal) Title() string {
 }
 
 func (r repoUsageModal) View(width, height int, m Model) string {
-	lines := []string{
-		accentStyle.Render("Unlink usages: " + r.name),
-		"Select current usages to remove.",
-		"",
-	}
+	body := []string{"Select current usages to remove.", ""}
+	focus := 2 + r.index
 	for i, target := range r.targets {
 		cursor := " "
 		if i == r.index {
@@ -580,31 +529,33 @@ func (r repoUsageModal) View(width, height int, m Model) string {
 		if r.selected[i] {
 			line = selectedBg.Render(line)
 		}
-		lines = append(lines, line)
+		body = append(body, line)
 	}
-	lines = append(lines, "", "[ Unlink selected ]   Cancel", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-		{ASCII: "up/down", Unicode: "↑/↓", Label: "move"},
-		{ASCII: "space", Label: "toggle"},
-		{ASCII: "enter", Unicode: "↵", Label: "choose"},
-		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-	})))
-	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: "Unlink usages: " + r.name,
+		Body:  body,
+		Footer: []string{
+			"[ Unlink selected ]   Cancel",
+			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+				{ASCII: "up/down", Unicode: "↑/↓", Label: "move"},
+				{ASCII: "space", Label: "toggle"},
+				{ASCII: "enter", Unicode: "↵", Label: "choose"},
+				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+			})),
+		},
+		Focus: focus,
+	})
 }
 
 func (r repoUsageModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 {
+		r.index = clampModalIndex(r.index+delta, len(r.targets))
+		m.modal = r
+		return false, nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		return true, nil
-	case "up":
-		if r.index > 0 {
-			r.index--
-		}
-		m.modal = r
-	case "down":
-		if r.index+1 < len(r.targets) {
-			r.index++
-		}
-		m.modal = r
 	case " ":
 		r.selected[r.index] = !r.selected[r.index]
 		m.modal = r

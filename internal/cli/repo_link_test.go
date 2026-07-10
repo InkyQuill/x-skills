@@ -31,7 +31,7 @@ func TestLinkAcceptsMultipleNames(t *testing.T) {
 	second := makeSkill(t, archive, "second-skill", "Second.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "link", "first-skill", "second-skill", "--project", "--target", "codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "link", "first-skill", "second-skill", "--at", "project:codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +50,63 @@ func TestLinkAcceptsMultipleNames(t *testing.T) {
 	}
 }
 
+func TestLinkAcceptsMultipleLocations(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	source := makeSkill(t, filepath.Join(home, ".x-skills", "skills"), "typescript-expert", "TypeScript.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "link", "typescript-expert", "--at", ".Ag", "--at", "~Cd"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		filepath.Join(project, ".agents", "skills", "typescript-expert"),
+		filepath.Join(home, ".codex", "skills", "typescript-expert"),
+	} {
+		resolved, err := filepath.EvalSymlinks(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved != source {
+			t.Fatalf("%s resolved to %q, want %q", target, resolved, source)
+		}
+	}
+	if !strings.Contains(out.String(), "Summary:") || !strings.Contains(out.String(), "linked: typescript-expert, typescript-expert") {
+		t.Fatalf("link output:\n%s", out.String())
+	}
+}
+
+func TestLinkSupportsConfiguredCustomTarget(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	configPath := filepath.Join(home, ".x-skills", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("active_roots:\n  - scope: project\n    target: opencode\n    path: .opencode/skills\n    label: .Oc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := makeSkill(t, filepath.Join(home, ".x-skills", "skills"), "typescript-expert", "TypeScript.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "link", "typescript-expert", "--at", ".Oc"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(project, ".opencode", "skills", "typescript-expert")
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != source {
+		t.Fatalf("resolved = %q, want %q", resolved, source)
+	}
+	if !strings.Contains(out.String(), "linked: typescript-expert") {
+		t.Fatalf("link output:\n%s", out.String())
+	}
+}
+
 func TestLinkBatchReportsPartialFailureAndContinues(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -57,7 +114,7 @@ func TestLinkBatchReportsPartialFailureAndContinues(t *testing.T) {
 	second := makeSkill(t, archive, "second-skill", "Second.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "link", "missing-skill", "second-skill", "--project", "--target", "codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "link", "missing-skill", "second-skill", "--at", "project:codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected partial failure error")
 	}
@@ -95,7 +152,7 @@ func TestLinkFailsNoInputWhenDestinationIsAmbiguous(t *testing.T) {
 	if !strings.Contains(err.Error(), "choose a destination") {
 		t.Fatalf("error = %q, want choose a destination", err)
 	}
-	if !strings.Contains(err.Error(), "x-skills link typescript-expert --target codex --project") {
+	if !strings.Contains(err.Error(), "x-skills link typescript-expert --at project:codex") {
 		t.Fatalf("error missing one-shot hint: %v", err)
 	}
 }

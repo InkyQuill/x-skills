@@ -66,11 +66,16 @@ func unlinkNamesWithOptions(
 	opts unlinkOptions,
 ) ([]actions.MutationResult, []mutationFailure, []mutationSkipped) {
 	cfg := rootOptions.config()
+	location, locationErr := optionalOneLocation(cfg, opts.at)
 	var results []actions.MutationResult
 	var failures []mutationFailure
 	var skipped []mutationSkipped
 	for _, name := range names {
-		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "unlink", opts.activeRootOptions)
+		if locationErr != nil {
+			failures = append(failures, mutationFailure{name: name, err: locationErr})
+			continue
+		}
+		skill, err := chooseActiveSkill(cmd, rootOptions, cfg, name, "unlink", location)
 		if err != nil {
 			failures = append(failures, mutationFailure{name: name, err: err})
 			continue

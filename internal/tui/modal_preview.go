@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"gopkg.in/yaml.v3"
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
@@ -40,7 +42,7 @@ func (p previewModal) Title() string {
 
 func (p previewModal) renderContent() string {
 	if p.rendered {
-		rendered, err := glamour.Render(p.raw, "dark")
+		rendered, err := glamour.Render(renderedPreviewMarkdown(p.raw), "dark")
 		if err == nil {
 			return strings.TrimRight(rendered, "\n")
 		}
@@ -64,10 +66,12 @@ func (p previewModal) View(width, height int, m Model) string {
 	p.viewport.Width = bodyWidth
 	p.viewport.Height = bodyHeight
 	p.viewport.SetContent(p.renderContent())
+	skillFile := filepath.Base(filepath.Dir(p.path)) + "/" + filepath.Base(p.path)
+	detail := truncate(fmt.Sprintf("%s  |  %s", skillFile, mode), bodyWidth)
 	lines := []string{
-		accentStyle.Render(p.title),
-		p.path + "       " + mode,
-		strings.Repeat("-", 60),
+		accentStyle.Render(truncate(p.title, bodyWidth)),
+		mutedStyle.Render(detail),
+		strings.Repeat("-", bodyWidth),
 		p.viewport.View(),
 		"",
 		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
@@ -78,6 +82,65 @@ func (p previewModal) View(width, height int, m Model) string {
 		})),
 	}
 	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+}
+
+func renderedPreviewMarkdown(value string) string {
+	frontmatter, body, ok := splitYAMLFrontmatter(value)
+	if !ok {
+		return value
+	}
+	body = strings.TrimLeft(body, "\r\n")
+	description := frontmatterDescription(frontmatter)
+	if description == "" || strings.Contains(body, description) {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return description + "\n"
+	}
+	return description + "\n\n" + body
+}
+
+func splitYAMLFrontmatter(value string) (string, string, bool) {
+	if !strings.HasPrefix(value, "---\n") && !strings.HasPrefix(value, "---\r\n") {
+		return "", value, false
+	}
+	lines := strings.SplitAfter(value, "\n")
+	if len(lines) < 3 {
+		return "", value, false
+	}
+	for i := 1; i < len(lines); i++ {
+		if isYAMLDocumentDelimiter(lines[i]) {
+			return strings.Join(lines[1:i], ""), linesAfter(lines, i+1), true
+		}
+	}
+	return "", value, false
+}
+
+func frontmatterDescription(frontmatter string) string {
+	var metadata struct {
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &metadata); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata.Description)
+}
+
+func isYAMLDocumentDelimiter(line string) bool {
+	if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+		return false
+	}
+	line = strings.TrimSuffix(line, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	line = strings.TrimRight(line, " \t")
+	return line == "---" || line == "..."
+}
+
+func linesAfter(lines []string, index int) string {
+	if index >= len(lines) {
+		return ""
+	}
+	return strings.Join(lines[index:], "")
 }
 
 func (p previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {

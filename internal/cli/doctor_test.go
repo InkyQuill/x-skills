@@ -68,7 +68,7 @@ func TestDoctorFixRespectsScopeFilter(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix", "--project"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix", "--at", ".Cl"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}

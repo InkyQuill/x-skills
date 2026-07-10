@@ -8,26 +8,31 @@ import (
 )
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
-	tabStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	activeTab     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Padding(0, 1)
-	panelStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1)
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("110"))
-	cursorBg      = lipgloss.NewStyle().Background(lipgloss.Color("60"))
-	selectedBg    = lipgloss.NewStyle().Background(lipgloss.Color("238"))
-	mutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	kbdStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("236"))
-	projectChip   = lipgloss.NewStyle().Background(lipgloss.Color("24"))
-	globalChip    = lipgloss.NewStyle().Background(lipgloss.Color("95"))
-	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	accentStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("110"))
-	dangerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	archiveStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	incomingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	diffMetaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("110"))
-	managedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	unmanaged     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	titleStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
+	tabStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activeTab           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Padding(0, 1)
+	panelStyle          = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1)
+	cursorStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
+	selectedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("110"))
+	cursorBg            = lipgloss.NewStyle().Background(lipgloss.Color("60"))
+	selectedBg          = lipgloss.NewStyle().Background(lipgloss.Color("238"))
+	mutedStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	kbdStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("236"))
+	projectChip         = lipgloss.NewStyle().Background(lipgloss.Color("24"))
+	globalChip          = lipgloss.NewStyle().Background(lipgloss.Color("95"))
+	okStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	accentStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("110"))
+	inspectorTitleStyle = accentStyle
+	inspectorKeyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("110"))
+	inspectorValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	installSourceStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("109"))
+	installCountStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
+	dangerStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	archiveStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	incomingStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	diffMetaStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("110"))
+	managedStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	unmanaged           = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 )
 
 func init() {
@@ -46,6 +51,11 @@ func init() {
 		globalChip = globalChip.UnsetForeground().UnsetBackground()
 		okStyle = okStyle.UnsetForeground().UnsetBackground()
 		accentStyle = accentStyle.UnsetForeground().UnsetBackground()
+		inspectorTitleStyle = inspectorTitleStyle.UnsetForeground().UnsetBackground()
+		inspectorKeyStyle = inspectorKeyStyle.UnsetForeground().UnsetBackground()
+		inspectorValueStyle = inspectorValueStyle.UnsetForeground().UnsetBackground()
+		installSourceStyle = installSourceStyle.UnsetForeground().UnsetBackground()
+		installCountStyle = installCountStyle.UnsetForeground().UnsetBackground()
 		dangerStyle = dangerStyle.UnsetForeground().UnsetBackground()
 		archiveStyle = archiveStyle.UnsetForeground().UnsetBackground()
 		incomingStyle = incomingStyle.UnsetForeground().UnsetBackground()
@@ -88,6 +98,19 @@ func renderStatusChip(m Model, status string) string {
 		return dangerStyle.Render(m.symbols.Broken + " broken")
 	default:
 		return mutedStyle.Render(status)
+	}
+}
+
+func renderStatusDotWithBackground(m Model, status string, background lipgloss.TerminalColor) string {
+	switch status {
+	case "managed":
+		return renderWithOptionalBackground(managedStyle, m.symbols.Managed, background)
+	case "unmanaged":
+		return renderWithOptionalBackground(unmanaged, m.symbols.Unmanaged, background)
+	case "broken":
+		return renderWithOptionalBackground(dangerStyle, m.symbols.Broken, background)
+	default:
+		return renderWithOptionalBackground(mutedStyle, m.symbols.Unmanaged, background)
 	}
 }
 

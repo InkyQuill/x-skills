@@ -28,17 +28,17 @@ func (t textModal) Title() string {
 
 func (t textModal) View(width, height int, m Model) string {
 	lines := []string{
-		accentStyle.Render(t.title),
-		"",
 		t.label,
 		t.input.View(),
-		"",
-		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+	}
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: t.title,
+		Body:  lines,
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "apply"},
 			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-		})),
-	}
-	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+		}))},
+	})
 }
 
 func (t textModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {

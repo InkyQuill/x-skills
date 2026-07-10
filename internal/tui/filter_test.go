@@ -132,7 +132,7 @@ func TestDoctorSpaceDoesNotToggleSelection(t *testing.T) {
 		t.Fatalf("doctor selection = %#v, want empty", m.selected)
 	}
 	view := plain(m.View())
-	if strings.Contains(view, "□") || strings.Contains(view, "■") {
+	if strings.Contains(view, "› ◇") || strings.Contains(view, "› ◆") {
 		t.Fatalf("doctor view should not render selection checkbox:\n%s", view)
 	}
 	if strings.Contains(view, "c clear") {
@@ -174,8 +174,8 @@ func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
 	updated, _ = m.Update(keyRunes("target"))
 	m = mustModel(t, updated)
 
-	view := m.View()
-	if !strings.Contains(view, "› □ target-skill") {
+	view := plain(m.View())
+	if !strings.Contains(view, "› ◇ ● target-skill") {
 		t.Fatalf("filtered cursor is not drawn on target row:\n%s", view)
 	}
 
@@ -205,7 +205,7 @@ func TestFilterCursorAndActionsUseFilteredRepoRows(t *testing.T) {
 	m = mustModel(t, updated)
 
 	view := m.View()
-	if !strings.Contains(view, "› □ target-skill") {
+	if !strings.Contains(view, "› ◇ target-skill") {
 		t.Fatalf("filtered repo cursor is not drawn on target row:\n%s", view)
 	}
 

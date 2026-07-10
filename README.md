@@ -6,13 +6,17 @@ skills you currently need into project or global agent directories.
 The CLI is working-directory based: `x-skills list` inspects the current project
 plus global skill roots. To inspect another project, `cd` there first.
 
-## Go Rewrite
+## Go Implementation
 
-This branch is the Go implementation of `x-skills`, replacing the earlier
-Python/Textual prototype (Python source remains in `src/x_skills` only as a
-historical reference; it is not the active implementation).
+The Go CLI and TUI are the authoritative implementation of `x-skills`. The
+earlier Python/Textual source remains in `src/x_skills` only as a historical
+reference; it is not supported or distributed.
+
+Build or run the Go implementation from a source checkout:
 
 ```bash
+mkdir -p ~/bin
+go build -o ~/bin/x-skills ./cmd/x-skills
 go run ./cmd/x-skills list
 go run ./cmd/x-skills repo
 go run ./cmd/x-skills doctor
@@ -20,38 +24,44 @@ go run ./cmd/x-skills doctor --fix -y
 go run ./cmd/x-skills tui
 ```
 
-Shipped today: cwd-based active scanning, local repo listing, `link`,
-`migrate`, `unlink`, `doctor` (with `--fix`), and the `x-skills tui` Bubble Tea
-guided manager (Active, Repo, and Doctor pages). Active rows are merged by
+Shipped: cwd-based active scanning, local repo listing, `add` (remote
+`skills.sh` search and install with archive-and-link), `link`, `migrate`,
+`unlink`, `doctor` (with `--fix`), and the `x-skills tui` Bubble Tea guided
+manager (Active, Repo, Doctor, and Install pages). Active rows are merged by
 directory SHA fingerprint so identical linked copies appear as one item while
 changed copies remain separate; the fingerprint is internal and not shown in
 the UI.
 
 Not yet implemented (designed, tracked in `docs/adr/` and
 `docs/superpowers/specs/2026-07-06-go-tui-install-and-repo-updates-design.md`):
-remote `skills.sh` search/install (`add`), Repo update checks, and the TUI
-Install page. See that design doc and the backlog for current status before
-relying on any of it.
+`repo check`/`repo update`/`repo update-all`, and `repo remove`. See that
+design doc and the backlog for current status before relying on any of it.
 
 ## Usage
 
 ```bash
 x-skills list
-x-skills list --target codex
-x-skills list --project
-x-skills list --global
+x-skills list --at project:codex
+x-skills list --at .Ag --at ~Cl
+x-skills list-roots --json
 
 x-skills repo
-x-skills repo --used
-x-skills repo --unused
 
-x-skills link svelte-coder --target codex --project
-x-skills link typescript-expert --target codex --global
-x-skills link svelte-coder typescript-expert --target codex --project
+x-skills search next
+x-skills search next --owner vercel-labs --json
 
-x-skills migrate next-best-practices --target codex --project
-x-skills unlink opentui-react --target agents --global
-x-skills unlink supergoal --target claude --global --delete-unmanaged
+x-skills link svelte-coder --at project:codex
+x-skills link typescript-expert --at global:codex
+x-skills link svelte-coder typescript-expert --at project:codex
+
+x-skills migrate next-best-practices --at project:codex
+x-skills unlink opentui-react --at global:agents
+x-skills unlink supergoal --at global:claude --delete-unmanaged
+
+x-skills add owner/repo@skill
+x-skills add owner/repo@skill --no-link -y
+x-skills add owner/repo --all --at .Ag --at ~Cl
+x-skills add owner/repo skill-name --at .Cd -y
 
 x-skills tui
 x-skills doctor
@@ -59,8 +69,8 @@ x-skills doctor --fix -y
 ```
 
 `x-skills list` answers "what am I currently working with?" It shows active
-skills from the current project and global roots across `agents`, `claude`, and
-`codex`, grouped by scope and target. Each active skill is marked:
+skills from the current project and global managed roots, grouped by scope and
+target. Each active skill is marked:
 
 - `managed`: symlinked to the same-named repo skill in `~/.x-skills/skills`;
 - `unmanaged`: a real skill directory or symlink outside the repo;
@@ -74,7 +84,7 @@ directory without `SKILL.md`.
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
 
-`link`, `migrate`, `unlink`, and `repo remove` accept multiple skill names and
+`add`, `link`, `migrate`, and `unlink` accept multiple skill names and
 print a summary for batch runs. Batch operations run in order and do not roll
 back earlier successful changes if a later item fails.
 
@@ -101,8 +111,33 @@ Default global active roots:
 - `~/.claude/skills`
 - `~/.codex/skills`
 
-Use `--target agents`, `--target claude`, or `--target codex` to narrow active
-commands. Use `--project` or `--global` to select a scope when needed.
+Use repeatable `--at` selectors to narrow active commands. Selectors can be
+canonical locations such as `project:agents` or `global:codex`, root labels such
+as `.Ag` or `~Cl`, or configured custom labels such as `.Oc`. Ambiguous labels
+fail with guidance to use the canonical `scope:target` form.
+
+Custom managed roots live in `~/.x-skills/config.yaml`:
+
+```yaml
+version: 1
+active_roots:
+  - scope: global
+    target: hermes
+    path: ~/.config/hermes/skills
+    label: ~Hm
+  - scope: global
+    target: claude
+    enabled: false
+```
+
+Config entries add or override roots by `scope` and `target`. `enabled: false`
+disables a root and does not require `path`. Relative project paths are resolved
+from the current project root; relative global paths and `~/` paths are resolved
+from the home directory. Target ids must match `^[a-z][a-z0-9-]*$`.
+
+Use `x-skills list-roots` to inspect enabled managed roots and discover
+available `--at` selectors. Use `x-skills list-roots --json` for
+agent-readable root discovery.
 
 ## Prompts
 
@@ -119,8 +154,8 @@ Global prompt flags:
 - `-n`, `--no`: answer no to yes/no confirmations;
 - `--no-input`: never prompt.
 
-`-y` and `-n` do not choose among ambiguous locations. Use explicit flags such as
-`--target codex --project` or answer the interactive selection prompt.
+`-y` and `-n` do not choose among ambiguous locations. Use explicit selectors
+such as `--at project:codex` or answer the interactive selection prompt.
 
 For unmanaged active directories, `unlink` asks whether to migrate first, remove
 the active directory without migration, or cancel. For automation, use
@@ -134,7 +169,8 @@ sessions. The TUI has Active, Repo, Doctor, and Install pages: press `A` for
 Active, `R` for Repo, `D` for Doctor, and `I` for Install. Refresh is `ctrl+r`.
 
 Use Install to search `skills.sh`, preview remote `SKILL.md`, archive a skill,
-or install and link it into the current project. Manual generic Git installs
+or install and link it into the current project. Audit risk pills (safe/warn/risky)
+and source badges are shown alongside each result. Manual generic Git installs
 remain CLI-first through `x-skills add --git`.
 
 Use Active to inspect current project/global skills, preview `SKILL.md`, migrate

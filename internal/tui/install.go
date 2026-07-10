@@ -16,6 +16,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
+	"github.com/InkyQuill/x-skills/internal/roots"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -48,6 +49,8 @@ type installState struct {
 	checkouts            *remote.CheckoutCache
 	testCloneURL         string
 	pendingUse           *pendingInstallUseIntent
+	pendingArchiveBatch  *installArchiveBatchContinuation
+	pendingUseBatch      *installUseBatchContinuation
 }
 
 type installUseGeneration struct {
@@ -88,6 +91,7 @@ type installArchiveMsg struct {
 	name         string
 	identity     installArchiveIdentity
 	archiveState string
+	batch        *installArchiveBatchResult
 	err          error
 }
 
@@ -104,6 +108,7 @@ type installUseMsg struct {
 	identity     installArchiveIdentity
 	archiveState string
 	destinations []installDestination
+	batch        *installUseBatchResult
 	stale        bool
 	err          error
 }
@@ -115,9 +120,54 @@ type installArchiveIdentity struct {
 	path  string
 }
 
+type installArchiveBatchResult struct {
+	total    int
+	success  []string
+	failures []string
+	next     *installArchiveBatchNext
+}
+
+type installArchiveBatchNext struct {
+	row       installResultView
+	action    string
+	remaining []installResultView
+}
+
+type installUseBatchResult struct {
+	total    int
+	success  []string
+	failures []string
+	next     *installUseBatchNext
+}
+
+type installUseBatchNext struct {
+	row       installResultView
+	remaining []installResultView
+}
+
 type pendingInstallUseIntent struct {
 	row         installResultView
 	updateToken int
+}
+
+type installArchiveBatchContinuation struct {
+	identity    installArchiveIdentity
+	updateToken int
+	total       int
+	remaining   []installResultView
+	success     []string
+	failures    []string
+}
+
+type installUseBatchContinuation struct {
+	identity     installArchiveIdentity
+	row          installResultView
+	updateToken  int
+	total        int
+	remaining    []installResultView
+	destinations []installDestination
+	success      []string
+	failures     []string
 }
 
 type installResultView struct {
@@ -180,6 +230,7 @@ func (m Model) runInstallSearch() tea.Cmd {
 func (m *Model) startInstallSearch() tea.Cmd {
 	m.install.searchToken++
 	m.install.previewToken++
+	clear(m.selected[ViewInstall])
 	if len([]rune(strings.TrimSpace(m.install.Query))) < 2 {
 		m.install.Searching = false
 		m.install.Message = "type at least 2 characters"
@@ -240,6 +291,31 @@ func (m Model) selectedInstallResult() (installResultView, bool) {
 	return m.install.Results[m.cursor], true
 }
 
+func (m Model) selectedInstallRows() []installResultView {
+	selected := m.selected[ViewInstall]
+	if len(selected) == 0 {
+		return nil
+	}
+	rows := make([]installResultView, 0, len(selected))
+	for _, row := range m.install.Results {
+		if selected[installID(row.Result)] {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+func (m Model) installActionRows() []installResultView {
+	if rows := m.selectedInstallRows(); len(rows) > 0 {
+		return rows
+	}
+	row, ok := m.selectedInstallResult()
+	if !ok {
+		return nil
+	}
+	return []installResultView{row}
+}
+
 func (m *Model) previewInstallResult() tea.Cmd {
 	row, ok := m.selectedInstallResult()
 	if !ok {
@@ -271,8 +347,8 @@ func (m *Model) previewInstallResult() tea.Cmd {
 }
 
 func (m *Model) archiveInstallResult() tea.Cmd {
-	row, ok := m.selectedInstallResult()
-	if !ok {
+	rows := m.installActionRows()
+	if len(rows) == 0 {
 		return nil
 	}
 	if m.install.useInFlight || m.install.archiveInFlight {
@@ -280,6 +356,13 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 		m.install.Message = m.status
 		return nil
 	}
+	if len(rows) == 1 {
+		return m.archiveInstallSingleResult(rows[0])
+	}
+	return m.archiveInstallBatch(rows)
+}
+
+func (m *Model) archiveInstallSingleResult(row installResultView) tea.Cmd {
 	if row.ArchiveState == remote.ArchiveStateNameConflict {
 		m.openInstallNameConflictModal(row)
 		return nil
@@ -294,6 +377,125 @@ func (m *Model) archiveInstallResult() tea.Cmd {
 	m.install.archiveInFlight = true
 	m.install.archiveInFlightToken = m.install.archiveToken
 	return cmd
+}
+
+func (m *Model) archiveInstallBatch(rows []installResultView) tea.Cmd {
+	actionRows := rows
+	var next *installArchiveBatchNext
+	for i, row := range rows {
+		switch row.ArchiveState {
+		case remote.ArchiveStateNameConflict:
+			actionRows = rows[:i]
+			next = &installArchiveBatchNext{
+				row:       row,
+				action:    remote.ArchiveStateNameConflict,
+				remaining: append([]installResultView(nil), rows[i+1:]...),
+			}
+		case remote.ArchiveStateUpdateAvailable:
+			actionRows = rows[:i]
+			next = &installArchiveBatchNext{
+				row:       row,
+				action:    remote.ArchiveStateUpdateAvailable,
+				remaining: append([]installResultView(nil), rows[i+1:]...),
+			}
+		}
+		if next != nil {
+			break
+		}
+	}
+	if len(actionRows) == 0 {
+		m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+			identity:  installArchiveIdentityFromResult(next.row.Result),
+			total:     len(rows),
+			remaining: append([]installResultView(nil), next.remaining...),
+		}
+		return m.openInstallArchiveBatchNext(next)
+	}
+	cmd := m.archiveInstallRows(actionRows, next, len(rows))
+	if cmd == nil {
+		return nil
+	}
+	m.install.archiveInFlight = true
+	m.install.archiveInFlightToken = m.install.archiveToken
+	m.status = fmt.Sprintf("archiving %d skills...", len(actionRows))
+	m.install.Message = m.status
+	return cmd
+}
+
+func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiveBatchNext, total int) tea.Cmd {
+	commands := make([]tea.Cmd, 0, len(rows))
+	for _, row := range rows {
+		cmd := m.archiveInstallRow(row)
+		if cmd == nil {
+			continue
+		}
+		commands = append(commands, cmd)
+	}
+	if len(commands) == 0 {
+		return nil
+	}
+	token := m.install.archiveToken
+	return func() tea.Msg {
+		result := &installArchiveBatchResult{total: total, next: next}
+		for i, cmd := range commands {
+			msg := cmd().(installArchiveMsg)
+			if msg.err != nil {
+				switch msg.archiveState {
+				case remote.ArchiveStateNameConflict:
+					result.next = &installArchiveBatchNext{
+						row:       rows[i],
+						action:    remote.ArchiveStateNameConflict,
+						remaining: append(append([]installResultView(nil), rows[i+1:]...), installArchiveBatchNextRows(next)...),
+					}
+					return installArchiveMsg{token: token, batch: result}
+				case remote.ArchiveStateUpdateAvailable:
+					result.next = &installArchiveBatchNext{
+						row:       rows[i],
+						action:    remote.ArchiveStateUpdateAvailable,
+						remaining: append(append([]installResultView(nil), rows[i+1:]...), installArchiveBatchNextRows(next)...),
+					}
+					return installArchiveMsg{token: token, batch: result}
+				default:
+					result.failures = append(result.failures, rows[i].Result.Name+": "+msg.err.Error())
+					continue
+				}
+			}
+			result.success = append(result.success, msg.name)
+		}
+		return installArchiveMsg{token: token, batch: result}
+	}
+}
+
+func (m *Model) openInstallArchiveBatchNext(next *installArchiveBatchNext) tea.Cmd {
+	if next == nil {
+		return nil
+	}
+	switch next.action {
+	case remote.ArchiveStateNameConflict:
+		m.openInstallNameConflictModal(next.row)
+		return nil
+	case remote.ArchiveStateUpdateAvailable:
+		cmd := m.openInstallUpdateDiff(next.row)
+		if cmd != nil {
+			identity := installArchiveIdentityFromResult(next.row.Result)
+			if m.pendingInstallArchiveBatchMatches(identity) {
+				m.install.pendingArchiveBatch.updateToken = m.install.previewToken
+			}
+		}
+		return cmd
+	default:
+		return nil
+	}
+}
+
+func installArchiveBatchNextRows(next *installArchiveBatchNext) []installResultView {
+	if next == nil {
+		return nil
+	}
+	rows := make([]installResultView, 0, 1+len(next.remaining))
+	rows = append(rows, next.row)
+	rows = append(rows, next.remaining...)
+	return rows
 }
 
 func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
@@ -469,6 +671,8 @@ func (m *Model) applyInstallNameConflictChoice(row installResultView, choice int
 		m.status = "cancelled install " + row.Result.Name
 		m.install.Message = m.status
 		m.install.pendingUse = nil
+		m.install.pendingUseBatch = nil
+		m.install.pendingArchiveBatch = nil
 	}
 	return nil
 }
@@ -575,19 +779,28 @@ func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
 	}
 }
 
-func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) {
+func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) tea.Cmd {
 	if msg.token != m.install.previewToken || m.view != ViewInstall {
 		m.clearPendingInstallUseForUpdateDiff(msg.row, msg.token)
-		return
+		return nil
 	}
 	if msg.err != nil {
+		identity := installArchiveIdentityFromResult(msg.row.Result)
+		if isMissingSkillInRepoError(msg.err) {
+			if m.pendingInstallArchiveBatchUpdateMatches(identity, msg.token) {
+				return m.continueInstallArchiveBatchAfterResolved(identity, msg.row.Result.Name, msg.err)
+			}
+			if m.pendingInstallUseBatchUpdateMatches(identity, msg.token) {
+				return m.continueInstallUseBatchAfterArchiveResolution(identity, msg.row.Result.Name, msg.err)
+			}
+		}
 		m.clearPendingInstallUseForUpdateDiff(msg.row, msg.token)
 		if m.showMissingSkillInRepoModal(msg.err) {
-			return
+			return nil
 		}
 		m.status = msg.err.Error()
 		m.install.Message = m.status
-		return
+		return nil
 	}
 	row := msg.row
 	m.modal = newConflictDiffModalWithModelCommandApply(row.Result.Name, msg.diff, "Incoming remote", func(current *Model, chosen string) tea.Cmd {
@@ -599,16 +812,28 @@ func (m *Model) applyInstallUpdateDiffResult(msg installUpdateDiffMsg) {
 			row.ArchiveState = remote.ArchiveStateArchived
 			current.install.pendingUse = nil
 			current.install.bumpUseToken()
-			current.modal = newInstallDestinationModalUsingExistingArchive(row)
+			current.modal = newInstallDestinationModalUsingExistingArchive(current.cfg, row)
 			current.status = "kept archive " + row.Result.Name + "; choose destinations"
 			current.install.Message = current.status
 			return nil
+		}
+		identity := installArchiveIdentityFromResult(row.Result)
+		if current.pendingInstallUseBatchUpdateMatches(identity, msg.token) {
+			current.status = "kept archive " + row.Result.Name + "; continuing install"
+			current.install.Message = current.status
+			return current.continueInstallUseBatchAfterArchiveResolution(identity, row.Result.Name, nil)
+		}
+		if current.pendingInstallArchiveBatchUpdateMatches(identity, msg.token) {
+			current.status = "kept archive " + row.Result.Name + "; continuing archive"
+			current.install.Message = current.status
+			return current.continueInstallArchiveBatchAfterResolved(identity, row.Result.Name, nil)
 		}
 		current.status = "kept archive " + row.Result.Name
 		current.install.Message = current.status
 		current.install.pendingUse = nil
 		return nil
 	})
+	return nil
 }
 
 func (m *Model) applyInstallArchiveWithConflict(row installResultView, archiveName, conflict string) tea.Cmd {
@@ -715,6 +940,135 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	}
 }
 
+func (m *Model) installAndUseRows(rows []installResultView, destinations []installDestination) tea.Cmd {
+	return m.installAndUseRowsWithProgress(rows, destinations, nil, false)
+}
+
+func (m *Model) installAndUseRowsWithProgress(
+	rows []installResultView,
+	destinations []installDestination,
+	progress *installUseBatchResult,
+	useExistingFirstArchive bool,
+) tea.Cmd {
+	if len(rows) == 0 {
+		return nil
+	}
+	if len(rows) == 1 && progress == nil && !useExistingFirstArchive {
+		return m.installAndUse(rows[0], destinations, false)
+	}
+	if len(destinations) == 0 {
+		m.status = "select at least one destination"
+		m.install.Message = m.status
+		return nil
+	}
+	if m.install.useInFlight || m.install.archiveInFlight {
+		m.status = "install already running"
+		m.install.Message = m.status
+		return nil
+	}
+	for _, row := range rows {
+		if err := preflightInstallUseDestinations(m.cfg, row.Result.Name, destinations); err != nil {
+			m.status = err.Error()
+			m.install.Message = m.status
+			return nil
+		}
+	}
+	token := m.install.bumpUseToken()
+	archiveCommands := make([]tea.Cmd, 0, len(rows))
+	for i, row := range rows {
+		if i == 0 && useExistingFirstArchive {
+			archiveCommands = append(archiveCommands, nil)
+			continue
+		}
+		cmd := m.archiveInstallRow(row)
+		if cmd == nil {
+			return nil
+		}
+		archiveCommands = append(archiveCommands, cmd)
+	}
+	m.install.useInFlight = true
+	m.install.useInFlightToken = token
+	cfg := m.cfg
+	useGeneration := m.install.ensureUseGeneration()
+	return func() tea.Msg {
+		result := &installUseBatchResult{total: len(rows)}
+		if progress != nil {
+			result.total = progress.total
+			result.success = append(result.success, progress.success...)
+			result.failures = append(result.failures, progress.failures...)
+		}
+		createdPaths := make([]string, 0, len(rows)*len(destinations))
+		for i, row := range rows {
+			if !useGeneration.isCurrent(token) {
+				if err := rollbackInstallUseLinks(createdPaths); err != nil {
+					return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+				}
+				return installUseMsg{token: token, destinations: destinations, stale: true}
+			}
+			if archiveCommands[i] != nil {
+				archiveMsg := archiveCommands[i]().(installArchiveMsg)
+				if archiveMsg.err != nil {
+					switch archiveMsg.archiveState {
+					case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
+						result.next = &installUseBatchNext{
+							row:       row,
+							remaining: append([]installResultView(nil), rows[i+1:]...),
+						}
+						return installUseMsg{
+							token:        token,
+							name:         row.Result.Name,
+							row:          row,
+							identity:     archiveMsg.identity,
+							archiveState: archiveMsg.archiveState,
+							destinations: destinations,
+							batch:        result,
+							err:          archiveMsg.err,
+						}
+					default:
+						result.failures = append(result.failures, row.Result.Name+": "+archiveMsg.err.Error())
+						continue
+					}
+				}
+			}
+			rowFailed := false
+			rowCreatedPaths := make([]string, 0, len(destinations))
+			for _, dest := range destinations {
+				if !useGeneration.isCurrent(token) {
+					rollbackPaths := append(append([]string(nil), createdPaths...), rowCreatedPaths...)
+					if err := rollbackInstallUseLinks(rollbackPaths); err != nil {
+						return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+					}
+					return installUseMsg{token: token, destinations: destinations, stale: true}
+				}
+				linkResult, err := installUseLink(cfg, actions.LinkRequest{Name: row.Result.Name, Scope: dest.Scope, Target: dest.Target})
+				if err != nil {
+					if rollbackErr := rollbackInstallUseLinks(rowCreatedPaths); rollbackErr != nil {
+						err = errors.Join(err, fmt.Errorf("rollback partial install-use links: %w", rollbackErr))
+					}
+					result.failures = append(result.failures, row.Result.Name+": "+err.Error())
+					rowFailed = true
+					break
+				}
+				if linkResult.Path != "" {
+					rowCreatedPaths = append(rowCreatedPaths, linkResult.Path)
+				}
+				if !useGeneration.isCurrent(token) {
+					rollbackPaths := append(append([]string(nil), createdPaths...), rowCreatedPaths...)
+					if err := rollbackInstallUseLinks(rollbackPaths); err != nil {
+						return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+					}
+					return installUseMsg{token: token, destinations: destinations, stale: true}
+				}
+			}
+			if !rowFailed {
+				createdPaths = append(createdPaths, rowCreatedPaths...)
+				result.success = append(result.success, row.Result.Name)
+			}
+		}
+		return installUseMsg{token: token, destinations: destinations, batch: result}
+	}
+}
+
 func rollbackInstallUseLinks(paths []string) error {
 	var errs []error
 	for i := len(paths) - 1; i >= 0; i-- {
@@ -769,23 +1123,59 @@ type installDestinationModal struct {
 	useExistingArchive bool
 }
 
-func newInstallDestinationModal(row installResultView) modal {
-	return newInstallDestinationModalWithArchiveMode(row, false)
+func newInstallDestinationModal(cfg config.Config, row installResultView) modal {
+	return newInstallDestinationModalWithArchiveMode(cfg, row, false)
 }
 
-func newInstallDestinationModalUsingExistingArchive(row installResultView) modal {
-	return newInstallDestinationModalWithArchiveMode(row, true)
+func newInstallDestinationModalUsingExistingArchive(cfg config.Config, row installResultView) modal {
+	return newInstallDestinationModalWithArchiveMode(cfg, row, true)
 }
 
-func newInstallDestinationModalWithArchiveMode(row installResultView, useExistingArchive bool) modal {
-	return installDestinationModal{name: row.Result.Name, row: row, useExistingArchive: useExistingArchive, destinations: []installDestination{
-		{Scope: config.ScopeProject, Target: config.TargetAgents, Label: ".Ag", Checked: true},
-		{Scope: config.ScopeProject, Target: config.TargetClaude, Label: ".Cl"},
-		{Scope: config.ScopeProject, Target: config.TargetCodex, Label: ".Cd"},
-		{Scope: config.ScopeGlobal, Target: config.TargetAgents, Label: "~Ag"},
-		{Scope: config.ScopeGlobal, Target: config.TargetClaude, Label: "~Cl"},
-		{Scope: config.ScopeGlobal, Target: config.TargetCodex, Label: "~Cd"},
-	}}
+func newInstallDestinationModalWithArchiveMode(cfg config.Config, row installResultView, useExistingArchive bool) modal {
+	return installDestinationModal{
+		name:               row.Result.Name,
+		row:                row,
+		useExistingArchive: useExistingArchive,
+		destinations:       installDestinations(cfg),
+	}
+}
+
+func installDestinations(cfg config.Config) []installDestination {
+	activeRoots := roots.ActiveRoots(cfg, roots.Filter{})
+	destinations := make([]installDestination, 0, len(activeRoots))
+	defaultIndex := defaultInstallDestinationIndex(activeRoots)
+	for i, root := range activeRoots {
+		destinations = append(destinations, installDestination{
+			Scope:   root.Scope,
+			Target:  root.Target,
+			Label:   rootLabel(root),
+			Checked: i == defaultIndex,
+		})
+	}
+	return destinations
+}
+
+func defaultInstallDestinationIndex(activeRoots []roots.ActiveRoot) int {
+	firstProject := -1
+	firstAvailable := -1
+	for i, root := range activeRoots {
+		if firstAvailable == -1 {
+			firstAvailable = i
+		}
+		if root.Scope != config.ScopeProject {
+			continue
+		}
+		if firstProject == -1 {
+			firstProject = i
+		}
+		if root.Target == config.TargetAgents {
+			return i
+		}
+	}
+	if firstProject != -1 {
+		return firstProject
+	}
+	return firstAvailable
 }
 
 func (m *Model) openInstallDestinationModal(row installResultView) tea.Cmd {
@@ -805,7 +1195,24 @@ func (m *Model) openInstallDestinationModal(row installResultView) tea.Cmd {
 		return cmd
 	}
 	m.install.bumpUseToken()
-	m.modal = newInstallDestinationModal(row)
+	m.modal = newInstallDestinationModal(m.cfg, row)
+	return nil
+}
+
+func (m *Model) openInstallDestinationModalForRows(rows []installResultView) tea.Cmd {
+	if len(rows) == 0 {
+		return nil
+	}
+	if len(rows) == 1 {
+		return m.openInstallDestinationModal(rows[0])
+	}
+	if m.install.useInFlight || m.install.archiveInFlight {
+		m.status = "install already running"
+		m.install.Message = m.status
+		return nil
+	}
+	m.install.bumpUseToken()
+	m.modal = newInstallBatchDestinationModal(m.cfg, rows)
 	return nil
 }
 
@@ -814,7 +1221,7 @@ func (d installDestinationModal) Title() string {
 }
 
 func (d installDestinationModal) View(width, height int, m Model) string {
-	lines := []string{accentStyle.Render(d.Title()), ""}
+	body := make([]string, 0, len(d.destinations))
 	for i, dest := range d.destinations {
 		cursor := " "
 		if i == d.cursor {
@@ -828,34 +1235,33 @@ func (d installDestinationModal) View(width, height int, m Model) string {
 		if i == d.cursor {
 			row = selectedBg.Render(row)
 		}
-		lines = append(lines, row)
+		body = append(body, row)
 	}
-	lines = append(lines, "", mutedStyle.Render("up/down move  space toggle  enter install  esc cancel"))
-	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title:  d.Title(),
+		Body:   body,
+		Footer: []string{mutedStyle.Render("up/down move  space toggle  enter install  esc cancel")},
+		Focus:  d.cursor,
+	})
 }
 
 func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 {
+		d.cursor = clampModalIndex(d.cursor+delta, len(d.destinations))
+		m.modal = d
+		return false, nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		m.install.bumpUseToken()
 		return true, nil
-	case "up", "k":
-		if len(d.destinations) > 0 {
-			d.cursor = (d.cursor + len(d.destinations) - 1) % len(d.destinations)
-		}
-		m.modal = d
-	case "down", "j":
-		if len(d.destinations) > 0 {
-			d.cursor = (d.cursor + 1) % len(d.destinations)
-		}
-		m.modal = d
 	case " ":
 		if d.cursor >= 0 && d.cursor < len(d.destinations) {
 			d.destinations[d.cursor].Checked = !d.destinations[d.cursor].Checked
 		}
 		m.modal = d
 	case "enter":
-		destinations := d.checked()
+		destinations := checkedInstallDestinations(d.destinations)
 		if len(destinations) == 0 {
 			m.status = "select at least one destination"
 			m.install.Message = m.status
@@ -869,9 +1275,84 @@ func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd
 	return false, nil
 }
 
-func (d installDestinationModal) checked() []installDestination {
-	destinations := make([]installDestination, 0, len(d.destinations))
-	for _, dest := range d.destinations {
+type installBatchDestinationModal struct {
+	rows         []installResultView
+	destinations []installDestination
+	cursor       int
+}
+
+func newInstallBatchDestinationModal(cfg config.Config, rows []installResultView) modal {
+	copiedRows := append([]installResultView(nil), rows...)
+	return installBatchDestinationModal{rows: copiedRows, destinations: installDestinations(cfg)}
+}
+
+func (d installBatchDestinationModal) Title() string {
+	return fmt.Sprintf("Install and use %d skills", len(d.rows))
+}
+
+func (d installBatchDestinationModal) View(width, height int, m Model) string {
+	names := make([]string, 0, len(d.rows))
+	for _, row := range d.rows {
+		names = append(names, row.Result.Name)
+	}
+	body := []string{mutedStyle.Render(strings.Join(names, ", ")), ""}
+	focus := 2 + d.cursor
+	for i, dest := range d.destinations {
+		cursor := " "
+		if i == d.cursor {
+			cursor = m.symbols.Cursor
+		}
+		check := "[ ]"
+		if dest.Checked {
+			check = "[x]"
+		}
+		row := "  " + cursor + " " + check + " " + dest.Label
+		if i == d.cursor {
+			row = selectedBg.Render(row)
+		}
+		body = append(body, row)
+	}
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title:  d.Title(),
+		Body:   body,
+		Footer: []string{mutedStyle.Render("up/down move  space toggle  enter install  esc cancel")},
+		Focus:  focus,
+	})
+}
+
+func (d installBatchDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 {
+		d.cursor = clampModalIndex(d.cursor+delta, len(d.destinations))
+		m.modal = d
+		return false, nil
+	}
+	switch msg.String() {
+	case "esc", "q":
+		m.install.bumpUseToken()
+		return true, nil
+	case " ":
+		if d.cursor >= 0 && d.cursor < len(d.destinations) {
+			d.destinations[d.cursor].Checked = !d.destinations[d.cursor].Checked
+		}
+		m.modal = d
+	case "enter":
+		destinations := checkedInstallDestinations(d.destinations)
+		if len(destinations) == 0 {
+			m.status = "select at least one destination"
+			m.install.Message = m.status
+			m.modal = d
+			return false, nil
+		}
+		m.status = fmt.Sprintf("installing %d skills...", len(d.rows))
+		m.install.Message = m.status
+		return true, m.installAndUseRows(d.rows, destinations)
+	}
+	return false, nil
+}
+
+func checkedInstallDestinations(available []installDestination) []installDestination {
+	destinations := make([]installDestination, 0, len(available))
+	for _, dest := range available {
 		if dest.Checked {
 			destinations = append(destinations, dest)
 		}
@@ -904,6 +1385,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 	if msg.token != m.install.searchToken {
 		return nil
 	}
+	clear(m.selected[ViewInstall])
 	m.install.Searching = false
 	if msg.err != nil {
 		m.install.Results = nil
@@ -993,33 +1475,62 @@ func (m *Model) applyInstallArchiveStateResult(msg installArchiveStateMsg) {
 	}
 }
 
-func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
+func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) tea.Cmd {
 	if msg.token != 0 && msg.token == m.install.archiveInFlightToken {
 		m.install.archiveInFlight = false
 		m.install.archiveInFlightToken = 0
 	}
 	if msg.token == 0 || msg.token != m.install.archiveToken {
-		return
+		return nil
+	}
+	if msg.batch != nil {
+		return m.applyInstallArchiveBatchResult(msg.batch)
 	}
 	if msg.err != nil {
 		m.reload()
 		m.refreshInstallArchiveStates()
 		m.updateInstallArchiveState(msg.identity, msg.archiveState)
+		if isMissingSkillInRepoError(msg.err) {
+			if m.pendingInstallArchiveBatchMatches(msg.identity) {
+				return m.continueInstallArchiveBatchAfterResolved(msg.identity, msg.name, msg.err)
+			}
+			if m.pendingInstallUseBatchMatches(msg.identity) {
+				return m.continueInstallUseBatchAfterArchiveResolution(msg.identity, msg.name, msg.err)
+			}
+		}
 		if m.showMissingSkillInRepoModal(msg.err) {
 			if m.pendingInstallUseMatches(msg.identity) {
 				m.install.pendingUse = nil
 			}
-			return
+			if m.pendingInstallUseBatchMatches(msg.identity) {
+				m.install.pendingUseBatch = nil
+			}
+			if m.pendingInstallArchiveBatchMatches(msg.identity) {
+				m.install.pendingArchiveBatch = nil
+			}
+			return nil
 		}
 		m.status = msg.err.Error()
 		m.install.Message = m.status
 		if m.pendingInstallUseMatches(msg.identity) {
 			m.install.pendingUse = nil
 		}
-		return
+		if m.pendingInstallArchiveBatchMatches(msg.identity) {
+			return m.continueInstallArchiveBatchAfterResolved(msg.identity, msg.name, msg.err)
+		}
+		if m.pendingInstallUseBatchMatches(msg.identity) {
+			return m.continueInstallUseBatchAfterArchiveResolution(msg.identity, msg.name, msg.err)
+		}
+		return nil
 	}
 	m.reload()
 	m.refreshInstallArchiveStates()
+	if m.pendingInstallArchiveBatchMatches(msg.identity) {
+		return m.continueInstallArchiveBatchAfterResolved(msg.identity, msg.name, nil)
+	}
+	if m.pendingInstallUseBatchMatches(msg.identity) {
+		return m.continueInstallUseBatchAfterArchiveResolution(msg.identity, msg.name, nil)
+	}
 	if pending := m.install.pendingUse; pending != nil && installArchiveIdentityFromResult(pending.row.Result) == msg.identity {
 		row := pending.row
 		if msg.name != "" {
@@ -1028,17 +1539,154 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) {
 		row.ArchiveState = remote.ArchiveStateArchived
 		m.install.pendingUse = nil
 		m.install.bumpUseToken()
-		m.modal = newInstallDestinationModal(row)
+		m.modal = newInstallDestinationModal(m.cfg, row)
 		m.status = "archived " + msg.name + "; choose destinations"
 		m.install.Message = m.status
-		return
+		return nil
 	}
 	m.status = "archived " + msg.name
 	m.install.Message = m.status
+	return nil
+}
+
+func (m *Model) applyInstallArchiveBatchResult(result *installArchiveBatchResult) tea.Cmd {
+	m.reload()
+	m.refreshInstallArchiveStates()
+	if result.next != nil {
+		m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+			identity:  installArchiveIdentityFromResult(result.next.row.Result),
+			total:     result.total,
+			remaining: append([]installResultView(nil), result.next.remaining...),
+			success:   append([]string(nil), result.success...),
+			failures:  append([]string(nil), result.failures...),
+		}
+		m.install.archiveInFlight = false
+		m.install.archiveInFlightToken = 0
+		return m.openInstallArchiveBatchNext(result.next)
+	}
+	if len(result.failures) > 0 {
+		lines := make([]string, 0, len(result.success)+len(result.failures))
+		for _, name := range result.success {
+			lines = append(lines, "✓ archived "+name)
+		}
+		for _, failure := range result.failures {
+			lines = append(lines, "x "+failure)
+		}
+		m.modal = newResultModal("Archive Results", lines)
+		m.status = fmt.Sprintf("archived %d of %d skills", len(result.success), result.total)
+		m.install.Message = m.status
+		return nil
+	}
+	if len(result.success) > 0 {
+		m.status = fmt.Sprintf("archived %d skills", len(result.success))
+		m.install.Message = m.status
+	}
+	return nil
 }
 
 func (m Model) pendingInstallUseMatches(identity installArchiveIdentity) bool {
 	return m.install.pendingUse != nil && installArchiveIdentityFromResult(m.install.pendingUse.row.Result) == identity
+}
+
+func (m Model) pendingInstallArchiveBatchMatches(identity installArchiveIdentity) bool {
+	return m.install.pendingArchiveBatch != nil && m.install.pendingArchiveBatch.identity == identity
+}
+
+func (m Model) pendingInstallUseBatchMatches(identity installArchiveIdentity) bool {
+	return m.install.pendingUseBatch != nil && m.install.pendingUseBatch.identity == identity
+}
+
+func (m Model) pendingInstallArchiveBatchUpdateMatches(identity installArchiveIdentity, updateToken int) bool {
+	return m.install.pendingArchiveBatch != nil &&
+		m.install.pendingArchiveBatch.identity == identity &&
+		m.install.pendingArchiveBatch.updateToken == updateToken
+}
+
+func (m Model) pendingInstallUseBatchUpdateMatches(identity installArchiveIdentity, updateToken int) bool {
+	return m.install.pendingUseBatch != nil &&
+		m.install.pendingUseBatch.identity == identity &&
+		m.install.pendingUseBatch.updateToken == updateToken
+}
+
+func (m *Model) continueInstallArchiveBatchAfterResolved(identity installArchiveIdentity, name string, err error) tea.Cmd {
+	pending := m.install.pendingArchiveBatch
+	if pending == nil || pending.identity != identity {
+		return nil
+	}
+	m.install.pendingArchiveBatch = nil
+	result := &installArchiveBatchResult{
+		total:    pending.total,
+		success:  append([]string(nil), pending.success...),
+		failures: append([]string(nil), pending.failures...),
+	}
+	if err != nil {
+		failure := err.Error()
+		if name == "" {
+			name = pending.identity.name
+		}
+		if name != "" {
+			failure = name + ": " + failure
+		}
+		result.failures = append(result.failures, failure)
+	} else if name != "" {
+		result.success = append(result.success, name)
+	}
+	if len(pending.remaining) == 0 {
+		return m.applyInstallArchiveBatchResult(result)
+	}
+	cmd := m.archiveInstallRows(pending.remaining, nil, pending.total)
+	if cmd == nil {
+		return m.applyInstallArchiveBatchResult(result)
+	}
+	m.install.archiveInFlight = true
+	m.install.archiveInFlightToken = m.install.archiveToken
+	m.status = fmt.Sprintf("archiving %d skills...", len(pending.remaining))
+	m.install.Message = m.status
+	return func() tea.Msg {
+		msg := cmd().(installArchiveMsg)
+		if msg.batch == nil {
+			return msg
+		}
+		msg.batch.success = append(result.success, msg.batch.success...)
+		msg.batch.failures = append(result.failures, msg.batch.failures...)
+		return msg
+	}
+}
+
+func (m *Model) continueInstallUseBatchAfterArchiveResolution(identity installArchiveIdentity, archiveName string, err error) tea.Cmd {
+	pending := m.install.pendingUseBatch
+	if pending == nil || pending.identity != identity {
+		return nil
+	}
+	m.install.pendingUseBatch = nil
+	row := pending.row
+	result := &installUseBatchResult{
+		total:    pending.total,
+		success:  append([]string(nil), pending.success...),
+		failures: append([]string(nil), pending.failures...),
+	}
+	if err != nil {
+		if archiveName == "" {
+			archiveName = row.Result.Name
+		}
+		result.failures = append(result.failures, archiveName+": "+err.Error())
+		if len(pending.remaining) == 0 {
+			return m.applyInstallUseResult(installUseMsg{
+				token:        m.install.useToken,
+				destinations: pending.destinations,
+				batch:        result,
+			})
+		}
+		return m.installAndUseRowsWithProgress(pending.remaining, pending.destinations, result, false)
+	}
+	if archiveName != "" {
+		row.Result.Name = archiveName
+	}
+	row.ArchiveState = remote.ArchiveStateArchived
+	rows := make([]installResultView, 0, 1+len(pending.remaining))
+	rows = append(rows, row)
+	rows = append(rows, pending.remaining...)
+	return m.installAndUseRowsWithProgress(rows, pending.destinations, result, true)
 }
 
 func (m *Model) clearPendingInstallUseForUpdateDiff(row installResultView, token int) {
@@ -1046,13 +1694,21 @@ func (m *Model) clearPendingInstallUseForUpdateDiff(row installResultView, token
 	if m.pendingInstallUseMatches(identity) && m.install.pendingUse.updateToken == token {
 		m.install.pendingUse = nil
 	}
+	if m.pendingInstallUseBatchUpdateMatches(identity, token) {
+		m.install.pendingUseBatch = nil
+	}
+	if m.pendingInstallArchiveBatchUpdateMatches(identity, token) {
+		m.install.pendingArchiveBatch = nil
+	}
 }
 
 func (m *Model) clearPendingInstallUseOnModalClose(closed modal) {
-	if m.install.pendingUse == nil || !installModalClosesPendingUse(closed) {
+	if !installModalClosesPendingUse(closed) {
 		return
 	}
 	m.install.pendingUse = nil
+	m.install.pendingUseBatch = nil
+	m.install.pendingArchiveBatch = nil
 }
 
 func installModalClosesPendingUse(closed modal) bool {
@@ -1079,6 +1735,41 @@ func (m *Model) applyInstallUseResult(msg installUseMsg) tea.Cmd {
 	if msg.stale {
 		return nil
 	}
+	if msg.batch != nil {
+		m.reload()
+		m.refreshInstallArchiveStates()
+		m.modal = nil
+		if msg.batch.next != nil {
+			m.install.pendingUseBatch = &installUseBatchContinuation{
+				identity:     installArchiveIdentityFromResult(msg.batch.next.row.Result),
+				row:          msg.batch.next.row,
+				total:        msg.batch.total,
+				remaining:    append([]installResultView(nil), msg.batch.next.remaining...),
+				destinations: append([]installDestination(nil), msg.destinations...),
+				success:      append([]string(nil), msg.batch.success...),
+				failures:     append([]string(nil), msg.batch.failures...),
+			}
+			m.install.useInFlight = false
+			m.install.useInFlightToken = 0
+			return m.openInstallUseArchiveResolution(msg)
+		}
+		if len(msg.batch.failures) > 0 {
+			lines := make([]string, 0, len(msg.batch.success)+len(msg.batch.failures))
+			for _, name := range msg.batch.success {
+				lines = append(lines, "✓ installed "+name)
+			}
+			for _, failure := range msg.batch.failures {
+				lines = append(lines, "x "+failure)
+			}
+			m.modal = newResultModal("Install Results", lines)
+			m.status = fmt.Sprintf("installed %d of %d skills", len(msg.batch.success), msg.batch.total)
+			m.install.Message = m.status
+			return nil
+		}
+		m.status = fmt.Sprintf("installed %d skills to %s", len(msg.batch.success), installDestinationLabels(msg.destinations))
+		m.install.Message = m.status
+		return nil
+	}
 	if msg.err != nil {
 		m.reload()
 		m.refreshInstallArchiveStates()
@@ -1088,6 +1779,9 @@ func (m *Model) applyInstallUseResult(msg installUseMsg) tea.Cmd {
 		}
 		m.status = msg.err.Error()
 		m.install.Message = m.status
+		if m.pendingInstallUseBatchMatches(msg.identity) {
+			return m.continueInstallUseBatchAfterArchiveResolution(msg.identity, msg.name, msg.err)
+		}
 		return m.openInstallUseArchiveResolution(msg)
 	}
 	m.reload()
@@ -1123,6 +1817,11 @@ func (m *Model) showMissingSkillInRepoModal(err error) bool {
 	return true
 }
 
+func isMissingSkillInRepoError(err error) bool {
+	var missing *remote.MissingSkillError
+	return errors.As(err, &missing)
+}
+
 func (m *Model) openInstallUseArchiveResolution(msg installUseMsg) tea.Cmd {
 	switch msg.archiveState {
 	case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
@@ -1136,12 +1835,21 @@ func (m *Model) openInstallUseArchiveResolution(msg installUseMsg) tea.Cmd {
 	row.ArchiveState = msg.archiveState
 	switch msg.archiveState {
 	case remote.ArchiveStateNameConflict:
-		m.install.pendingUse = &pendingInstallUseIntent{row: row}
+		if !m.pendingInstallUseBatchMatches(installArchiveIdentityFromResult(row.Result)) {
+			m.install.pendingUse = &pendingInstallUseIntent{row: row}
+		}
 		m.openInstallNameConflictModal(row)
 		return nil
 	case remote.ArchiveStateUpdateAvailable:
 		cmd := m.openInstallUpdateDiff(row)
-		m.install.pendingUse = &pendingInstallUseIntent{row: row, updateToken: m.install.previewToken}
+		identity := installArchiveIdentityFromResult(row.Result)
+		if m.pendingInstallUseBatchMatches(identity) {
+			if cmd != nil {
+				m.install.pendingUseBatch.updateToken = m.install.previewToken
+			}
+		} else {
+			m.install.pendingUse = &pendingInstallUseIntent{row: row, updateToken: m.install.previewToken}
+		}
 		return cmd
 	default:
 		return nil

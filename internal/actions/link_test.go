@@ -31,6 +31,39 @@ func TestLinkRepoSkillCreatesSymlink(t *testing.T) {
 	}
 }
 
+func TestLinkRepoSkillUsesConfiguredCustomRoot(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	configPath := filepath.Join(home, ".x-skills", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("active_roots:\n  - scope: project\n    target: opencode\n    path: .opencode/skills\n    label: .Oc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := makeSkill(t, cfg.ArchiveSkillsRoot(), "typescript-expert", "TS.")
+
+	result, err := Link(cfg, LinkRequest{Name: "typescript-expert", Scope: "project", Target: "opencode"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != filepath.Join(project, ".opencode", "skills", "typescript-expert") {
+		t.Fatalf("Path = %q", result.Path)
+	}
+	resolved, err := filepath.EvalSymlinks(result.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != source {
+		t.Fatalf("resolved = %q, want %q", resolved, source)
+	}
+}
+
 func TestLinkFailsWhenDestinationExists(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

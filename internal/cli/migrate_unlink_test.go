@@ -14,7 +14,7 @@ func TestMigrateWithYesFlag(t *testing.T) {
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "-y", "migrate", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "migrate", "local-only", "--at", "project:codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestMigrateWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testing.T) {
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "migrate", "local-only", "--at", "project:codex"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +59,8 @@ func TestMigrateFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
 	if !strings.Contains(err.Error(), `multiple active skills named "svelte-coder"`) {
 		t.Fatalf("error = %q, want multiple active skills", err)
 	}
-	if !strings.Contains(err.Error(), "x-skills migrate svelte-coder --target codex --project") ||
-		!strings.Contains(err.Error(), "x-skills migrate svelte-coder --target agents --global") {
+	if !strings.Contains(err.Error(), "x-skills migrate svelte-coder --at project:codex") ||
+		!strings.Contains(err.Error(), "x-skills migrate svelte-coder --at global:agents") {
 		t.Fatalf("error missing one-shot hints: %v", err)
 	}
 }
@@ -121,7 +121,7 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "local-only", "--project", "--target", "codex", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "local-only", "--at", "project:codex", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestUnlinkUnmanagedPromptsForArchiveOrDelete(t *testing.T) {
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex"}, strings.NewReader("1\n"), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--at", "project:codex"}, strings.NewReader("1\n"), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestUnlinkUnmanagedPromptCanDeleteWithoutArchive(t *testing.T) {
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex"}, strings.NewReader("2\n"), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--at", "project:codex"}, strings.NewReader("2\n"), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestUnlinkUnmanagedNoInputRequiresChoice(t *testing.T) {
 	project := t.TempDir()
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
-	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "unlink", "local-only", "--project", "--target", "codex"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "unlink", "local-only", "--at", "project:codex"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected unmanaged choice error")
 	}
@@ -260,8 +260,8 @@ func TestUnlinkFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
 	if !strings.Contains(err.Error(), `multiple active skills named "code-review"`) {
 		t.Fatalf("error = %q, want multiple active skills", err)
 	}
-	if !strings.Contains(err.Error(), "x-skills unlink code-review --target codex --project") ||
-		!strings.Contains(err.Error(), "x-skills unlink code-review --target agents --global") {
+	if !strings.Contains(err.Error(), "x-skills unlink code-review --at project:codex") ||
+		!strings.Contains(err.Error(), "x-skills unlink code-review --at global:agents") {
 		t.Fatalf("error missing one-shot hints: %v", err)
 	}
 }
@@ -292,7 +292,7 @@ func TestUnlinkGlobalWithYesDefaultsToGlobalMatchingRoots(t *testing.T) {
 	projectSkill := makeSkill(t, filepath.Join(project, ".agents", "skills"), "commit-context", "Project.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "--global", "commit-context", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "unlink", "commit-context", "--at", "global:agents", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestUnlinkDeleteUnmanagedWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testin
 	active := makeSkill(t, filepath.Join(project, ".codex", "skills"), "local-only", "Local.")
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--project", "--target", "codex", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "unlink", "local-only", "--at", "project:codex", "--delete-unmanaged"}, strings.NewReader(""), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}

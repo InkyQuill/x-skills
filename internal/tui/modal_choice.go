@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
@@ -32,8 +30,9 @@ func (c choiceModal) Title() string {
 }
 
 func (c choiceModal) View(width, height int, m Model) string {
-	body := append([]string{accentStyle.Render(c.title), ""}, c.lines...)
+	body := append([]string{}, c.lines...)
 	body = append(body, "")
+	focus := len(body) + c.index
 	for i, choice := range c.choices {
 		prefix := "  "
 		if i == c.index {
@@ -45,30 +44,35 @@ func (c choiceModal) View(width, height int, m Model) string {
 		}
 		body = append(body, line)
 	}
-	body = append(body, "", mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-		{ASCII: "up/down", Unicode: "↑/↓", Label: "choose"},
-		{ASCII: "enter", Unicode: "↵", Label: "apply"},
-		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-		{ASCII: "q", Label: "close"},
-	})))
-	return modalStyle(width, height).Render(strings.Join(body, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: c.title,
+		Body:  body,
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "choose"},
+			{ASCII: "enter", Unicode: "↵", Label: "apply"},
+			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+			{ASCII: "q", Label: "close"},
+		}))},
+		Focus: focus,
+	})
 }
 
 func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if closeOnEscapeOrQuit(msg) {
 		return true, nil
 	}
+	if delta := modalMoveDelta(msg); delta != 0 {
+		c.index += delta
+		if c.index < 0 {
+			c.index = 0
+		}
+		if c.index >= len(c.choices) {
+			c.index = len(c.choices) - 1
+		}
+		m.modal = c
+		return false, nil
+	}
 	switch msg.String() {
-	case "up":
-		if c.index > 0 {
-			c.index--
-		}
-		m.modal = c
-	case "down":
-		if c.index+1 < len(c.choices) {
-			c.index++
-		}
-		m.modal = c
 	case "enter":
 		return false, c.apply(m, c.index)
 	}

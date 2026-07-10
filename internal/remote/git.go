@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -60,7 +61,13 @@ type MissingSkillError struct {
 
 func (e *MissingSkillError) Error() string {
 	if e.PreferredPath == "" {
+		if e.Name == "" {
+			return "skill not found in repo"
+		}
 		return fmt.Sprintf("skill %q not found in repo", e.Name)
+	}
+	if e.Name == "" {
+		return fmt.Sprintf("skill not found at %q in repo", e.PreferredPath)
 	}
 	return fmt.Sprintf("skill %q not found at %q in repo", e.Name, e.PreferredPath)
 }
@@ -144,6 +151,50 @@ func (c Checkout) FindSkill(name, preferredPath string) (FoundSkill, error) {
 	return c.FindSkillContext(context.Background(), name, preferredPath)
 }
 
+func (c Checkout) ListSkillsContext(ctx context.Context) ([]FoundSkill, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var found []FoundSkill
+	err := filepath.WalkDir(c.Path, func(path string, entry os.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if !skills.IsDir(path) {
+			return nil
+		}
+		rel, err := filepath.Rel(c.Path, path)
+		if err != nil {
+			return err
+		}
+		skill, err := c.foundAt(path, filepath.ToSlash(rel))
+		if err != nil {
+			return err
+		}
+		found = append(found, skill)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return filepath.SkipDir
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list skills: %w", err)
+	}
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].Info.Name != found[j].Info.Name {
+			return found[i].Info.Name < found[j].Info.Name
+		}
+		return found[i].Metadata.SkillPath < found[j].Metadata.SkillPath
+	})
+	return found, nil
+}
+
 func (c Checkout) FindSkillContext(ctx context.Context, name, preferredPath string) (FoundSkill, error) {
 	if err := ctx.Err(); err != nil {
 		return FoundSkill{}, err
@@ -152,20 +203,57 @@ func (c Checkout) FindSkillContext(ctx context.Context, name, preferredPath stri
 		skillDir, rel, err := c.resolvePreferredSkillPath(preferredPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return FoundSkill{}, &MissingSkillError{
+				missing := &MissingSkillError{
 					Name:          name,
 					PreferredPath: preferredPath,
 					RepoURL:       c.Source.CloneURL,
 					Err:           err,
 				}
+				return c.findSkillByRepoSearchOrErr(ctx, name, missing)
 			}
 			return FoundSkill{}, err
 		}
 		if err := ctx.Err(); err != nil {
 			return FoundSkill{}, err
 		}
-		return c.foundAt(skillDir, rel)
+		found, err := c.foundAt(skillDir, rel)
+		if err != nil {
+			return FoundSkill{}, err
+		}
+		if name != "" && found.Info.Name != name && filepath.Base(filepath.FromSlash(rel)) != name {
+			missing := &MissingSkillError{
+				Name:          name,
+				PreferredPath: preferredPath,
+				RepoURL:       c.Source.CloneURL,
+				Err: fmt.Errorf(
+					"found skill %q at %q",
+					found.Info.Name,
+					preferredPath,
+				),
+			}
+			return c.findSkillByRepoSearchOrErr(ctx, name, missing)
+		}
+		return found, nil
 	}
+	return c.findSkillByRepoSearch(ctx, name)
+}
+
+func (c Checkout) findSkillByRepoSearchOrErr(ctx context.Context, name string, fallbackErr error) (FoundSkill, error) {
+	if name == "" {
+		return FoundSkill{}, fallbackErr
+	}
+	found, err := c.findSkillByRepoSearch(ctx, name)
+	if err != nil {
+		var missing *MissingSkillError
+		if errors.As(err, &missing) {
+			return FoundSkill{}, fallbackErr
+		}
+		return FoundSkill{}, err
+	}
+	return found, nil
+}
+
+func (c Checkout) findSkillByRepoSearch(ctx context.Context, name string) (FoundSkill, error) {
 	var matches []string
 	err := filepath.WalkDir(c.Path, func(path string, entry os.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {

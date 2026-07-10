@@ -2,17 +2,123 @@ package remote
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
+type searchResponseTransport struct {
+	statusCode int
+	body       io.ReadCloser
+}
+
+func (t searchResponseTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	statusCode := t.statusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	return &http.Response{
+		StatusCode: statusCode,
+		Body:       t.body,
+		Header:     make(http.Header),
+	}, nil
+}
+
+type closeErrorBody struct {
+	io.Reader
+	err        error
+	closeCalls *int
+}
+
+func (b closeErrorBody) Close() error {
+	if b.closeCalls != nil {
+		*b.closeCalls = *b.closeCalls + 1
+	}
+	return b.err
+}
+
 func TestSearchRejectsShortQuery(t *testing.T) {
 	client := NewSearchClient("https://skills.sh/api/search", http.DefaultClient)
 	_, err := client.Search(t.Context(), SearchRequest{Query: "s", Limit: 50})
 	if err == nil {
 		t.Fatal("expected short query error")
+	}
+}
+
+func TestSearchReturnsResponseBodyCloseError(t *testing.T) {
+	closeErr := errors.New("close failed")
+	closeCalls := 0
+	client := NewSearchClient("https://skills.sh/api/search", &http.Client{
+		Transport: searchResponseTransport{body: closeErrorBody{
+			Reader:     strings.NewReader(`{"results":[{"name":"go"}]}`),
+			err:        closeErr,
+			closeCalls: &closeCalls,
+		}},
+	})
+
+	results, err := client.Search(t.Context(), SearchRequest{Query: "go"})
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("error = %v, want close error", err)
+	}
+	if !strings.Contains(err.Error(), "close search response") {
+		t.Fatalf("error = %q, want close context", err)
+	}
+	if len(results) != 1 || results[0].Name != "go" {
+		t.Fatalf("results = %#v, want decoded result", results)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("Close calls = %d, want 1", closeCalls)
+	}
+}
+
+func TestSearchJoinsPrimaryAndResponseBodyCloseErrors(t *testing.T) {
+	closeErr := errors.New("close failed")
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		want       string
+	}{
+		{
+			name:       "http status",
+			statusCode: http.StatusServiceUnavailable,
+			want:       "search skills: HTTP 503",
+		},
+		{
+			name:       "decode",
+			statusCode: http.StatusOK,
+			body:       "{",
+			want:       "decode search results",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			closeCalls := 0
+			client := NewSearchClient("https://skills.sh/api/search", &http.Client{
+				Transport: searchResponseTransport{
+					statusCode: tt.statusCode,
+					body: closeErrorBody{
+						Reader:     strings.NewReader(tt.body),
+						err:        closeErr,
+						closeCalls: &closeCalls,
+					},
+				},
+			})
+
+			_, err := client.Search(t.Context(), SearchRequest{Query: "go"})
+			if !errors.Is(err, closeErr) {
+				t.Fatalf("error = %v, want close error", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want primary error %q", err, tt.want)
+			}
+			if closeCalls != 1 {
+				t.Fatalf("Close calls = %d, want 1", closeCalls)
+			}
+		})
 	}
 }
 

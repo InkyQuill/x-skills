@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
@@ -39,14 +37,19 @@ func (c confirmModal) View(width, height int, m Model) string {
 	} else {
 		cancel = selectedBg.Render(cancel)
 	}
-	body := append([]string{accentStyle.Render(c.title), ""}, c.lines...)
-	body = append(body, "", apply+"   "+cancel, mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-		{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
-		{ASCII: "enter", Unicode: "↵", Label: "apply"},
-		{ASCII: "y/n", Label: "select"},
-		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-	})))
-	return modalStyle(width, height).Render(strings.Join(body, "\n"))
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: c.title,
+		Body:  c.lines,
+		Footer: []string{
+			apply + "   " + cancel,
+			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+				{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
+				{ASCII: "enter", Unicode: "↵", Label: "apply"},
+				{ASCII: "y/n", Label: "select"},
+				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
+			})),
+		},
+	})
 }
 
 func (c confirmModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {

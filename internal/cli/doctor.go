@@ -3,18 +3,18 @@ package cli
 import (
 	"fmt"
 	"io"
-	"slices"
+	"path/filepath"
+	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/spf13/cobra"
 )
 
 type doctorOptions struct {
-	project bool
-	global  bool
-	target  string
-	fix     bool
+	at  []string
+	fix bool
 }
 
 func newDoctorCommand(rootOptions *options) *cobra.Command {
@@ -24,17 +24,17 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 		Short: "Diagnose active skill root issues",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opts.validate(); err != nil {
+			cfg := rootOptions.config()
+			locations, err := resolveOptionalLocations(cfg, opts.at)
+			if err != nil {
 				return err
 			}
+			filter := doctorFilterForLocations(locations)
 			if opts.fix {
 				if !rootOptions.yes {
 					return fmt.Errorf("doctor fix requires confirmation; rerun with -y")
 				}
-				results, err := doctor.Fix(rootOptions.config(), doctor.FixOptions{
-					Yes:    rootOptions.yes,
-					Filter: opts.filter(),
-				})
+				results, err := fixDoctorLocations(cfg, filter, locations)
 				if err != nil && len(results) > 0 {
 					writeDoctorFixResults(cmd.OutOrStdout(), results)
 					return err
@@ -46,43 +46,56 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 				return nil
 			}
 
-			issues, err := doctor.Diagnose(rootOptions.config(), opts.filter())
+			issues, err := doctor.Diagnose(cfg, filter)
 			if err != nil {
 				return err
 			}
+			issues = filterDoctorIssuesByLocations(issues, locations)
 			writeDoctorIssues(cmd.OutOrStdout(), issues)
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&opts.project, "project", false, "check project active roots")
-	cmd.Flags().BoolVar(&opts.global, "global", false, "check global active roots")
-	cmd.Flags().StringVar(&opts.target, "target", "", "filter by target: agents, claude, or codex")
+	cmd.Flags().StringArrayVar(&opts.at, "at", nil, "managed root location; repeat for multiple locations")
 	cmd.Flags().BoolVar(&opts.fix, "fix", false, "apply safe fixes")
 	return cmd
 }
 
-func (o doctorOptions) validate() error {
-	if o.target == "" {
-		return nil
-	}
-	if !slices.Contains(config.Targets, o.target) {
-		return fmt.Errorf("unknown target %q", o.target)
-	}
-	return nil
-}
-
-func (o doctorOptions) filter() doctor.Filter {
-	var scope string
-	switch {
-	case o.project && !o.global:
-		scope = config.ScopeProject
-	case o.global && !o.project:
-		scope = config.ScopeGlobal
+func doctorFilterForLocations(locations []roots.ActiveRoot) doctor.Filter {
+	if len(locations) != 1 {
+		return doctor.Filter{}
 	}
 	return doctor.Filter{
-		Scope:  scope,
-		Target: o.target,
+		Scope:  locations[0].Scope,
+		Target: locations[0].Target,
 	}
+}
+
+func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roots.ActiveRoot) ([]doctor.FixResult, error) {
+	if len(locations) <= 1 {
+		return doctor.Fix(cfg, doctor.FixOptions{Yes: true, Filter: filter})
+	}
+	issues, err := doctor.Diagnose(cfg, filter)
+	if err != nil {
+		return nil, err
+	}
+	return doctor.FixIssues(filterDoctorIssuesByLocations(issues, locations))
+}
+
+func filterDoctorIssuesByLocations(issues []doctor.Issue, locations []roots.ActiveRoot) []doctor.Issue {
+	if len(locations) <= 1 {
+		return issues
+	}
+	allowed := pathPrefixSet(locations)
+	filtered := make([]doctor.Issue, 0, len(issues))
+	for _, issue := range issues {
+		for prefix := range allowed {
+			if issue.Path == prefix || strings.HasPrefix(issue.Path, prefix+string(filepath.Separator)) {
+				filtered = append(filtered, issue)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func writeDoctorIssues(out io.Writer, issues []doctor.Issue) {

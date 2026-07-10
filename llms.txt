@@ -37,7 +37,8 @@ internal/         application packages (cli, tui, repo, actions, symlinkcheck, .
 docs/adr/         architecture decision records (0001-0018)
 docs/backlog.md   planned work
 docs/superpowers/ plans and specs
-agent/skills/     bundled agent skills used by the project
+.agents/skills/   active project skill symlinks
+skills/           project-owned x-skills workflow skills
 src/x_skills/     historical, non-distributed Python prototype (reference only)
 CONTEXT.md        project terminology glossary
 ```

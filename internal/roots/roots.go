@@ -1,6 +1,8 @@
 package roots
 
 import (
+	"slices"
+
 	"github.com/InkyQuill/x-skills/internal/config"
 )
 
@@ -38,7 +40,7 @@ func ActiveRoots(cfg config.Config, filter Filter) []ActiveRoot {
 			Target:    managed.Target,
 			Path:      managed.Path,
 			Label:     managed.Label,
-			Consumers: managed.Consumers,
+			Consumers: slices.Clone(managed.Consumers),
 		})
 	}
 

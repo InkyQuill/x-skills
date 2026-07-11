@@ -41,6 +41,31 @@ func TestActiveRootsIncludesConsumers(t *testing.T) {
 	}
 }
 
+func TestActiveRootsReturnsIndependentConsumerSlices(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	configPath := filepath.Join(home, ".x-skills", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("active_roots:\n  - scope: project\n    target: agents\n    path: .agents/skills\n    consumers: [codex, pi]\n")
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := ActiveRoots(loaded, Filter{Scope: config.ScopeProject, Target: config.TargetAgents})
+	first[0].Consumers[0] = "invalid_id"
+
+	second := ActiveRoots(loaded, Filter{Scope: config.ScopeProject, Target: config.TargetAgents})
+	if want := []string{"codex", "pi"}; !slices.Equal(second[0].Consumers, want) {
+		t.Fatalf("Consumers = %v, want %v", second[0].Consumers, want)
+	}
+}
+
 func TestActiveRootsCanBeFilteredByScopeOnly(t *testing.T) {
 	cfg := config.Default("/project", "/home/inky")
 

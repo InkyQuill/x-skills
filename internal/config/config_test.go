@@ -256,6 +256,37 @@ func TestLoadGlobalConfigLeavesOmittedCustomConsumersUnknown(t *testing.T) {
 	t.Fatal("opencode root missing")
 }
 
+func TestManagedRootsReturnsIndependentConsumerSlices(t *testing.T) {
+	home := t.TempDir()
+	cfg := Default(t.TempDir(), home)
+	writeGlobalConfig(t, home, []byte("active_roots:\n  - scope: project\n    target: agents\n    path: .agents/skills\n    consumers: [codex, pi]\n  - scope: project\n    target: opencode\n    path: .opencode/skills\n"))
+
+	loaded, err := LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := loaded.ManagedRoots()
+	for i := range first {
+		if first[i].Scope == ScopeProject && first[i].Target == TargetAgents {
+			first[i].Consumers[0] = "invalid_id"
+		}
+	}
+
+	second := loaded.ManagedRoots()
+	for _, root := range second {
+		switch {
+		case root.Scope == ScopeProject && root.Target == TargetAgents:
+			if want := []string{"codex", "pi"}; !slices.Equal(root.Consumers, want) {
+				t.Fatalf("Consumers = %v, want %v", root.Consumers, want)
+			}
+		case root.Scope == ScopeProject && root.Target == "opencode":
+			if root.Consumers != nil {
+				t.Fatalf("Consumers = %v, want nil", root.Consumers)
+			}
+		}
+	}
+}
+
 func TestNormalizeConsumers(t *testing.T) {
 	t.Run("normalizes", func(t *testing.T) {
 		got, err := NormalizeConsumers([]string{" Pi ", "codex", "PI", "open-code"})

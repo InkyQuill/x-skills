@@ -113,9 +113,17 @@ func validTarget(target string) bool {
 
 func (c Config) ManagedRoots() []ManagedRoot {
 	if c.managedRoots == nil {
-		return c.defaultManagedRoots()
+		return cloneManagedRoots(c.defaultManagedRoots())
 	}
-	return append([]ManagedRoot(nil), c.managedRoots...)
+	return cloneManagedRoots(c.managedRoots)
+}
+
+func cloneManagedRoots(roots []ManagedRoot) []ManagedRoot {
+	cloned := slices.Clone(roots)
+	for i := range cloned {
+		cloned[i].Consumers = slices.Clone(cloned[i].Consumers)
+	}
+	return cloned
 }
 
 func LoadGlobal(cfg Config) (Config, error) {

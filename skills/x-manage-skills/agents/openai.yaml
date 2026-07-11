@@ -1,0 +1,4 @@
+interface:
+  display_name: "X Skills: Manage Skills"
+  short_description: "Prune and reconcile project skills"
+  default_prompt: "Use $x-manage-skills to audit this project skills setup and keep only the useful skills linked."

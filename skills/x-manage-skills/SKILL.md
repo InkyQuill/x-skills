@@ -1,9 +1,9 @@
 ---
-name: manage-skills
+name: x-manage-skills
 description: Audit, prune, link, unlink, migrate, and reconcile project agent skills with x-skills. Use when the user wants to disable unnecessary project skills while preserving useful skills in the x-skills archive, clean active skill roots, resolve duplicate/conflicting skills, or choose the best local/remote skill version.
 ---
 
-# Manage Skills
+# X Skills: Manage Skills
 
 Use `x-skills` as the authority for active roots and the archive. The goal is to keep the project linked only to skills that help the current work, while preserving reusable skills in `~/.x-skills/skills`.
 

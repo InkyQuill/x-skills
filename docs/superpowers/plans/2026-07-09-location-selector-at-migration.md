@@ -17,7 +17,7 @@
 - Modify: `internal/cli/add.go` to replace `--to` with `--at`.
 - Modify: `internal/cli/link.go`, `internal/cli/migrate.go`, `internal/cli/unlink.go`, `internal/cli/list.go`, `internal/cli/doctor.go` to remove `--target`, `--project`, `--global`.
 - Modify: related CLI tests to use `--at`.
-- Modify: `README.md`, `/home/inky/.x-skills/skills/find-skills/SKILL.md`, and `/home/inky/.x-skills/skills/manage-skills/SKILL.md`.
+- Modify: `README.md`, `/home/inky/.x-skills/skills/x-find-skills/SKILL.md`, and `/home/inky/.x-skills/skills/x-manage-skills/SKILL.md`.
 - Modify: `docs/backlog.md` after verification.
 
 ### Task 1: Location Selector Parser
@@ -345,8 +345,8 @@ Expected: PASS.
 
 **Files:**
 - Modify: `README.md`
-- Modify: `/home/inky/.x-skills/skills/find-skills/SKILL.md`
-- Modify: `/home/inky/.x-skills/skills/manage-skills/SKILL.md`
+- Modify: `/home/inky/.x-skills/skills/x-find-skills/SKILL.md`
+- Modify: `/home/inky/.x-skills/skills/x-manage-skills/SKILL.md`
 - Modify: `docs/backlog.md`
 
 - [ ] **Step 1: Update command examples**

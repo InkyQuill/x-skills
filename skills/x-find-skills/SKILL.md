@@ -1,9 +1,9 @@
 ---
-name: find-skills
+name: x-find-skills
 description: Discover, compare, and install agent skills with x-skills and skills.sh. Use when the user asks to find a skill, asks whether a skill exists, wants help extending agent capabilities, wants skills.sh search results checked against the local x-skills archive/repo, or wants an install command compatible with the current x-skills workflow.
 ---
 
-# Find Skills
+# X Skills: Find Skills
 
 Discover skills repo-first, then registry-first. Prefer `x-skills` over `npx skills` in this environment because it preserves the local archive in `~/.x-skills/skills`, links only the active roots needed for the current project, and records Git metadata for update checks.
 

@@ -48,6 +48,28 @@ func TestSyncCandidateDefaultAndRenderingUseChosenCompatibleVariant(t *testing.T
 	}
 }
 
+func TestSyncCandidateRediscoveryReconcilesStableChoices(t *testing.T) {
+	w := syncWorkbenchModal{
+		stage:    syncStageDestinations,
+		selected: map[string]bool{"keep:a": false, "variant:b": true, "gone:z": true},
+		variants: map[string]string{"keep": "keep:a", "variant": "variant:b", "gone": "gone:z"},
+	}
+	w.reconcileCandidateDefaults([]syncer.NameGroup{
+		{Name: "keep", Variants: []syncer.Candidate{{ID: "keep:a", Compatibility: compatibility.Assessment{State: compatibility.StateCompatible}}}},
+		{Name: "variant", Variants: []syncer.Candidate{{ID: "variant:a"}, {ID: "variant:b"}}},
+		{Name: "new", Variants: []syncer.Candidate{{ID: "new:a", Compatibility: compatibility.Assessment{State: compatibility.StateUnknown}}}},
+	})
+	if w.selected["keep:a"] || !w.selected["variant:b"] || !w.selected["new:a"] {
+		t.Fatalf("selected = %#v", w.selected)
+	}
+	if _, found := w.selected["gone:z"]; found {
+		t.Fatalf("vanished selection retained: %#v", w.selected)
+	}
+	if w.variants["variant"] != "variant:b" {
+		t.Fatalf("variants = %#v", w.variants)
+	}
+}
+
 func TestSyncWorkbenchSmallTerminalRender(t *testing.T) {
 	w := newSyncWorkbenchModal(config.Default(t.TempDir(), t.TempDir()))
 	view := plain(w.View(36, 9, Model{symbols: symbolsFor(defaultOptions())}))
@@ -179,6 +201,177 @@ func TestSyncWorkbenchEndToEndAppliesAndReconcilesManifest(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, ".x-skills.local.yaml")); err != nil {
 		t.Fatalf("local manifest: %v", err)
+	}
+}
+
+func TestSyncWorkbenchExactKeyboardFlowPreservesConflictsAndChoices(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	recommended := "version: 1\nskills:\n  - name: diverge\n    source:\n      type: git\n      repository: https://example.invalid/skills.git\n      path: diverge\n"
+	if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte(recommended), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSyncTestSkill(t, filepath.Join(project, ".claude", "skills", "alpha"), "alpha-source")
+	writeSyncTestSkill(t, filepath.Join(project, ".claude", "skills", "diverge"), "diverge-claude")
+	writeSyncTestSkill(t, filepath.Join(project, ".codex", "skills", "diverge"), "diverge-codex")
+	writeSyncTestSkill(t, filepath.Join(project, ".claude", "skills", "keepme"), "keepme-source")
+	writeSyncTestSkill(t, filepath.Join(project, ".agents", "skills", "diverge"), "diverge-destination")
+	writeSyncTestSkill(t, filepath.Join(project, ".agents", "skills", "keepme"), "keepme-destination")
+
+	m := New(cfg)
+	press := func(key tea.KeyMsg) tea.Cmd {
+		t.Helper()
+		updated, cmd := m.Update(key)
+		m = mustModel(t, updated)
+		return cmd
+	}
+	deliver := func(cmd tea.Cmd) tea.Cmd {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("expected asynchronous command")
+		}
+		updated, next := m.Update(cmd())
+		m = mustModel(t, updated)
+		return next
+	}
+
+	press(keyRunes("S"))
+	press(tea.KeyMsg{Type: tea.KeySpace}) // choose .agents destination through the UI
+	deliver(press(tea.KeyMsg{Type: tea.KeyEnter}))
+	w := m.modal.(syncWorkbenchModal)
+	if w.stage != syncStageCandidates || len(w.groups) != 3 {
+		t.Fatalf("candidate stage = %#v", w)
+	}
+	if !w.groupSelected(w.groups[0]) {
+		t.Fatal("alpha did not default selected")
+	}
+	press(tea.KeyMsg{Type: tea.KeySpace}) // unselect alpha
+	w = m.modal.(syncWorkbenchModal)
+	if w.groupSelected(w.groups[0]) {
+		t.Fatal("alpha remained selected")
+	}
+	press(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.modal.(syncWorkbenchModal).stage != syncStageDestinations {
+		t.Fatal("back did not reach destinations")
+	}
+	deliver(press(tea.KeyMsg{Type: tea.KeyEnter})) // rediscover, preserving stable choices
+	w = m.modal.(syncWorkbenchModal)
+	if w.groupSelected(w.groups[0]) {
+		t.Fatal("rediscovery reset alpha selection")
+	}
+
+	press(tea.KeyMsg{Type: tea.KeyEnter})
+	w = m.modal.(syncWorkbenchModal)
+	if w.stage != syncStageVariants || len(w.divergentGroups()) != 1 {
+		t.Fatalf("variant stage = %#v", w)
+	}
+	beforeVariant := w.variants["diverge"]
+	press(tea.KeyMsg{Type: tea.KeySpace})
+	w = m.modal.(syncWorkbenchModal)
+	chosenVariant := w.variants["diverge"]
+	if chosenVariant == beforeVariant {
+		t.Fatal("divergent variant did not change")
+	}
+	var chosenContent []byte
+	for _, group := range w.groups {
+		if group.Name != "diverge" {
+			continue
+		}
+		for _, candidate := range group.Variants {
+			if candidate.ID == chosenVariant {
+				var err error
+				chosenContent, err = os.ReadFile(filepath.Join(candidate.Occurrences[0].Path, "SKILL.md"))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	deliver(press(tea.KeyMsg{Type: tea.KeyEnter}))
+	w = m.modal.(syncWorkbenchModal)
+	if w.stage != syncStageConflicts || len(w.plan.Conflicts) != 2 {
+		t.Fatalf("conflicts = %#v", w.plan.Conflicts)
+	}
+
+	preserved := map[string]string{}
+	for i := range w.plan.Conflicts {
+		w = m.modal.(syncWorkbenchModal)
+		conflict := w.plan.Conflicts[w.index]
+		name := conflict.Name + "-preserved-test"
+		preserved[conflict.Name] = name
+		press(keyRunes("e"))
+		press(tea.KeyMsg{Type: tea.KeyCtrlU})
+		press(keyRunes(name))
+		press(tea.KeyMsg{Type: tea.KeyEnter})
+		if i+1 < len(w.plan.Conflicts) {
+			press(tea.KeyMsg{Type: tea.KeyDown})
+		}
+	}
+	deliver(press(tea.KeyMsg{Type: tea.KeyEnter}))
+	w = m.modal.(syncWorkbenchModal)
+	if w.stage != syncStageConfirmation {
+		t.Fatalf("stage = %v", w.stage)
+	}
+	preview := plain(w.View(140, 50, m))
+	for _, name := range preserved {
+		if !strings.Contains(preview, name) {
+			t.Fatalf("preview missing %q:\n%s", name, preview)
+		}
+	}
+
+	cmd := press(tea.KeyMsg{Type: tea.KeyEnter})
+	for cmd != nil {
+		cmd = deliver(cmd)
+	}
+	for _, name := range []string{"diverge", "keepme"} {
+		destination := filepath.Join(project, ".agents", "skills", name)
+		if info, err := os.Lstat(destination); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s link: info=%v err=%v", name, info, err)
+		}
+		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), name, "SKILL.md")); err != nil {
+			t.Fatalf("%s archive: %v", name, err)
+		}
+		content, err := os.ReadFile(filepath.Join(cfg.ArchiveSkillsRoot(), preserved[name], "SKILL.md"))
+		if err != nil {
+			t.Fatalf("%s preserved archive: %v", name, err)
+		}
+		if !strings.Contains(string(content), name+"-destination") {
+			t.Fatalf("preserved %s content = %q", name, content)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".agents", "skills", "alpha")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unselected alpha destination err = %v", err)
+	}
+	manifestData, err := os.ReadFile(filepath.Join(project, ".x-skills.local.yaml"))
+	if err != nil {
+		t.Fatalf("manifest: %v; status=%q", err, m.status)
+	}
+	for _, name := range []string{"keepme"} {
+		if !strings.Contains(string(manifestData), name) {
+			t.Fatalf("manifest missing %s:\n%s", name, manifestData)
+		}
+	}
+	if !strings.Contains(recommended, "diverge") {
+		t.Fatal("recommended manifest missing diverge")
+	}
+
+	archiveData, err := os.ReadFile(filepath.Join(cfg.ArchiveSkillsRoot(), "diverge", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(archiveData) != string(chosenContent) {
+		t.Fatalf("chosen archive content = %q, want %q", archiveData, chosenContent)
+	}
+}
+
+func writeSyncTestSkill(t *testing.T, path, marker string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := "---\nname: " + filepath.Base(path) + "\n---\n" + marker + "\n"
+	if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

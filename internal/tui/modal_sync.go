@@ -166,18 +166,35 @@ func (w syncWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 }
 
 func (w *syncWorkbenchModal) setCandidateDefaults() {
+	w.reconcileCandidateDefaults(w.groups)
+}
+
+func (w *syncWorkbenchModal) reconcileCandidateDefaults(groups []syncer.NameGroup) {
+	previousSelected, previousVariants := w.selected, w.variants
 	w.selected = map[string]bool{}
-	if w.variants == nil {
-		w.variants = map[string]string{}
-	}
-	for _, group := range w.groups {
+	w.variants = map[string]string{}
+	for _, group := range groups {
+		chosenID := previousVariants[group.Name]
+		chosenIsValid, groupWasSeen := false, false
 		for _, candidate := range group.Variants {
-			if candidate.Compatibility.State != compatibility.StateIncompatible {
-				w.selected[candidate.ID] = true
-				w.variants[group.Name] = candidate.ID
-				break
+			if selected, seen := previousSelected[candidate.ID]; seen {
+				w.selected[candidate.ID] = selected
+				groupWasSeen = true
+			}
+			if candidate.ID == chosenID {
+				chosenIsValid = true
+				groupWasSeen = true
 			}
 		}
+		if groupWasSeen {
+			if chosenIsValid {
+				w.variants[group.Name] = chosenID
+			}
+			continue
+		}
+		candidate := defaultSyncCandidate(group)
+		w.variants[group.Name] = candidate.ID
+		w.selected[candidate.ID] = candidate.Compatibility.State != compatibility.StateIncompatible
 	}
 }
 
@@ -259,8 +276,6 @@ func (w *syncWorkbenchModal) toggle(m *Model) {
 		if len(w.destinations) > 0 {
 			w.destinations[w.index].checked = !w.destinations[w.index].checked
 			w.groups = nil
-			w.selected = map[string]bool{}
-			w.variants = map[string]string{}
 			w.invalidatePlan()
 		}
 	case syncStageCandidates:
@@ -480,7 +495,7 @@ func syncPlanLines(plan syncer.Plan) []string {
 	}
 	lines = append(lines, fmt.Sprintf("Preserved conflicts (%d)", len(plan.Conflicts)))
 	for _, conflict := range plan.Conflicts {
-		lines = append(lines, "  "+conflict.Name+"  "+conflict.DestinationPath+" → "+conflict.Resolution.PreserveAs)
+		lines = append(lines, "  "+conflict.Name+"  preserve as "+conflict.Resolution.PreserveAs+"  from "+conflict.DestinationPath)
 	}
 	lines = append(lines, fmt.Sprintf("Skips (%d)", len(plan.Skipped)))
 	for _, skip := range plan.Skipped {

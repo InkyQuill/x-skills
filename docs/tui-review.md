@@ -8,7 +8,7 @@ and a targeted deep-dive on `install.go` (the largest, network/disk-touching fil
 
 The review below is retained as the original finding ledger. Findings 1–8 are resolved;
 finding 9 remains passed. Each finding records its resolving commit and verification.
-- Implementation is split between [TUI production readiness](superpowers/plans/2026-07-11-tui-production-readiness.md) and [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md).
+- Production-readiness findings were resolved by commits `1e3c961` through `12472bb`; remaining shared-component work is tracked in [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md).
 
 ## Blocking issues
 
@@ -134,7 +134,7 @@ outlive user intent by up to a minute per operation. Low severity because it's b
 and self-cleans, but worth a `context.WithCancel` wired to `tea.Quit`/view-change if this
 ships as a long-lived TUI people leave running.
 
-**Resolved:** this commit (`fix(tui): cancel obsolete background work`). Verified by
+**Resolved:** `095e08f` (`fix(tui): cancel obsolete background work`). Verified by
 `go test ./internal/tui/... -race -count=1`.
 
 ### 8. Large multi-select batches have no aggregate timeout or progress detail
@@ -144,7 +144,7 @@ row with its own ~60s timeout but no cap on the whole batch. A 30-skill multi-se
 a few slow network calls can make the UI appear to hang for minutes with only a generic
 "archiving N skills..." status, no per-item progress or the ability to cancel mid-batch.
 
-**Resolved:** `f12994c` (`fix(tui): emit install batch progress`) and this commit
+**Resolved:** `f12994c` (`fix(tui): emit install batch progress`) and `095e08f`
 (`fix(tui): cancel obsolete background work`). Batches deliberately retain per-operation
 timeouts without an aggregate wall-clock deadline. Verified by
 `go test ./internal/tui/... -race -count=1`.

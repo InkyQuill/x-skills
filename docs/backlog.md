@@ -2,7 +2,6 @@
 
 ## Planned implementation slices
 
-- [TUI production readiness](superpowers/plans/2026-07-11-tui-production-readiness.md): current build baseline, stale-work cancellation, bounded/coalesced update checks, visible advisory failures, progress, and asynchronous refresh.
 - [Skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md): Skills Folder consumers, explicit and inferred Compatibility Profiles, `x-` Built-In Skill naming, `x-port-skill`, and Doctor installation/linking.
 - [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md): committed recommendations, local overlay, recommend/unrecommend, safe restore/full restore, automatic reconciliation, and Git hygiene Doctor checks.
 - [Interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md): aggregate project candidates, compatibility-aware defaults, conflict preservation, CLI/TUI sync, and general archive rename.

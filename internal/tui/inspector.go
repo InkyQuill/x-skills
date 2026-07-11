@@ -30,7 +30,13 @@ func textInspectorValue(value string) inspectorValue {
 
 func blockInspectorValue(value string) inspectorValue {
 	return func(width int) string {
-		return inspectorValueStyle.Render(strings.Join(wrapInspectorText(value, width), "\n"))
+		lines := wrapInspectorText(value, width)
+		// Render lines one at a time: a single multi-line Render pads every
+		// line to the longest line's width, leaving trailing spaces.
+		for i, line := range lines {
+			lines[i] = inspectorValueStyle.Render(line)
+		}
+		return strings.Join(lines, "\n")
 	}
 }
 

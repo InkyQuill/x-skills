@@ -12,6 +12,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
@@ -60,6 +61,11 @@ func (m *Model) applyMigrateTargetsWithResults(targets []actions.ActiveSkill, re
 			continue
 		}
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
+		if skill.Root.Scope == config.ScopeProject {
+			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
+				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
+			}
+		}
 	}
 	m.finishMigrateTargets(successes, failures)
 }
@@ -76,6 +82,11 @@ func (m *Model) applyResolvedMigrateConflict(skill actions.ActiveSkill, remainin
 		failures = append(failures, "x "+filepath.Base(skill.Path)+"  "+err.Error())
 	} else {
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
+		if skill.Root.Scope == config.ScopeProject {
+			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
+				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
+			}
+		}
 	}
 	m.applyMigrateTargetsWithResults(remaining, actions.ConflictResolutionAsk, successes, failures)
 }
@@ -423,6 +434,11 @@ func (r repoLinkModal) apply(m *Model) {
 		}
 		successes = append(successes, "✓ "+result.Name+" linked")
 	}
+	if len(successes) > 0 && location.Scope == config.ScopeProject {
+		if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
+			lines = append(lines, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
+		}
+	}
 	m.reload()
 	lines = append(successes, lines...)
 	m.modal = newResultModal("Link Results", lines)
@@ -608,6 +624,11 @@ func (m *Model) applyUsageTargetsWithResults(targets []repoUsageTarget, deleteUn
 			continue
 		}
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
+		if target.Scope == config.ScopeProject {
+			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
+				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
+			}
+		}
 	}
 	m.finishUsageTargets(successes, failures)
 }
@@ -625,6 +646,11 @@ func (m *Model) applyResolvedUsageConflict(target repoUsageTarget, remaining []r
 		failures = append(failures, "x "+target.Path+": "+err.Error())
 	} else {
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
+		if target.Scope == config.ScopeProject {
+			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
+				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
+			}
+		}
 	}
 	m.applyUsageTargetsWithResults(remaining, deleteUnmanaged, actions.ConflictResolutionAsk, successes, failures)
 }

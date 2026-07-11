@@ -15,6 +15,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
@@ -1198,6 +1199,11 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		if err := discardInstallUseArchiveRollback(backupPath); err != nil {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 		}
+		if installDestinationsContainProject(destinations) {
+			if _, err := manifest.ReconcileLocal(cfg); err != nil {
+				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)}
+			}
+		}
 		return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
 	}
 }
@@ -1330,8 +1336,22 @@ func (m *Model) installAndUseRowsWithProgress(
 				result.success = append(result.success, row.Result.Name)
 			}
 		}
+		if len(result.success) > 0 && installDestinationsContainProject(destinations) {
+			if _, err := manifest.ReconcileLocal(cfg); err != nil {
+				return installUseMsg{token: token, destinations: destinations, batch: result, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)}
+			}
+		}
 		return installUseMsg{token: token, destinations: destinations, batch: result}
 	}
+}
+
+func installDestinationsContainProject(destinations []installDestination) bool {
+	for _, destination := range destinations {
+		if destination.Scope == config.ScopeProject {
+			return true
+		}
+	}
+	return false
 }
 
 func rollbackInstallUseLinks(paths []string) error {

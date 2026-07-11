@@ -9,6 +9,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/spf13/cobra"
@@ -266,9 +267,23 @@ func applyAddSkills(
 			}
 			added.linked = append(added.linked, destination)
 		}
+		if containsProjectRoot(added.linked) {
+			if _, err := manifest.ReconcileLocal(cfg); err != nil {
+				failures = append(failures, mutationFailure{name: archiveName, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
+			}
+		}
 		results = append(results, added)
 	}
 	return results, failures
+}
+
+func containsProjectRoot(roots []roots.ActiveRoot) bool {
+	for _, root := range roots {
+		if root.Scope == config.ScopeProject {
+			return true
+		}
+	}
+	return false
 }
 
 func addNeedsSkillNameError(source string, found []remote.FoundSkill) error {

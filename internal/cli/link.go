@@ -7,6 +7,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/spf13/cobra"
@@ -79,6 +80,11 @@ func linkNames(
 				continue
 			}
 			results = append(results, result)
+			if root.Scope == config.ScopeProject {
+				if _, err := manifest.ReconcileLocal(cfg); err != nil {
+					failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
+				}
+			}
 		}
 	}
 	return results, failures

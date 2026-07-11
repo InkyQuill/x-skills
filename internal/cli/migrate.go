@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/spf13/cobra"
 )
 
@@ -116,6 +118,11 @@ func migrateNames(
 			continue
 		}
 		results = append(results, result)
+		if skill.Root.Scope == config.ScopeProject {
+			if _, err := manifest.ReconcileLocal(cfg); err != nil {
+				failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
+			}
+		}
 	}
 	return results, failures, skipped
 }

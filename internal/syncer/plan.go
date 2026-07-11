@@ -41,6 +41,7 @@ type ConflictResolution struct {
 type Change struct {
 	CandidateID     string
 	Name            string
+	Fingerprint     string
 	Action          string
 	SourcePath      string
 	ArchivePath     string
@@ -50,6 +51,7 @@ type Change struct {
 type Conflict struct {
 	CandidateID         string
 	Name                string
+	Fingerprint         string
 	DestinationPath     string
 	DestinationStatus   string
 	SuggestedPreserveAs string
@@ -151,6 +153,7 @@ func Preflight(
 			}
 			conflict := Conflict{
 				CandidateID: candidate.ID, Name: candidate.Name,
+				Fingerprint:     candidate.Fingerprint,
 				DestinationPath: archivePath, DestinationStatus: actions.StatusManaged,
 				SuggestedPreserveAs: suggestion, Resolution: resolution,
 			}
@@ -184,6 +187,7 @@ func Preflight(
 			plan.Migrations = append(plan.Migrations, Change{
 				CandidateID: candidate.ID,
 				Name:        candidate.Name,
+				Fingerprint: candidate.Fingerprint,
 				Action:      "migrate",
 				SourcePath:  source.Path,
 				ArchivePath: archivePath,
@@ -225,6 +229,7 @@ func Preflight(
 					}
 					conflict := Conflict{
 						CandidateID: candidate.ID, Name: candidate.Name,
+						Fingerprint:     candidate.Fingerprint,
 						DestinationPath: destinationPath, DestinationStatus: classification.status,
 						SuggestedPreserveAs: suggestion, Resolution: resolution,
 					}
@@ -638,6 +643,7 @@ func linkChange(candidate Candidate, archivePath, destinationPath, action string
 	return Change{
 		CandidateID:     candidate.ID,
 		Name:            candidate.Name,
+		Fingerprint:     candidate.Fingerprint,
 		Action:          action,
 		ArchivePath:     archivePath,
 		DestinationPath: destinationPath,

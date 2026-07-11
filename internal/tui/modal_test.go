@@ -12,6 +12,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
 )
 
 func TestModalConsumesBackgroundKeys(t *testing.T) {
@@ -196,6 +197,21 @@ func TestEnterOpensDoctorDetailModal(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("doctor detail modal missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestDoctorDetailModalPreservesShellQuotedManualCommand(t *testing.T) {
+	command := "git rm -r --cached -- 'team skills;$(touch nope)'"
+	m := Model{opts: Options{ASCII: true}}
+	view := plain(doctorDetailModal(doctor.Issue{
+		Kind:    doctor.KindSkillsFolderTracked,
+		Name:    ".Tm",
+		Path:    "/project/team skills;$(touch nope)",
+		Reason:  "configured project Skills Folder contains files tracked by Git",
+		SafeFix: command,
+	}).View(100, 30, m))
+	if !strings.Contains(view, command) {
+		t.Fatalf("Doctor detail omitted quoted command %q:\n%s", command, view)
 	}
 }
 

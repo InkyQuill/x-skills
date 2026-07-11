@@ -32,6 +32,10 @@ _Avoid_: Bundled helper, system skill
 A Doctor fix that archives missing Built-In Skills and optionally links them only into explicitly selected global Skills Folders. Non-interactive repair without a destination is archive-only; project Skills Folders are never inferred or accepted.
 _Avoid_: Automatic global install, project built-in install
 
+**Git Hygiene Repair**:
+A conservative Doctor workflow that audits Project Skill Manifest tracking and tracked files inside project Skills Folders. Its automatic fix may append literal patterns to `.gitignore`, but it never changes the Git index; shell-quoted `git add` and `git rm --cached` commands remain explicit manual suggestions.
+_Avoid_: Automatic staging, automatic untracking
+
 **Agent-Agnostic Skill**:
 A skill whose instructions are usable by more than one agent application without depending on one agent's exclusive capabilities or conventions.
 _Avoid_: Generic skill, universal skill

@@ -38,9 +38,9 @@ func TestDoctorReportsGitHygieneAndOnlyFixesGitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"git add -- .x-skills.yaml",
-		"git rm --cached -- .x-skills.local.yaml",
-		"git rm -r --cached -- .agents/skills",
+		"git add -- '.x-skills.yaml'",
+		"git rm --cached -- '.x-skills.local.yaml'",
+		"git rm -r --cached -- '.agents/skills'",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, out.String())
@@ -52,9 +52,9 @@ func TestDoctorReportsGitHygieneAndOnlyFixesGitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"run: git add -- .x-skills.yaml",
-		"git rm --cached -- .x-skills.local.yaml",
-		"git rm -r --cached -- .agents/skills",
+		"run: git add -- '.x-skills.yaml'",
+		"git rm --cached -- '.x-skills.local.yaml'",
+		"git rm -r --cached -- '.agents/skills'",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("doctor fix output missing %q:\n%s", want, out.String())
@@ -63,6 +63,51 @@ func TestDoctorReportsGitHygieneAndOnlyFixesGitignore(t *testing.T) {
 	tracked := runDoctorGit(t, project, "ls-files")
 	if !strings.Contains(tracked, ".x-skills.local.yaml") || !strings.Contains(tracked, ".agents/skills/tracked/SKILL.md") {
 		t.Fatalf("doctor changed Git index:\n%s", tracked)
+	}
+}
+
+func TestDoctorQuotesCustomSkillsFolderSuggestionAndEscapesIgnorePattern(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	runDoctorGit(t, project, "init", "--quiet")
+	rootRel := "team skills;$(touch nope)*[x]?"
+	skill := filepath.Join(project, rootRel, "tracked", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("---\nname: tracked\ndescription: test\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(home, ".x-skills")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configData := "active_roots:\n  - scope: project\n    target: team\n    path: '" + rootRel + "'\n    label: .Tm\n"
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configData), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDoctorGit(t, project, "add", "--", filepath.ToSlash(filepath.Join(rootRel, "tracked", "SKILL.md")))
+
+	var out bytes.Buffer
+	if err := Execute([]string{"--home", home, "--project-root", project, "doctor"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	wantCommand := "git rm -r --cached -- '" + rootRel + "'"
+	if !strings.Contains(out.String(), wantCommand) {
+		t.Fatalf("doctor output missing quoted command %q:\n%s", wantCommand, out.String())
+	}
+
+	out.Reset()
+	if err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(project, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIgnore := `/team\ skills;$(touch\ nope)\*\[x\]\?/`
+	if !strings.Contains(string(ignore), wantIgnore) {
+		t.Fatalf(".gitignore missing literal pattern %q:\n%s", wantIgnore, ignore)
 	}
 }
 

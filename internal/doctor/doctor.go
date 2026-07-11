@@ -225,7 +225,17 @@ func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
 			return nil, trackErr
 		}
 		if !tracked {
-			issues = append(issues, Issue{Kind: KindRecommendedManifestUntracked, Name: ".x-skills.yaml", Location: "project", Path: recommended, Reason: "recommended manifest exists but is not tracked by Git", SafeFix: "git add -- .x-skills.yaml", ProjectRoot: cfg.ProjectRoot})
+			ignored, ignoreErr := gitPathIgnored(cfg.ProjectRoot, ".x-skills.yaml")
+			if ignoreErr != nil {
+				return nil, ignoreErr
+			}
+			addFlag := ""
+			reason := "recommended manifest exists but is not tracked by Git"
+			if ignored {
+				addFlag = " -f"
+				reason = "recommended manifest exists but is ignored and not tracked by Git"
+			}
+			issues = append(issues, Issue{Kind: KindRecommendedManifestUntracked, Name: ".x-skills.yaml", Location: "project", Path: recommended, Reason: reason, SafeFix: "git add" + addFlag + " -- " + shellQuote(".x-skills.yaml"), ProjectRoot: cfg.ProjectRoot})
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("inspect recommended manifest: %w", err)
@@ -237,7 +247,7 @@ func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
 		return nil, err
 	}
 	if tracked {
-		issues = append(issues, Issue{Kind: KindLocalManifestTracked, Name: ".x-skills.local.yaml", Location: "project", Path: local, Reason: "local manifest is tracked by Git", SafeFix: "git rm --cached -- .x-skills.local.yaml", ProjectRoot: cfg.ProjectRoot})
+		issues = append(issues, Issue{Kind: KindLocalManifestTracked, Name: ".x-skills.local.yaml", Location: "project", Path: local, Reason: "local manifest is tracked by Git", SafeFix: "git rm --cached -- " + shellQuote(".x-skills.local.yaml"), ProjectRoot: cfg.ProjectRoot})
 	}
 
 	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject}) {
@@ -251,7 +261,7 @@ func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
 			return nil, err
 		}
 		if tracked {
-			issues = append(issues, Issue{Kind: KindSkillsFolderTracked, Name: root.Label, Location: root.Label, Path: root.Path, Reason: "configured project Skills Folder contains files tracked by Git", SafeFix: "git rm -r --cached -- " + rel, ProjectRoot: cfg.ProjectRoot})
+			issues = append(issues, Issue{Kind: KindSkillsFolderTracked, Name: root.Label, Location: root.Label, Path: root.Path, Reason: "configured project Skills Folder contains files tracked by Git", SafeFix: "git rm -r --cached -- " + shellQuote(rel), ProjectRoot: cfg.ProjectRoot})
 		}
 	}
 	return issues, nil
@@ -259,14 +269,38 @@ func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
 
 func gitInsideWorkTree(projectRoot string) (bool, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "rev-parse", "--is-inside-work-tree")
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
+		if _, ok := err.(*exec.ExitError); ok && !hasGitMarker(projectRoot) {
 			return false, nil
 		}
-		return false, fmt.Errorf("inspect Git work tree: %w", err)
+		return false, fmt.Errorf("inspect Git work tree: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+func hasGitMarker(path string) bool {
+	for {
+		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return false
+		}
+		path = parent
+	}
+}
+
+func gitPathIgnored(projectRoot, path string) (bool, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "check-ignore", "--quiet", "--", path)
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect ignored path %q: %w", path, err)
+	}
+	return true, nil
 }
 
 func gitPathTracked(projectRoot, path string) (bool, error) {
@@ -281,7 +315,7 @@ func gitPathTracked(projectRoot, path string) (bool, error) {
 }
 
 func gitFolderTracked(projectRoot, path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--", path+"/**")
+	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--", ":(literal)"+path)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("inspect tracked Skills Folder %q: %w", path, err)
@@ -297,7 +331,28 @@ func gitignoreEntry(issue Issue) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("skills folder is outside project root: %s", issue.Path)
 	}
-	return strings.TrimSuffix(filepath.ToSlash(rel), "/") + "/", nil
+	return literalGitignorePattern(strings.TrimSuffix(filepath.ToSlash(rel), "/"))
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func literalGitignorePattern(path string) (string, error) {
+	if strings.ContainsAny(path, "\r\n") {
+		return "", fmt.Errorf("cannot represent path containing a newline in .gitignore: %q", path)
+	}
+	var pattern strings.Builder
+	pattern.WriteByte('/')
+	for _, char := range path {
+		switch char {
+		case '\\', '*', '?', '[', ']', '#', '!', ' ':
+			pattern.WriteByte('\\')
+		}
+		pattern.WriteRune(char)
+	}
+	pattern.WriteByte('/')
+	return pattern.String(), nil
 }
 
 func appendGitignoreEntry(projectRoot, entry string) error {

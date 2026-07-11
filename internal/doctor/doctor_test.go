@@ -59,7 +59,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 			t.Fatal(err)
 		}
 		issue := issueByKind(t, issues, KindRecommendedManifestUntracked)
-		if issue.SafeFix != "git add -- .x-skills.yaml" {
+		if issue.SafeFix != "git add -- '.x-skills.yaml'" {
 			t.Fatalf("SafeFix = %q", issue.SafeFix)
 		}
 	})
@@ -77,7 +77,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 			t.Fatal(err)
 		}
 		issue := issueByKind(t, issues, KindLocalManifestTracked)
-		if issue.SafeFix != "git rm --cached -- .x-skills.local.yaml" {
+		if issue.SafeFix != "git rm --cached -- '.x-skills.local.yaml'" {
 			t.Fatalf("SafeFix = %q", issue.SafeFix)
 		}
 	})
@@ -92,7 +92,26 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 			t.Fatal(err)
 		}
 		issue := issueByKind(t, issues, KindSkillsFolderTracked)
-		if issue.SafeFix != "git rm -r --cached -- .agents/skills" {
+		if issue.SafeFix != "git rm -r --cached -- '.agents/skills'" {
+			t.Fatalf("SafeFix = %q", issue.SafeFix)
+		}
+	})
+
+	t.Run("ignored recommended manifest", func(t *testing.T) {
+		project := initGitRepo(t)
+		if err := os.WriteFile(filepath.Join(project, ".gitignore"), []byte(".x-skills.yaml\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		issue := issueByKind(t, issues, KindRecommendedManifestUntracked)
+		if issue.SafeFix != "git add -f -- '.x-skills.yaml'" {
 			t.Fatalf("SafeFix = %q", issue.SafeFix)
 		}
 	})
@@ -135,6 +154,61 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 	})
 }
 
+func TestDiagnoseGitHygieneSurfacesBrokenRepository(t *testing.T) {
+	project := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+	if err == nil || !strings.Contains(err.Error(), "inspect Git work tree") {
+		t.Fatalf("error = %v, want Git probe failure", err)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "spaces", path: "team skills", want: "'team skills'"},
+		{name: "metacharacters", path: "skills;$(touch nope)", want: "'skills;$(touch nope)'"},
+		{name: "single quote", path: "team's skills", want: "'team'\"'\"'s skills'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shellQuote(tt.path); got != tt.want {
+				t.Fatalf("shellQuote(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLiteralGitignorePattern(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "spaces", path: "team skills", want: "/team\\ skills/"},
+		{name: "comment", path: "#skills", want: "/\\#skills/"},
+		{name: "negation", path: "!skills", want: "/\\!skills/"},
+		{name: "globs", path: "skill*[a]?", want: "/skill\\*\\[a\\]\\?/"},
+		{name: "backslash", path: `team\skills`, want: `/team\\skills/`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := literalGitignorePattern(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("literalGitignorePattern(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFixGitHygieneOnlyEditsGitignore(t *testing.T) {
 	project := initGitRepo(t)
 	local := filepath.Join(project, ".x-skills.local.yaml")
@@ -169,7 +243,7 @@ func TestFixGitHygieneOnlyEditsGitignore(t *testing.T) {
 		}
 	}
 	joined := fmt.Sprint(results)
-	for _, want := range []string{"git rm --cached -- .x-skills.local.yaml", "git rm -r --cached -- .agents/skills"} {
+	for _, want := range []string{"git rm --cached -- '.x-skills.local.yaml'", "git rm -r --cached -- '.agents/skills'"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("results missing %q: %#v", want, results)
 		}

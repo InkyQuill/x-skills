@@ -21,7 +21,6 @@
 ## Commands and tools
 
 - Implement interactive `sync` in CLI and TUI. `x-skills sync --at .Cl` aggregates skills from every non-destination project Skills Folder, preselects candidates according to compatibility, lets the user exclude skills and resolve divergent variants, migrates unmanaged skills, and preserves destination conflicts under editable archive names. Non-interactive use requires `--all` or repeated `--skill`; `-y` never resolves ambiguity. Plan: [interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md).
-- Implement committed `.x-skills.yaml` recommendations plus gitignored `.x-skills.local.yaml` local state. `restore --at ...` is additive; `restore --full` reconciles only explicitly selected project Skills Folders, migrates unmanaged extras before removal, never deletes archives, and blocks all removal when any desired skill is unavailable. Plan: [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md).
 
 ## TUI Visual Inspiration
 

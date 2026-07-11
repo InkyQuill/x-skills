@@ -78,6 +78,15 @@ Project destinations are rejected for Built-In Skill repair. Without `-y`,
 `doctor --fix` shows the enabled global Skills Folders with `~Ag` preselected
 and an explicit `Archive only` choice.
 
+Doctor also audits project Git hygiene. It reports an untracked recommended
+manifest (`.x-skills.yaml`), a tracked local manifest
+(`.x-skills.local.yaml`), and tracked files inside configured project Skills
+Folders. Both the CLI and the TUI show shell-quoted `git add` or
+`git rm --cached` commands for the user to run manually. `doctor --fix` never
+changes or stages the Git index; it only appends literal ignore rules for the
+local manifest and project Skills Folders to `.gitignore`. An ignored
+recommended manifest is reported with an explicit `git add -f` suggestion.
+
 `x-skills list` answers "what am I currently working with?" It shows active
 skills from the current project and global managed roots, grouped by scope and
 target. Each active skill is marked:

@@ -2193,6 +2193,105 @@ func TestInstallAndUseRollsBackReplacedArchiveAfterLateFailure(t *testing.T) {
 	assertFileContent(t, oldSkillPath, string(oldBytes))
 }
 
+func TestInstallAndUseRollsBackArchiveAddedBeforeMutationAfterLateFailure(t *testing.T) {
+	cfg, m, row, destinations := installAndUseLateFailureFixture(t, remote.ArchiveStateNotArchived)
+	archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), row.Result.Name)
+	originalPrepare := installUsePrepareArchiveRollback
+	installUsePrepareArchiveRollback = func(path string) (string, error) {
+		makeSkill(t, filepath.Dir(path), filepath.Base(path), "Old.")
+		return originalPrepare(path)
+	}
+	t.Cleanup(func() {
+		installUsePrepareArchiveRollback = originalPrepare
+	})
+
+	msg := m.installAndUse(row, destinations, false)().(installUseMsg)
+
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "late link failure") {
+		t.Fatalf("error = %v, want late link failure", msg.err)
+	}
+	assertFileContent(t, filepath.Join(archivePath, "SKILL.md"), "---\nname: svelte-coder\ndescription: Old.\n---\n")
+}
+
+func TestInstallAndUseRollsBackArchiveCreatedFromStaleArchivedRowAfterLateFailure(t *testing.T) {
+	cfg, m, row, destinations := installAndUseLateFailureFixture(t, remote.ArchiveStateArchived)
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), row.Result.Name, "Old.")
+	if err := os.RemoveAll(archivePath); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := m.installAndUse(row, destinations, false)().(installUseMsg)
+
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "late link failure") {
+		t.Fatalf("error = %v, want late link failure", msg.err)
+	}
+	if _, err := os.Lstat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive remains after rollback or unexpected error: %v", err)
+	}
+}
+
+func TestInstallAndUseReportsArchiveRollbackFailureAfterGenerationInvalidation(t *testing.T) {
+	_, m, row, destinations := installAndUseLateFailureFixture(t, remote.ArchiveStateNotArchived)
+	originalRollback := installUseRollbackArchive
+	installUseRollbackArchive = func(string, string) error {
+		return errors.New("injected archive rollback failure")
+	}
+	t.Cleanup(func() {
+		installUseRollbackArchive = originalRollback
+	})
+	originalApply := installApplyArchive
+	installApplyArchive = func(req remote.AddRequest) (remote.AddResult, error) {
+		result, err := originalApply(req)
+		m.install.ensureUseGeneration().next()
+		return result, err
+	}
+	t.Cleanup(func() {
+		installApplyArchive = originalApply
+	})
+
+	msg := m.installAndUse(row, destinations, false)().(installUseMsg)
+
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "injected archive rollback failure") {
+		t.Fatalf("error = %v, want archive rollback failure", msg.err)
+	}
+}
+
+func installAndUseLateFailureFixture(
+	t *testing.T,
+	archiveState string,
+) (config.Config, *Model, installResultView, []installDestination) {
+	t.Helper()
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "New.")
+	gitTUITestCommit(t, repoDir, "initial")
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	row := installResultView{
+		Result:       remote.SearchResult{Name: "svelte-coder", Path: "skills/svelte-coder"},
+		ArchiveState: archiveState,
+	}
+	destinations := []installDestination{
+		{Scope: config.ScopeProject, Target: config.TargetAgents},
+		{Scope: config.ScopeProject, Target: config.TargetClaude},
+	}
+	originalLink := installUseLink
+	calls := 0
+	installUseLink = func(cfg config.Config, req actions.LinkRequest) (actions.MutationResult, error) {
+		calls++
+		if calls == 2 {
+			return actions.MutationResult{}, errors.New("late link failure")
+		}
+		return originalLink(cfg, req)
+	}
+	t.Cleanup(func() {
+		installUseLink = originalLink
+	})
+	return cfg, &m, row, destinations
+}
+
 func assertFileContent(t *testing.T, path, want string) {
 	t.Helper()
 	got, err := os.ReadFile(path)

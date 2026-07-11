@@ -2,12 +2,19 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+var restoreInputIsTerminal = func(input io.Reader) bool {
+	file, ok := input.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(int(file.Fd()))
+}
 
 func newRestoreCommand(opts *options) *cobra.Command {
 	var selectors []string
@@ -27,7 +34,10 @@ func newRestoreCommand(opts *options) *cobra.Command {
 					return fmt.Errorf("restore destination %q is not a project Skills Folder", destination.Path)
 				}
 			}
-			plan, err := manifest.PlanRestore(cmd.Context(), cfg, manifest.RestoreRequest{Destinations: destinations, Full: full})
+			plan, err := manifest.PlanRestore(cmd.Context(), cfg, manifest.RestoreRequest{
+				Destinations: destinations,
+				Full:         full,
+			})
 			if err != nil {
 				return err
 			}
@@ -35,6 +45,10 @@ func newRestoreCommand(opts *options) *cobra.Command {
 			printRestorePlan(cmd, plan)
 			if err := resolveRestoreConflicts(cmd, opts, &plan); err != nil {
 				return err
+			}
+			if len(plan.Conflicts) > 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "final restore plan")
+				printRestorePlan(cmd, plan)
 			}
 			confirmed, err := confirm(cmd, opts, "Apply restore plan? [y/N] ", "restore requires confirmation; rerun with -y")
 			if err != nil {
@@ -47,7 +61,13 @@ func newRestoreCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "restored: %d links, %d migrations, %d removals\n", len(result.Additions), len(result.Normalizations), len(result.Removals))
+			_, err = fmt.Fprintf(
+				cmd.OutOrStdout(),
+				"restored: %d links, %d migrations, %d removals\n",
+				len(result.Additions),
+				len(result.Normalizations),
+				len(result.Removals),
+			)
 			return err
 		},
 	}
@@ -64,9 +84,12 @@ func printRestorePlan(cmd *cobra.Command, plan manifest.RestorePlan) {
 	}
 	printRestoreGroup(cmd, "unavailable", unavailable)
 	printRestoreGroup(cmd, "links", restoreChangeLines(plan.Additions))
-	migrations := append(restoreChangeLines(plan.Normalizations), restoreChangeLinesByKind(plan.Removals, manifest.ChangeMigrate)...)
+	migrations := restoreChangeLinesByKind(plan.Normalizations, manifest.ChangeMigrate)
+	migrations = append(migrations, restoreChangeLinesByKind(plan.Removals, manifest.ChangeMigrate)...)
 	printRestoreGroup(cmd, "migrations", migrations)
-	printRestoreGroup(cmd, "removals", restoreChangeLinesWithoutKind(plan.Removals, manifest.ChangeMigrate))
+	removals := restoreChangeLinesWithoutKind(plan.Normalizations, manifest.ChangeMigrate)
+	removals = append(removals, restoreChangeLinesWithoutKind(plan.Removals, manifest.ChangeMigrate)...)
+	printRestoreGroup(cmd, "removals", removals)
 	if plan.RemovalsBlocked {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "warning: unavailable skills block destructive migrations and removals")
 	}
@@ -94,7 +117,7 @@ func restoreAvailableNames(skills []manifest.PlannedSkill) []string {
 func restoreChangeLines(changes []manifest.Change) []string {
 	lines := make([]string, 0, len(changes))
 	for _, change := range changes {
-		lines = append(lines, change.Name+"  "+change.Destination.Label)
+		lines = append(lines, restoreChangeLine(change))
 	}
 	return lines
 }
@@ -103,7 +126,7 @@ func restoreChangeLinesByKind(changes []manifest.Change, kind string) []string {
 	lines := []string{}
 	for _, change := range changes {
 		if change.Kind == kind {
-			lines = append(lines, change.Name+"  "+change.Destination.Label)
+			lines = append(lines, restoreChangeLine(change))
 		}
 	}
 	return lines
@@ -113,17 +136,17 @@ func restoreChangeLinesWithoutKind(changes []manifest.Change, kind string) []str
 	lines := []string{}
 	for _, change := range changes {
 		if change.Kind != kind {
-			lines = append(lines, change.Name+"  "+change.Destination.Label)
+			lines = append(lines, restoreChangeLine(change))
 		}
 	}
 	return lines
 }
 
 func resolveRestoreConflicts(cmd *cobra.Command, opts *options, plan *manifest.RestorePlan) error {
+	if len(plan.Conflicts) > 0 && (opts.noInput || !restoreInputIsTerminal(cmd.InOrStdin())) {
+		return fmt.Errorf("restore conflict resolution requires an interactive terminal")
+	}
 	for _, conflict := range plan.Conflicts {
-		if opts.noInput {
-			return fmt.Errorf("migration conflict for %q requires an archive name; rerun interactively", conflict.Name)
-		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Archive name for preserving %s [%s]: ", conflict.Path, conflict.SuggestedName)
 		name, err := readPromptLine(cmd.InOrStdin())
 		if err != nil {
@@ -136,6 +159,18 @@ func resolveRestoreConflicts(cmd *cobra.Command, opts *options, plan *manifest.R
 		setRestoreArchiveName(plan, conflict.Path, name)
 	}
 	return nil
+}
+
+func restoreChangeLine(change manifest.Change) string {
+	line := change.Name + "  " + change.Destination.Label + "  " + change.Path
+	if change.Kind == manifest.ChangeMigrate {
+		archiveName := change.ArchiveName
+		if archiveName == "" {
+			archiveName = "(rename required)"
+		}
+		line += " -> archive:" + archiveName
+	}
+	return line
 }
 
 func setRestoreArchiveName(plan *manifest.RestorePlan, path, name string) {

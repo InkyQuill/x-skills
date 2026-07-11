@@ -206,6 +206,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		closeRestoreModalPlan(m.modal)
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
 		return m, tea.Quit

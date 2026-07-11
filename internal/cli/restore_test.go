@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,8 +69,52 @@ func TestRestoreConflictRequiresExplicitRenameEvenWithYes(t *testing.T) {
 	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "wanted", "Different.")
 
 	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "-y", "restore", "--at", ".Ag"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "requires an archive name") {
+	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
 		t.Fatalf("restore conflict error = %v", err)
+	}
+}
+
+func TestRestoreConflictRejectsPipedSuggestionEvenWithYes(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	writeRestoreCLISkill(t, cfg, "wanted")
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "wanted", "Different.")
+
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "-y", "restore", "--at", ".Ag"},
+		strings.NewReader("wanted-preserved\n"),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("piped restore conflict error = %v", err)
+	}
+}
+
+func TestRestoreConfirmationShowsFinalMigrationSourceAndArchiveName(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	writeRestoreCLISkill(t, cfg, "wanted")
+	source := makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "wanted", "Different.")
+
+	previous := restoreInputIsTerminal
+	restoreInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { restoreInputIsTerminal = previous })
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "restore", "--at", ".Ag"},
+		strings.NewReader("wanted-local\nn\n"),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{source, "wanted-local", "Apply restore plan?"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("final restore confirmation missing %q:\n%s", want, out.String())
+		}
 	}
 }
 

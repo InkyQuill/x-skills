@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -53,7 +54,12 @@ func (r restoreWorkbenchModal) View(width, height int, m Model) string {
 	if r.full {
 		full = "ON"
 	}
-	body = append(body, "", "Full restore: "+full, "Full restore may migrate or remove extra skills only in the selected folders.")
+	body = append(
+		body,
+		"",
+		"Full restore: "+full,
+		"Full restore may migrate or remove extra skills only in the selected folders.",
+	)
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: r.Title(),
 		Body:  body,
@@ -97,7 +103,7 @@ func (r restoreWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) 
 			return false, nil
 		}
 		m.modal = nil
-		return false, m.beginRestorePlan(destinations, r.full)
+		return false, m.beginRestorePlan(r, destinations, r.full)
 	}
 	return false, nil
 }
@@ -105,6 +111,7 @@ func (r restoreWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) 
 type restorePlanMsg struct {
 	token uint64
 	plan  manifest.RestorePlan
+	setup restoreWorkbenchModal
 	err   error
 }
 
@@ -119,7 +126,7 @@ type restoreApplyMsg struct {
 	reloadErr error
 }
 
-func (m *Model) beginRestorePlan(destinations []roots.ActiveRoot, full bool) tea.Cmd {
+func (m *Model) beginRestorePlan(setup restoreWorkbenchModal, destinations []roots.ActiveRoot, full bool) tea.Cmd {
 	m.cancelRestoreWork()
 	m.restoreToken++
 	token := m.restoreToken
@@ -131,7 +138,7 @@ func (m *Model) beginRestorePlan(destinations []roots.ActiveRoot, full bool) tea
 	return func() tea.Msg {
 		defer cancel()
 		plan, err := manifest.PlanRestore(ctx, cfg, manifest.RestoreRequest{Destinations: destinations, Full: full})
-		return restorePlanMsg{token: token, plan: plan, err: err}
+		return restorePlanMsg{token: token, plan: plan, setup: setup, err: err}
 	}
 }
 
@@ -147,12 +154,14 @@ func (m *Model) applyRestorePlanResult(msg restorePlanMsg) tea.Cmd {
 		m.status = "restore planning failed: " + msg.err.Error()
 		return nil
 	}
-	m.openRestorePlan(msg.plan)
+	m.modal = restorePlanModal{plan: msg.plan, setup: msg.setup}
 	return nil
 }
 
 type restorePlanModal struct {
-	plan manifest.RestorePlan
+	plan          manifest.RestorePlan
+	setup         restoreWorkbenchModal
+	conflictIndex int
 }
 
 func (m *Model) openRestorePlan(plan manifest.RestorePlan) { m.modal = restorePlanModal{plan: plan} }
@@ -163,44 +172,58 @@ func (r restorePlanModal) View(width, height int, m Model) string {
 	body := restorePlanLines(r.plan)
 	if len(r.plan.Conflicts) > 0 {
 		body = append(body, "", "Rename decisions")
-		for _, conflict := range r.plan.Conflicts {
+		for i, conflict := range r.plan.Conflicts {
 			name := restoreArchiveName(r.plan, conflict.Path)
 			if name == "" {
 				name = conflict.SuggestedName + " (suggested)"
 			}
-			body = append(body, "  "+conflict.Name+" → "+name)
+			cursor := "  "
+			if i == r.conflictIndex {
+				cursor = m.symbols.Cursor + " "
+			}
+			body = append(body, cursor+conflict.Name+" → "+name)
 		}
 	}
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: r.Title(), Body: body,
 		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
-			{ASCII: "e", Label: "edit rename"}, {ASCII: "enter", Unicode: "↵", Label: "apply"}, {ASCII: "esc", Unicode: "Esc", Label: "discard"},
+			{ASCII: "e", Label: "edit rename"},
+			{ASCII: "enter", Unicode: "↵", Label: "apply"},
+			{ASCII: "esc", Unicode: "Esc", Label: "discard"},
 		}))},
 	})
 }
 
 func (r restorePlanModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 && len(r.plan.Conflicts) > 0 {
+		r.conflictIndex += delta
+		if r.conflictIndex < 0 {
+			r.conflictIndex = len(r.plan.Conflicts) - 1
+		}
+		if r.conflictIndex >= len(r.plan.Conflicts) {
+			r.conflictIndex = 0
+		}
+		m.modal = r
+		return false, nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		_ = r.plan.Close()
-		return true, nil
+		m.modal = r.setup
+		return false, nil
 	case "e":
-		if index := firstUnresolvedRestoreConflict(r.plan); index >= 0 {
-			r.editConflict(m, index)
-		} else if len(r.plan.Conflicts) > 0 {
-			r.editConflict(m, 0)
+		if len(r.plan.Conflicts) > 0 {
+			r.editConflict(m, r.conflictIndex)
 		}
 	case "enter":
 		if len(r.plan.Conflicts) > 0 && !restoreConflictsResolved(r.plan) {
-			r.editConflict(m, firstUnresolvedRestoreConflict(r.plan))
+			index := firstUnresolvedRestoreConflict(r.plan)
+			r.conflictIndex = index
+			r.editConflict(m, index)
 			return false, nil
 		}
-		if len(r.plan.Removals) > 0 {
-			plan := r.plan
-			m.modal = newConfirmModal("Confirm full restore", restorePlanLines(plan), true, func(current *Model) {
-				current.modal = nil
-				current.pendingMutationCmd = current.beginRestoreApply(plan)
-			})
+		if restorePlanIsDestructive(r.plan) {
+			m.modal = restoreConfirmModal{parent: r, choice: 1}
 			return false, nil
 		}
 		m.modal = nil
@@ -215,16 +238,102 @@ func (r restorePlanModal) editConflict(m *Model, index int) {
 	if value == "" {
 		value = conflict.SuggestedName
 	}
-	m.modal = newTextModal("Preserve "+conflict.Name, "Archive name", value, func(current *Model, name string) tea.Cmd {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			current.status = "archive name is required"
-			return nil
-		}
-		setTUIRestoreArchiveName(&r.plan, conflict.Path, name)
-		current.modal = r
-		return nil
+	input := textinput.New()
+	input.SetValue(value)
+	input.Focus()
+	m.modal = restoreRenameModal{parent: r, conflictIndex: index, input: input}
+}
+
+type restoreRenameModal struct {
+	parent        restorePlanModal
+	conflictIndex int
+	input         textinput.Model
+}
+
+func (r restoreRenameModal) Title() string {
+	return "Preserve " + r.parent.plan.Conflicts[r.conflictIndex].Name
+}
+
+func (r restoreRenameModal) View(width, height int, m Model) string {
+	r.input.Width = max(width-12, 1)
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: r.Title(),
+		Body:  []string{"Archive name", r.input.View()},
+		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			{ASCII: "enter", Unicode: "↵", Label: "save"},
+			{ASCII: "esc", Unicode: "Esc", Label: "back"},
+		}))},
 	})
+}
+
+func (r restoreRenameModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.modal = r.parent
+		return false, nil
+	case "enter":
+		name := strings.TrimSpace(r.input.Value())
+		if name == "" {
+			m.status = "archive name is required"
+			return false, nil
+		}
+		conflict := r.parent.plan.Conflicts[r.conflictIndex]
+		setTUIRestoreArchiveName(&r.parent.plan, conflict.Path, name)
+		m.modal = r.parent
+		return false, nil
+	}
+	var cmd tea.Cmd
+	r.input, cmd = r.input.Update(msg)
+	m.modal = r
+	return false, cmd
+}
+
+type restoreConfirmModal struct {
+	parent restorePlanModal
+	choice int
+}
+
+func (r restoreConfirmModal) Title() string { return "Confirm destructive restore" }
+
+func (r restoreConfirmModal) View(width, height int, m Model) string {
+	apply, back := "Apply", "[ Back ]"
+	if r.choice == 0 {
+		apply, back = "[ Apply ]", "Back"
+	}
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: r.Title(),
+		Body:  restorePlanLines(r.parent.plan),
+		Footer: []string{
+			apply + "   " + back,
+			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+				{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
+				{ASCII: "enter", Unicode: "↵", Label: "select"},
+				{ASCII: "esc", Unicode: "Esc", Label: "back"},
+			})),
+		},
+	})
+}
+
+func (r restoreConfirmModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "n":
+		m.modal = r.parent
+		return false, nil
+	case "left", "right":
+		r.choice = 1 - r.choice
+		m.modal = r
+	case "y":
+		m.modal = nil
+		return false, m.beginRestoreApply(r.parent.plan)
+	case "enter":
+		if r.choice == 1 {
+			m.modal = r.parent
+			return false, nil
+		}
+		m.modal = nil
+		return false, m.beginRestoreApply(r.parent.plan)
+	}
+	return false, nil
 }
 
 func (m *Model) beginRestoreApply(plan manifest.RestorePlan) tea.Cmd {
@@ -259,7 +368,12 @@ func (m *Model) applyRestoreResult(msg restoreApplyMsg) tea.Cmd {
 		m.status = "restore failed: " + msg.err.Error()
 		return nil
 	}
-	m.status = fmt.Sprintf("restored %d links, %d migrations, %d removals", len(msg.result.Additions), len(msg.result.Normalizations), len(msg.result.Removals))
+	m.status = fmt.Sprintf(
+		"restored %d links, %d migrations, %d removals",
+		len(msg.result.Additions),
+		len(msg.result.Normalizations),
+		len(msg.result.Removals),
+	)
 	if msg.reloadErr != nil {
 		m.status += "; refresh failed: " + msg.reloadErr.Error()
 	}
@@ -285,24 +399,52 @@ func restorePlanLines(plan manifest.RestorePlan) []string {
 	}
 	lines = append(lines, "Links")
 	for _, change := range plan.Additions {
-		lines = append(lines, "  "+change.Name+"  "+change.Destination.Label)
+		lines = append(lines, "  "+restoreTUIChangeLine(change))
 	}
 	lines = append(lines, "Migrations")
-	for _, change := range append(append([]manifest.Change{}, plan.Normalizations...), plan.Removals...) {
+	changes := append(append([]manifest.Change{}, plan.Normalizations...), plan.Removals...)
+	for _, change := range changes {
 		if change.Kind == manifest.ChangeMigrate {
-			lines = append(lines, "  "+change.Name+"  "+change.Destination.Label)
+			lines = append(lines, "  "+restoreTUIChangeLine(change))
 		}
 	}
 	lines = append(lines, "Removals")
-	for _, change := range plan.Removals {
+	for _, change := range changes {
 		if change.Kind != manifest.ChangeMigrate {
-			lines = append(lines, "  "+change.Name+"  "+change.Destination.Label)
+			lines = append(lines, "  "+restoreTUIChangeLine(change))
 		}
 	}
 	if plan.RemovalsBlocked {
 		lines = append(lines, "", "Unavailable skills block destructive migrations and removals.")
 	}
 	return lines
+}
+
+func restoreTUIChangeLine(change manifest.Change) string {
+	line := change.Name + "  " + change.Destination.Label + "  " + change.Path
+	if change.Kind == manifest.ChangeMigrate {
+		archiveName := change.ArchiveName
+		if archiveName == "" {
+			archiveName = "(rename required)"
+		}
+		line += " -> archive:" + archiveName
+	}
+	return line
+}
+
+func restorePlanIsDestructive(plan manifest.RestorePlan) bool {
+	return len(plan.Normalizations) > 0 || len(plan.Removals) > 0
+}
+
+func closeRestoreModalPlan(current modal) {
+	switch current := current.(type) {
+	case restorePlanModal:
+		_ = current.plan.Close()
+	case restoreRenameModal:
+		_ = current.parent.plan.Close()
+	case restoreConfirmModal:
+		_ = current.parent.plan.Close()
+	}
 }
 
 func restoreArchiveName(plan manifest.RestorePlan, path string) string {

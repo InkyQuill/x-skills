@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -76,12 +79,12 @@ func TestRestoreConflictRenameIsEditableBeforeApply(t *testing.T) {
 	m.openRestorePlan(plan)
 	preview := m.modal.(restorePlanModal)
 	preview.editConflict(&m, 0)
-	text, ok := m.modal.(textModal)
+	rename, ok := m.modal.(restoreRenameModal)
 	if !ok {
-		t.Fatalf("modal = %T, want editable text modal", m.modal)
+		t.Fatalf("modal = %T, want restoreRenameModal", m.modal)
 	}
-	text.input.SetValue("wanted-local")
-	m.modal = text
+	rename.input.SetValue("wanted-local")
+	m.modal = rename
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 	if cmd != nil {
@@ -91,6 +94,175 @@ func TestRestoreConflictRenameIsEditableBeforeApply(t *testing.T) {
 	if got := preview.plan.Normalizations[0].ArchiveName; got != "wanted-local" {
 		t.Fatalf("archive name = %q, want wanted-local", got)
 	}
+}
+
+func TestRestoreNormalizationOnlyRequiresDestructiveConfirmation(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{{
+			Kind: manifest.ChangeRemove,
+			Name: "broken",
+			Path: "/project/.agents/skills/broken",
+		}},
+	}
+	m.openRestorePlan(plan)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("destructive normalization started without confirmation")
+	}
+	if _, ok := m.modal.(restoreConfirmModal); !ok {
+		t.Fatalf("modal = %T, want restoreConfirmModal", m.modal)
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, "/project/.agents/skills/broken") {
+		t.Fatalf("confirmation missing exact normalization path:\n%s", view)
+	}
+}
+
+func TestRestoreDestructiveConfirmationShowsChosenArchiveName(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{{
+			Kind:        manifest.ChangeMigrate,
+			Name:        "wanted",
+			Path:        "/project/.agents/skills/wanted",
+			ArchiveName: "wanted-local",
+		}},
+	}
+	parent := restorePlanModal{plan: plan}
+	m.modal = restoreConfirmModal{parent: parent, choice: 1}
+	view := plain(m.modal.View(120, 40, m))
+	for _, want := range []string{"/project/.agents/skills/wanted", "archive:wanted-local"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("confirmation missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRestoreNestedModalsNavigateBackAndFinalCancelClosesStaging(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	before := restoreStagingRoots(t)
+	plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{
+		Destinations: roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[:1],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := addedRestoreStagingRoot(t, before)
+
+	m := New(cfg)
+	setup := newRestoreWorkbenchModal(cfg)
+	m.modal = restorePlanModal{plan: plan, setup: setup}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	if _, ok := m.modal.(restoreWorkbenchModal); !ok {
+		t.Fatalf("preview back modal = %T, want restoreWorkbenchModal", m.modal)
+	}
+	if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging root still exists after final cancel: %s", staging)
+	}
+}
+
+func TestRestoreQuitClosesStagingFromEveryNestedModal(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[:1]
+
+	tests := []struct {
+		name  string
+		modal func(manifest.RestorePlan) modal
+	}{
+		{
+			name: "rename",
+			modal: func(plan manifest.RestorePlan) modal {
+				parent := restorePlanModal{
+					plan: plan,
+				}
+				input := textinput.New()
+				return restoreRenameModal{parent: parent, input: input}
+			},
+		},
+		{
+			name: "confirmation",
+			modal: func(plan manifest.RestorePlan) modal {
+				return restoreConfirmModal{parent: restorePlanModal{plan: plan}, choice: 1}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := restoreStagingRoots(t)
+			plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{Destinations: destination})
+			if err != nil {
+				t.Fatal(err)
+			}
+			staging := addedRestoreStagingRoot(t, before)
+			m := New(cfg)
+			m.modal = tt.modal(plan)
+			_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("staging root still exists after quit: %s", staging)
+			}
+		})
+	}
+}
+
+func TestRestoreMultipleConflictsAreNavigableAndRenameBackPreservesPreview(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{
+			{Kind: manifest.ChangeMigrate, Name: "alpha", Path: "/skills/alpha"},
+			{Kind: manifest.ChangeMigrate, Name: "bravo", Path: "/skills/bravo"},
+		},
+		Conflicts: []manifest.MigrationConflict{
+			{Name: "alpha", Path: "/skills/alpha", SuggestedName: "alpha-preserved"},
+			{Name: "bravo", Path: "/skills/bravo", SuggestedName: "bravo-preserved"},
+		},
+	}
+	m.openRestorePlan(plan)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	preview := m.modal.(restorePlanModal)
+	if preview.conflictIndex != 1 {
+		t.Fatalf("conflict index = %d, want 1", preview.conflictIndex)
+	}
+	updated, _ = m.Update(keyRunes("e"))
+	m = mustModel(t, updated)
+	if rename := m.modal.(restoreRenameModal); rename.conflictIndex != 1 {
+		t.Fatalf("rename conflict index = %d, want 1", rename.conflictIndex)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	preview = m.modal.(restorePlanModal)
+	if preview.conflictIndex != 1 {
+		t.Fatalf("preview conflict index after back = %d, want 1", preview.conflictIndex)
+	}
+}
+
+func restoreStagingRoots(t *testing.T) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(os.TempDir(), "x-skills-restore-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return paths
+}
+
+func addedRestoreStagingRoot(t *testing.T, before []string) string {
+	t.Helper()
+	known := make(map[string]struct{}, len(before))
+	for _, path := range before {
+		known[path] = struct{}{}
+	}
+	for _, path := range restoreStagingRoots(t) {
+		if _, ok := known[path]; !ok {
+			return path
+		}
+	}
+	t.Fatal("restore planning did not create a staging root")
+	return ""
 }
 
 func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -512,6 +514,40 @@ func TestInstallArchiveUsesSelectedRows(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); err != nil {
 			t.Fatalf("archive %s missing: %v", name, err)
 		}
+	}
+}
+
+func TestRunInstallArchiveRowReturnsOperationMessage(t *testing.T) {
+	op := installArchiveRowOperation(func(context.Context) installArchiveMsg {
+		return installArchiveMsg{name: "beta", err: errors.New("boom")}
+	})
+
+	msg := runInstallArchiveRow(context.Background(), op)
+	if msg.name != "beta" || msg.err == nil {
+		t.Fatalf("msg = %#v", msg)
+	}
+}
+
+func TestRunInstallArchiveRowRejectsNilOperation(t *testing.T) {
+	msg := runInstallArchiveRow(context.Background(), nil)
+	if msg.err == nil || msg.err.Error() != "nil install archive row operation" {
+		t.Fatalf("msg = %#v", msg)
+	}
+}
+
+func TestInstallArchiveBatchAttributesFailureToOperationRow(t *testing.T) {
+	commands := []installArchiveRowCommand{
+		{
+			row: installResultView{Result: remote.SearchResult{Name: "alpha"}},
+			operation: func(context.Context) installArchiveMsg {
+				return installArchiveMsg{name: "beta", err: errors.New("boom")}
+			},
+		},
+	}
+
+	msg := runInstallArchiveBatch(context.Background(), commands, nil, 1, 7)
+	if msg.batch == nil || !reflect.DeepEqual(msg.batch.failures, []string{"alpha: boom"}) {
+		t.Fatalf("msg = %#v", msg)
 	}
 }
 

@@ -96,6 +96,23 @@ type installArchiveMsg struct {
 	err          error
 }
 
+type installArchiveRowOperation func(context.Context) installArchiveMsg
+
+func runInstallArchiveRow(ctx context.Context, operation installArchiveRowOperation) installArchiveMsg {
+	if operation == nil {
+		return installArchiveMsg{err: errors.New("nil install archive row operation")}
+	}
+	return operation(ctx)
+}
+
+func installArchiveOperationCmd(operation installArchiveRowOperation, timeout time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return runInstallArchiveRow(ctx, operation)
+	}
+}
+
 type installArchiveStateMsg struct {
 	token    int
 	identity installArchiveIdentity
@@ -378,13 +395,13 @@ func (m *Model) archiveInstallSingleResult(row installResultView) tea.Cmd {
 	if row.ArchiveState == remote.ArchiveStateUpdateAvailable {
 		return m.openInstallUpdateDiff(row)
 	}
-	cmd := m.archiveInstallRow(row)
-	if cmd == nil {
+	operation := m.archiveInstallRow(row)
+	if operation == nil {
 		return nil
 	}
 	m.install.archiveInFlight = true
 	m.install.archiveInFlightToken = m.install.archiveToken
-	return cmd
+	return installArchiveOperationCmd(operation, installArchiveTimeout)
 }
 
 func (m *Model) archiveInstallBatch(rows []installResultView) tea.Cmd {
@@ -419,64 +436,68 @@ func (m *Model) archiveInstallBatch(rows []installResultView) tea.Cmd {
 		}
 		return m.openInstallArchiveBatchNext(next)
 	}
-	cmd := m.archiveInstallRows(actionRows, next, len(rows))
-	if cmd == nil {
+	operation := m.archiveInstallRows(actionRows, next, len(rows))
+	if operation == nil {
 		return nil
 	}
 	m.install.archiveInFlight = true
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = fmt.Sprintf("archiving %d skills...", len(actionRows))
 	m.install.Message = m.status
-	return cmd
+	return installArchiveOperationCmd(operation, installArchiveTimeout)
 }
 
 type installArchiveRowCommand struct {
-	row installResultView
-	cmd tea.Cmd
+	row       installResultView
+	operation installArchiveRowOperation
 }
 
-func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiveBatchNext, total int) tea.Cmd {
+func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiveBatchNext, total int) installArchiveRowOperation {
 	commands := make([]installArchiveRowCommand, 0, len(rows))
 	for _, row := range rows {
-		cmd := m.archiveInstallRow(row)
-		if cmd == nil {
+		operation := m.archiveInstallRow(row)
+		if operation == nil {
 			continue
 		}
-		commands = append(commands, installArchiveRowCommand{row: row, cmd: cmd})
+		commands = append(commands, installArchiveRowCommand{row: row, operation: operation})
 	}
 	if len(commands) == 0 {
 		return nil
 	}
 	token := m.install.archiveToken
-	return func() tea.Msg {
-		result := &installArchiveBatchResult{total: total, next: next}
-		for i, command := range commands {
-			msg := command.cmd().(installArchiveMsg)
-			if msg.err != nil {
-				switch msg.archiveState {
-				case remote.ArchiveStateNameConflict:
-					result.next = &installArchiveBatchNext{
-						row:       command.row,
-						action:    remote.ArchiveStateNameConflict,
-						remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
-					}
-					return installArchiveMsg{token: token, batch: result}
-				case remote.ArchiveStateUpdateAvailable:
-					result.next = &installArchiveBatchNext{
-						row:       command.row,
-						action:    remote.ArchiveStateUpdateAvailable,
-						remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
-					}
-					return installArchiveMsg{token: token, batch: result}
-				default:
-					result.failures = append(result.failures, command.row.Result.Name+": "+msg.err.Error())
-					continue
-				}
-			}
-			result.success = append(result.success, msg.name)
-		}
-		return installArchiveMsg{token: token, batch: result}
+	return func(ctx context.Context) installArchiveMsg {
+		return runInstallArchiveBatch(ctx, commands, next, total, token)
 	}
+}
+
+func runInstallArchiveBatch(ctx context.Context, commands []installArchiveRowCommand, next *installArchiveBatchNext, total, token int) installArchiveMsg {
+	result := &installArchiveBatchResult{total: total, next: next}
+	for i, command := range commands {
+		msg := runInstallArchiveRow(ctx, command.operation)
+		if msg.err != nil {
+			switch msg.archiveState {
+			case remote.ArchiveStateNameConflict:
+				result.next = &installArchiveBatchNext{
+					row:       command.row,
+					action:    remote.ArchiveStateNameConflict,
+					remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
+				}
+				return installArchiveMsg{token: token, batch: result}
+			case remote.ArchiveStateUpdateAvailable:
+				result.next = &installArchiveBatchNext{
+					row:       command.row,
+					action:    remote.ArchiveStateUpdateAvailable,
+					remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
+				}
+				return installArchiveMsg{token: token, batch: result}
+			default:
+				result.failures = append(result.failures, command.row.Result.Name+": "+msg.err.Error())
+				continue
+			}
+		}
+		result.success = append(result.success, msg.name)
+	}
+	return installArchiveMsg{token: token, batch: result}
 }
 
 func remainingArchiveRows(commands []installArchiveRowCommand) []installResultView {
@@ -519,15 +540,15 @@ func installArchiveBatchNextRows(next *installArchiveBatchNext) []installResultV
 	return rows
 }
 
-func (m *Model) archiveInstallRow(row installResultView) tea.Cmd {
+func (m *Model) archiveInstallRow(row installResultView) installArchiveRowOperation {
 	return m.archiveInstallRowPreparing(row, nil)
 }
 
-func (m *Model) archiveInstallRowPreparing(row installResultView, prepare func() error) tea.Cmd {
+func (m *Model) archiveInstallRowPreparing(row installResultView, prepare func() error) installArchiveRowOperation {
 	return m.archiveInstallRowWithConflictPreparing(row, row.Result.Name, remote.ConflictArchiveOnly, prepare)
 }
 
-func (m *Model) archiveInstallRowWithConflict(row installResultView, archiveName, conflict string) tea.Cmd {
+func (m *Model) archiveInstallRowWithConflict(row installResultView, archiveName, conflict string) installArchiveRowOperation {
 	return m.archiveInstallRowWithConflictPreparing(row, archiveName, conflict, nil)
 }
 
@@ -536,28 +557,25 @@ func (m *Model) archiveInstallRowWithConflictPreparing(
 	archiveName string,
 	conflict string,
 	prepare func() error,
-) tea.Cmd {
+) installArchiveRowOperation {
 	m.install.previewToken++
 	m.install.archiveToken++
 	token := m.install.archiveToken
 	identity := installArchiveIdentityFromResult(row.Result)
 	checkouts := m.ensureInstallCheckoutCache()
 	if checkouts == nil {
-		return func() tea.Msg {
+		return func(context.Context) installArchiveMsg {
 			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: errors.New(m.status)}
 		}
 	}
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
-		return func() tea.Msg {
+		return func(context.Context) installArchiveMsg {
 			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
 		}
 	}
 	cfg := m.cfg
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
-		defer cancel()
-
+	return func(ctx context.Context) installArchiveMsg {
 		checkout, err := checkouts.Checkout(ctx, source)
 		if err != nil {
 			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: err}
@@ -624,28 +642,25 @@ func (m *Model) archiveInstallRowWithConflictPreparing(
 	}
 }
 
-func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath, newPath string) tea.Cmd {
+func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath, newPath string) installArchiveRowOperation {
 	m.install.previewToken++
 	m.install.archiveToken++
 	token := m.install.archiveToken
 	identity := installArchiveIdentityFromResult(row.Result)
 	checkouts := m.ensureInstallCheckoutCache()
 	if checkouts == nil {
-		return func() tea.Msg {
+		return func(context.Context) installArchiveMsg {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: errors.New(m.status)}
 		}
 	}
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
-		return func() tea.Msg {
+		return func(context.Context) installArchiveMsg {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
 	}
 	cfg := m.cfg
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
-		defer cancel()
-
+	return func(ctx context.Context) installArchiveMsg {
 		checkout, err := checkouts.Checkout(ctx, source)
 		if err != nil {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
@@ -779,8 +794,8 @@ func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName 
 		m.install.Message = m.status
 		return nil
 	}
-	cmd := m.archiveInstallRowRenamingExisting(row, oldPath, newPath)
-	if cmd == nil {
+	operation := m.archiveInstallRowRenamingExisting(row, oldPath, newPath)
+	if operation == nil {
 		return nil
 	}
 	m.modal = nil
@@ -788,7 +803,7 @@ func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName 
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = "archiving " + row.Result.Name + "..."
 	m.install.Message = m.status
-	return cmd
+	return installArchiveOperationCmd(operation, installArchiveTimeout)
 }
 
 func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
@@ -899,8 +914,8 @@ func (m *Model) applyInstallArchiveWithConflict(row installResultView, archiveNa
 		m.install.Message = m.status
 		return nil
 	}
-	cmd := m.archiveInstallRowWithConflict(row, archiveName, conflict)
-	if cmd == nil {
+	operation := m.archiveInstallRowWithConflict(row, archiveName, conflict)
+	if operation == nil {
 		return nil
 	}
 	m.modal = nil
@@ -908,7 +923,7 @@ func (m *Model) applyInstallArchiveWithConflict(row installResultView, archiveNa
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = "archiving " + archiveName + "..."
 	m.install.Message = m.status
-	return cmd
+	return installArchiveOperationCmd(operation, installArchiveTimeout)
 }
 
 func (m *Model) installAndUse(row installResultView, destinations []installDestination, useExistingArchive bool) tea.Cmd {
@@ -942,9 +957,9 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	}
 	backupPath := ""
 	archiveRollbackPrepared := false
-	var archiveCmd tea.Cmd
+	var archiveOperation installArchiveRowOperation
 	if !useExistingArchive {
-		archiveCmd = m.archiveInstallRowPreparing(row, func() error {
+		archiveOperation = m.archiveInstallRowPreparing(row, func() error {
 			var err error
 			backupPath, err = installUsePrepareArchiveRollback(archivePath)
 			if err == nil {
@@ -952,7 +967,7 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 			}
 			return err
 		})
-		if archiveCmd == nil {
+		if archiveOperation == nil {
 			return nil
 		}
 	}
@@ -963,8 +978,10 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		if !useGeneration.isCurrent(token) {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
-		if archiveCmd != nil {
-			archiveMsg := archiveCmd().(installArchiveMsg)
+		if archiveOperation != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+			archiveMsg := runInstallArchiveRow(ctx, archiveOperation)
+			cancel()
 			if archiveMsg.err != nil {
 				if archiveRollbackPrepared {
 					if rollbackErr := installUseRollbackArchive(archivePath, backupPath); rollbackErr != nil {
@@ -1073,17 +1090,17 @@ func (m *Model) installAndUseRowsWithProgress(
 		}
 	}
 	token := m.install.bumpUseToken()
-	archiveCommands := make([]tea.Cmd, 0, len(rows))
+	archiveOperations := make([]installArchiveRowOperation, 0, len(rows))
 	for i, row := range rows {
 		if i == 0 && useExistingFirstArchive {
-			archiveCommands = append(archiveCommands, nil)
+			archiveOperations = append(archiveOperations, nil)
 			continue
 		}
-		cmd := m.archiveInstallRow(row)
-		if cmd == nil {
+		operation := m.archiveInstallRow(row)
+		if operation == nil {
 			return nil
 		}
-		archiveCommands = append(archiveCommands, cmd)
+		archiveOperations = append(archiveOperations, operation)
 	}
 	m.install.useInFlight = true
 	m.install.useInFlightToken = token
@@ -1104,8 +1121,10 @@ func (m *Model) installAndUseRowsWithProgress(
 				}
 				return installUseMsg{token: token, destinations: destinations, stale: true}
 			}
-			if archiveCommands[i] != nil {
-				archiveMsg := archiveCommands[i]().(installArchiveMsg)
+			if archiveOperations[i] != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+				archiveMsg := runInstallArchiveRow(ctx, archiveOperations[i])
+				cancel()
 				if archiveMsg.err != nil {
 					switch archiveMsg.archiveState {
 					case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
@@ -1792,8 +1811,8 @@ func (m *Model) continueInstallArchiveBatchAfterResolved(identity installArchive
 	if len(pending.remaining) == 0 {
 		return m.applyInstallArchiveBatchResult(result)
 	}
-	cmd := m.archiveInstallRows(pending.remaining, nil, pending.total)
-	if cmd == nil {
+	operation := m.archiveInstallRows(pending.remaining, nil, pending.total)
+	if operation == nil {
 		return m.applyInstallArchiveBatchResult(result)
 	}
 	m.install.archiveInFlight = true
@@ -1801,7 +1820,9 @@ func (m *Model) continueInstallArchiveBatchAfterResolved(identity installArchive
 	m.status = fmt.Sprintf("archiving %d skills...", len(pending.remaining))
 	m.install.Message = m.status
 	return func() tea.Msg {
-		msg := cmd().(installArchiveMsg)
+		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+		defer cancel()
+		msg := runInstallArchiveRow(ctx, operation)
 		if msg.batch == nil {
 			return msg
 		}

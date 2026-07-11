@@ -230,7 +230,7 @@ func TestRepoFooterShowsRepoActions(t *testing.T) {
 	m.setView(ViewRepo)
 
 	view := plain(m.View())
-	want := "↵ details  / filter  p preview  l link  u unlink  d delete  c clear  ^R refresh"
+	want := "↵ details  / filter  p preview  l link  r recommend  u unlink  d delete  c clear  ^R refresh"
 	if !strings.Contains(view, want) {
 		t.Fatalf("repo footer missing repo actions:\n%s", view)
 	}

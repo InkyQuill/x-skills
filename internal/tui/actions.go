@@ -362,6 +362,46 @@ func (m Model) selectedRepoSkillNames() []string {
 	return names
 }
 
+func (m *Model) toggleRepoRecommendations() {
+	names := m.selectedRepoSkillNames()
+	if len(names) == 0 {
+		return
+	}
+	recommended, err := manifest.LoadRecommended(m.cfg.ProjectRoot)
+	if err != nil {
+		m.status = "project recommendation update failed: " + err.Error()
+		return
+	}
+	recommendedNames := make(map[string]struct{}, len(recommended.Skills))
+	for _, skill := range recommended.Skills {
+		recommendedNames[skill.Name] = struct{}{}
+	}
+	recommendedCount := 0
+	for _, name := range names {
+		if _, ok := recommendedNames[name]; ok {
+			recommendedCount++
+		}
+	}
+	if recommendedCount != 0 && recommendedCount != len(names) {
+		m.modal = newResultModal("Project recommendations", []string{"Select only recommended skills to remove, or only local skills to promote."})
+		return
+	}
+	if recommendedCount == len(names) {
+		err = manifest.Unrecommend(m.cfg, names)
+		if err == nil {
+			m.status = "Removed " + repoSelectionTitle(names) + " from project recommendations"
+		}
+	} else {
+		err = manifest.Recommend(m.cfg, names)
+		if err == nil {
+			m.status = "Promoted " + repoSelectionTitle(names) + " to project recommendations"
+		}
+	}
+	if err != nil {
+		m.status = "project recommendation update failed: " + err.Error()
+	}
+}
+
 func repoSelectionLabel(label string, count int) string {
 	if count == 1 {
 		return label

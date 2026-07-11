@@ -287,6 +287,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.view == ViewRepo {
 			m.openRepoLinkModal()
 		}
+	case "r":
+		if m.view == ViewRepo {
+			m.toggleRepoRecommendations()
+		}
 	case "m":
 		if m.view == ViewActive {
 			m.openMigrateModal()

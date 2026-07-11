@@ -38,6 +38,8 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "c", Label: "clear Active/Repo selection (Install too)"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "p", Label: "preview SKILL.md"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "l", Label: "link repo skill"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "r", Label: "Repo: Promote to project recommendations"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "r", Label: "Repo: Remove from project recommendations"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "u", Label: "unlink active/repo usages"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "d", Label: "delete repo skill"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "m", Label: "migrate active skill"}),

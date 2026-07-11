@@ -87,6 +87,8 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		newLinkCommand(&opts),
 		newMigrateCommand(&opts),
 		newUnlinkCommand(&opts),
+		newRecommendCommand(&opts),
+		newUnrecommendCommand(&opts),
 		newDoctorCommand(&opts),
 		newTUICommand(&opts),
 	)

@@ -689,6 +689,7 @@ func commandPalette(m Model) string {
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
 			{ASCII: "l", Label: "link"},
+			{ASCII: "r", Label: "recommend"},
 			{ASCII: "u", Label: "unlink"},
 			{ASCII: "d", Label: "delete"},
 			{ASCII: "c", Label: "clear"},

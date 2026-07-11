@@ -13,9 +13,51 @@ import (
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
+
+func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Zen.")
+	if err := remote.WriteSourceMetadata(archive, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "skills", SkillPath: "skills/zen-of-go"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewRepo)
+
+	updated, _ := m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	if m.view != ViewRepo {
+		t.Fatalf("view = %s, want Repo", m.view)
+	}
+	recommended, err := manifest.LoadRecommended(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommended.Skills) != 1 || recommended.Skills[0].Name != "zen-of-go" {
+		t.Fatalf("recommended = %#v, want zen-of-go", recommended.Skills)
+	}
+	if !strings.Contains(m.status, "Promoted") {
+		t.Fatalf("status = %q, want promotion result", m.status)
+	}
+
+	updated, _ = m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	recommended, err = manifest.LoadRecommended(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommended.Skills) != 0 {
+		t.Fatalf("recommended = %#v, want empty after second toggle", recommended.Skills)
+	}
+	if !strings.Contains(m.status, "Removed") {
+		t.Fatalf("status = %q, want removal result", m.status)
+	}
+}
 
 func TestActiveMigrateSameSHAArchivesRelinkWithoutConflict(t *testing.T) {
 	home := t.TempDir()

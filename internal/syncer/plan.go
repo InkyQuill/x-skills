@@ -575,7 +575,7 @@ func classifyDestination(cfg config.Config, path, archivePath, candidateFingerpr
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, err = filepath.EvalSymlinks(path)
 		if err != nil {
-			return destinationClassification{kind: destinationDivergent, status: actions.StatusUnmanaged}, nil
+			return destinationClassification{}, fmt.Errorf("resolve destination symlink %q: %w", path, err)
 		}
 		if isArchivedPath(cfg, resolved) {
 			status = actions.StatusManaged

@@ -108,7 +108,7 @@ func Apply(ctx context.Context, cfg config.Config, plan Plan, options ...ApplyOp
 			result.Failed = append(result.Failed, SkillResult{Name: skill.name, Err: err,
 				ArchiveChanged: mutation.archiveChanged, SourceRemoved: mutation.sourceRemoved, LinksRolledBack: mutation.linksRolledBack,
 				LinksRollbackIncomplete: mutation.linksRollbackIncomplete})
-			mutated = true
+			mutated = mutated || mutation.changedFilesystem()
 			continue
 		}
 		result.Succeeded = append(result.Succeeded, SkillResult{Name: skill.name})
@@ -390,6 +390,10 @@ type skillMutation struct {
 	linksRollbackIncomplete bool
 }
 
+func (mutation skillMutation) changedFilesystem() bool {
+	return mutation.archiveChanged || mutation.sourceRemoved || mutation.linksRollbackIncomplete
+}
+
 type applyFilesystem struct {
 	removeAll      func(string) error
 	rename         func(string, string) error
@@ -455,10 +459,12 @@ func applySkill(ctx context.Context, cfg config.Config, filesystem applyFilesyst
 			}
 			emit(ConflictReplace)
 		}
-		if err := os.Rename(staged, migration.ArchivePath); err != nil {
+		if err := filesystem.rename(staged, migration.ArchivePath); err != nil {
+			_ = os.RemoveAll(staged)
 			restoreErr := error(nil)
 			if preserved != "" {
-				restoreErr = copyTreeAtomic(preserved, migration.ArchivePath)
+				_, restoreErr = actions.RenameArchiveContext(context.WithoutCancel(ctx), cfg, conflict.Resolution.PreserveAs, migration.Name)
+				mutation.archiveChanged = restoreErr != nil
 			}
 			return mutation, errors.Join(fmt.Errorf("publish migration %q: %w", migration.Name, err), restoreErr)
 		}

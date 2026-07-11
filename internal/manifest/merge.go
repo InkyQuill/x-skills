@@ -36,7 +36,10 @@ func Effective(recommended, local Manifest) (Manifest, []Notice) {
 	}
 	slices.SortStableFunc(effective.Skills, compareSkillNames)
 	slices.SortStableFunc(notices, func(a, b Notice) int {
-		return strings.Compare(strings.ToLower(a.Skill), strings.ToLower(b.Skill))
+		return cmp.Or(
+			strings.Compare(strings.ToLower(a.Skill), strings.ToLower(b.Skill)),
+			strings.Compare(a.Skill, b.Skill),
+		)
 	})
 	return effective, notices
 }

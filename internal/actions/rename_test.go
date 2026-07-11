@@ -21,8 +21,14 @@ func TestRenameArchivePreservesSkillAndSourceMetadataIdentity(t *testing.T) {
 	if err := remote.WriteSourceMetadata(archive, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "repo", SkillPath: "skills/original"}); err != nil {
 		t.Fatal(err)
 	}
-	skillBefore, _ := os.ReadFile(filepath.Join(archive, "SKILL.md"))
-	metaBefore, _ := os.ReadFile(filepath.Join(archive, remote.MetadataFile))
+	skillBefore, err := os.ReadFile(filepath.Join(archive, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metaBefore, err := os.ReadFile(filepath.Join(archive, remote.MetadataFile))
+	if err != nil {
+		t.Fatal(err)
+	}
 	fingerprintBefore, err := fingerprint.Directory(archive)
 	if err != nil {
 		t.Fatal(err)
@@ -31,8 +37,14 @@ func TestRenameArchivePreservesSkillAndSourceMetadataIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	newArchive := filepath.Join(cfg.ArchiveSkillsRoot(), "new")
-	skillAfter, _ := os.ReadFile(filepath.Join(newArchive, "SKILL.md"))
-	metaAfter, _ := os.ReadFile(filepath.Join(newArchive, remote.MetadataFile))
+	skillAfter, err := os.ReadFile(filepath.Join(newArchive, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metaAfter, err := os.ReadFile(filepath.Join(newArchive, remote.MetadataFile))
+	if err != nil {
+		t.Fatal(err)
+	}
 	fingerprintAfter, err := fingerprint.Directory(newArchive)
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +54,39 @@ func TestRenameArchivePreservesSkillAndSourceMetadataIdentity(t *testing.T) {
 	}
 	if fingerprintAfter != fingerprintBefore {
 		t.Fatalf("fingerprint = %q, want %q", fingerprintAfter, fingerprintBefore)
+	}
+}
+
+func TestRollbackArchiveRenamePreservesExternallyChangedLink(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old")
+	newPath := filepath.Join(root, "new")
+	if err := os.Mkdir(newPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "usage")
+	if err := os.Symlink("external-target", link); err != nil {
+		t.Fatal(err)
+	}
+	err := rollbackArchiveRename(oldPath, newPath, []renameUsage{{path: link, oldText: "old", newText: "new"}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "rollback drift") {
+		t.Fatalf("error = %v, want rollback drift", err)
+	}
+	target, readErr := os.Readlink(link)
+	if readErr != nil || target != "external-target" {
+		t.Fatalf("link target = %q, err = %v; want external target preserved", target, readErr)
+	}
+}
+
+func TestJoinRenameCleanupErrorPreservesPrimaryAndCleanup(t *testing.T) {
+	primary := errors.New("primary")
+	cleanup := errors.New("cleanup")
+	got := joinRenameCleanupError(primary, cleanup)
+	if !errors.Is(got, primary) || !errors.Is(got, cleanup) {
+		t.Fatalf("joined error = %v, want primary and cleanup", got)
+	}
+	if got := joinRenameCleanupError(primary, os.ErrNotExist); !errors.Is(got, primary) || errors.Is(got, os.ErrNotExist) {
+		t.Fatalf("not-exist cleanup = %v, want primary only", got)
 	}
 }
 

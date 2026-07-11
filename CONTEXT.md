@@ -65,7 +65,7 @@ The committed `.x-skills.yaml` list of reproducible, sourced skills recommended 
 _Avoid_: Shared lockfile, local manifest
 
 **Local Skill Manifest**:
-The gitignored `.x-skills.local.yaml` overlay automatically reconciled from configured project Skills Folders after successful project mutations. It may retain unavailable archive-only skills so another consumer's local state cannot erase them.
+The gitignored `.x-skills.local.yaml` overlay automatically reconciled from configured project Skills Folders after project mutations, including failed operations that partially changed the filesystem. It may retain unavailable archive-only skills so another consumer's local state cannot erase them.
 _Avoid_: Recommended manifest, cache
 
 **Archive Source**:

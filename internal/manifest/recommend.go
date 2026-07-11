@@ -9,6 +9,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
+	"github.com/InkyQuill/x-skills/internal/repo"
 )
 
 func Recommend(cfg config.Config, names []string) error {
@@ -73,6 +74,9 @@ func Unrecommend(cfg config.Config, names []string) error {
 }
 
 func sourcedArchiveSkill(cfg config.Config, name string) (Skill, error) {
+	if err := repo.ValidateName(name); err != nil {
+		return Skill{}, err
+	}
 	archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), name)
 	if _, err := os.Stat(archivePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -138,7 +142,10 @@ func writeManifestPair(projectRoot string, recommended, local Manifest) error {
 	if err := WriteLocal(projectRoot, local); err != nil {
 		restoreErr := restoreRecommended(recommendedPath, backup, hadRecommended)
 		if restoreErr != nil {
-			return fmt.Errorf("write Local Skill Manifest: %v; restore Recommended Skill Manifest: %w", err, restoreErr)
+			return errors.Join(
+				fmt.Errorf("write Local Skill Manifest: %w", err),
+				fmt.Errorf("restore Recommended Skill Manifest: %w", restoreErr),
+			)
 		}
 		return fmt.Errorf("write Local Skill Manifest: %w", err)
 	}

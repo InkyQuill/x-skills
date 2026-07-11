@@ -11,6 +11,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/spf13/cobra"
 )
 
 func TestRestoreRequiresExplicitProjectDestination(t *testing.T) {
@@ -91,6 +92,23 @@ func TestRestoreConflictRequiresExplicitRenameEvenWithYes(t *testing.T) {
 	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "-y", "restore", "--at", ".Ag"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
 		t.Fatalf("restore conflict error = %v", err)
+	}
+}
+
+func TestResolveRestoreConflictsRejectsOriginalSkillName(t *testing.T) {
+	previous := restoreInputIsTerminal
+	restoreInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { restoreInputIsTerminal = previous })
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader("wanted\n"))
+	cmd.SetOut(&bytes.Buffer{})
+	plan := manifest.RestorePlan{
+		Conflicts:      []manifest.MigrationConflict{{Path: "/tmp/wanted", Name: "wanted", SuggestedName: "wanted-local"}},
+		Normalizations: []manifest.Change{{Path: "/tmp/wanted", Name: "wanted", Kind: manifest.ChangeMigrate}},
+	}
+	err := resolveRestoreConflicts(cmd, &options{}, &plan)
+	if err == nil || !strings.Contains(err.Error(), `preserve name must differ from "wanted"`) {
+		t.Fatalf("error = %v, want original-name rejection", err)
 	}
 }
 

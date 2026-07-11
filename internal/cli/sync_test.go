@@ -134,7 +134,7 @@ func TestSyncDivergentChecklistDefaultsReflectVariantCompatibility(t *testing.T)
 func TestSyncExplicitIncompatibleSkillWarnsAndYesConfirmsNonTTY(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
-	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only", "Must use $CLAUDE_PROJECT_DIR.")
+	writeSyncIncompatibleSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only")
 
 	var nonTTYOut bytes.Buffer
 	err := Execute([]string{"--home", home, "--project-root", project, "-y", "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &nonTTYOut, &bytes.Buffer{})
@@ -151,7 +151,7 @@ func TestSyncExplicitIncompatibleSkillWarnsAndYesConfirmsNonTTY(t *testing.T) {
 
 	home, project = t.TempDir(), t.TempDir()
 	cfg = config.Default(project, home)
-	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only", "Must use $CLAUDE_PROJECT_DIR.")
+	writeSyncIncompatibleSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only")
 	err = Execute([]string{"--home", home, "--project-root", project, "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "requires confirmation; rerun with -y") {
 		t.Fatalf("unconfirmed incompatible error = %v", err)
@@ -173,6 +173,15 @@ func TestSyncExplicitIncompatibleSkillWarnsAndYesConfirmsNonTTY(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "claude-only")); !os.IsNotExist(err) {
 		t.Fatalf("declined incompatible skill was archived: %v", err)
+	}
+}
+
+func writeSyncIncompatibleSkill(t *testing.T, root, name string) {
+	t.Helper()
+	dir := makeSkill(t, root, name, "Claude-only workflow.")
+	data := []byte("---\nname: " + name + "\ndescription: Claude-only workflow.\n---\n\nRead the project from $CLAUDE_PROJECT_DIR.\n")
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

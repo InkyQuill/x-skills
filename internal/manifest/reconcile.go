@@ -123,6 +123,9 @@ func reconciledSkill(cfg config.Config, name, activePath, status string) (Skill,
 	}
 	skill.Compatibility = meta.Compatibility
 	skill.Source.Ref = meta.Ref
+	if skill.Source.Ref == "" {
+		skill.Source.Ref = meta.Commit
+	}
 	skill.Source.Path = meta.SkillPath
 	switch meta.SourceType {
 	case remote.SourceTypeGitHub:

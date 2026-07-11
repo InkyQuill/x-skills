@@ -29,7 +29,9 @@ x-skills search <query> --owner <owner> --json
 If `x-skills search` is unavailable in an older checkout, call the skills.sh API directly:
 
 ```bash
-curl -fsSL 'https://skills.sh/api/search?q=<query>&limit=20'
+curl -fsSLG 'https://skills.sh/api/search' \
+  --data-urlencode 'q=<multi-keyword query>' \
+  --data-urlencode 'limit=20'
 ```
 
 Parse results for `name`, `description`, `owner`, `repo`, `path`, `installs`, and `audit`. Treat search/API failures as transient unless the same repository/path also fails during checkout.

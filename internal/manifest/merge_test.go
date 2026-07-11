@@ -113,3 +113,20 @@ func TestEffectiveKeepsExactCaseVariantsInDeterministicOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectiveOrdersNoticeCaseVariantsDeterministically(t *testing.T) {
+	recommended := Manifest{Version: 1, Skills: []Skill{
+		{Name: "alpha", Source: Source{Type: SourceGitHub, Repository: "r/a", Path: "a"}},
+		{Name: "Alpha", Source: Source{Type: SourceGitHub, Repository: "r/A", Path: "A"}},
+	}}
+	local := Manifest{Version: 1, Skills: []Skill{
+		{Name: "alpha", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA},
+		{Name: "Alpha", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintB},
+	}}
+	for range 20 {
+		_, notices := Effective(recommended, local)
+		if len(notices) != 2 || notices[0].Skill != "Alpha" || notices[1].Skill != "alpha" {
+			t.Fatalf("notices = %#v, want Alpha then alpha", notices)
+		}
+	}
+}

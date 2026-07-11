@@ -127,6 +127,20 @@ func TestReadSourceMetadataTreatsMissingSchemaVersionAsV1(t *testing.T) {
 	}
 }
 
+func TestReadSourceMetadataRejectsUnsupportedSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, MetadataFile), []byte(`{"schema_version":3}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, ok, err := ReadSourceMetadata(dir)
+	if err == nil || !strings.Contains(err.Error(), "unsupported source metadata schema version 3") {
+		t.Fatalf("error = %v, want unsupported schema version", err)
+	}
+	if ok {
+		t.Fatal("ok = true for unsupported schema")
+	}
+}
+
 func TestReadSourceMetadataMissing(t *testing.T) {
 	got, ok, err := ReadSourceMetadata(t.TempDir())
 	if err != nil {

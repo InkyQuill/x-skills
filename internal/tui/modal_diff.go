@@ -126,7 +126,8 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 		if diffIndex < len(diffLines) {
 			diffCell = diffLines[diffIndex]
 		}
-		lines = append(lines, fmt.Sprintf("%-*s │ %s", fileWidth, tuiui.TruncateANSI(fileCell, fileWidth), tuiui.TruncateANSI(diffCell, diffWidth)))
+		fileCell = tuiui.PadRightANSI(tuiui.TruncateANSI(fileCell, fileWidth), fileWidth)
+		lines = append(lines, fmt.Sprintf("%s │ %s", fileCell, tuiui.TruncateANSI(diffCell, diffWidth)))
 	}
 	if len(diffLines) > 0 {
 		end := c.scroll + bodyHeight

@@ -40,7 +40,7 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 					}
 					locations, archiveOnlyBuiltIns, err = promptDoctorBuiltInDestinations(cmd, cfg)
 					if err != nil {
-						return fmt.Errorf("doctor fix requires confirmation; rerun with -y")
+						return err
 					}
 					filter = doctorFilterForLocations(locations)
 				}
@@ -146,14 +146,8 @@ func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roo
 	if archiveOnlyBuiltIns {
 		destinations = nil
 	}
-	for _, issue := range filtered {
-		if issue.Kind != doctor.KindMissingBuiltIn && issue.Kind != doctor.KindInactiveBuiltIn {
-			continue
-		}
-		if err := doctor.ValidateBuiltInDestinations(destinations); err != nil {
-			return nil, err
-		}
-		break
+	if err := doctor.ValidateBuiltInDestinations(destinations); err != nil {
+		return nil, err
 	}
 	results, err := doctor.FixIssues(filtered)
 	if err != nil {

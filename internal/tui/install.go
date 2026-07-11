@@ -572,24 +572,7 @@ func newInstallArchiveBatchCmdWithProgress(
 		if generation != nil && !generation.isCurrent(token) {
 			return installBatchCancelledMsg{token: token}
 		}
-		if msg.err != nil {
-			switch msg.archiveState {
-			case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
-				result.next = &installArchiveBatchNext{
-					row:       commands[0].row,
-					action:    msg.archiveState,
-					remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[1:])...), installArchiveBatchNextRows(next)...),
-				}
-				return installArchiveMsg{token: token, batch: result}
-			default:
-				result.failures = append(result.failures, commands[0].row.Result.Name+": "+msg.err.Error())
-			}
-		} else {
-			result.success = append(result.success, msg.name)
-		}
-		result.completed++
-		result.currentName = commands[0].row.Result.Name
-		if len(commands) == 1 {
+		if applyInstallArchiveBatchRow(result, commands[0], commands[1:], next, msg) || len(commands) == 1 {
 			return installArchiveMsg{token: token, batch: result}
 		}
 		return installBatchProgressMsg{
@@ -602,6 +585,8 @@ func newInstallArchiveBatchCmdWithProgress(
 	}
 }
 
+// runInstallArchiveBatch is a synchronous test harness for the production
+// progress-command chain. Both paths share applyInstallArchiveBatchRow.
 func runInstallArchiveBatch(
 	ctx context.Context,
 	commands []installArchiveRowCommand,
@@ -615,34 +600,39 @@ func runInstallArchiveBatch(
 			return installArchiveMsg{token: token, batch: result, stale: true}
 		}
 		msg := runInstallArchiveRow(ctx, command.operation)
-		if msg.err != nil {
-			switch msg.archiveState {
-			case remote.ArchiveStateNameConflict:
-				result.next = &installArchiveBatchNext{
-					row:       command.row,
-					action:    remote.ArchiveStateNameConflict,
-					remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
-				}
-				return installArchiveMsg{token: token, batch: result}
-			case remote.ArchiveStateUpdateAvailable:
-				result.next = &installArchiveBatchNext{
-					row:       command.row,
-					action:    remote.ArchiveStateUpdateAvailable,
-					remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
-				}
-				return installArchiveMsg{token: token, batch: result}
-			default:
-				result.failures = append(result.failures, command.row.Result.Name+": "+msg.err.Error())
-				result.completed++
-				result.currentName = command.row.Result.Name
-				continue
-			}
+		if applyInstallArchiveBatchRow(result, command, commands[i+1:], next, msg) {
+			return installArchiveMsg{token: token, batch: result}
 		}
-		result.success = append(result.success, msg.name)
-		result.completed++
-		result.currentName = command.row.Result.Name
 	}
 	return installArchiveMsg{token: token, batch: result}
+}
+
+// applyInstallArchiveBatchRow reduces one archive operation into batch state.
+func applyInstallArchiveBatchRow(
+	result *installArchiveBatchResult,
+	command installArchiveRowCommand,
+	remaining []installArchiveRowCommand,
+	next *installArchiveBatchNext,
+	msg installArchiveMsg,
+) bool {
+	if msg.err != nil {
+		switch msg.archiveState {
+		case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
+			result.next = &installArchiveBatchNext{
+				row:       command.row,
+				action:    msg.archiveState,
+				remaining: append(append([]installResultView(nil), remainingArchiveRows(remaining)...), installArchiveBatchNextRows(next)...),
+			}
+			return true
+		default:
+			result.failures = append(result.failures, command.row.Result.Name+": "+msg.err.Error())
+		}
+	} else {
+		result.success = append(result.success, msg.name)
+	}
+	result.completed++
+	result.currentName = command.row.Result.Name
+	return false
 }
 
 func remainingArchiveRows(commands []installArchiveRowCommand) []installResultView {
@@ -1681,14 +1671,6 @@ func (m *Model) ensureInstallCheckoutCache() *remote.CheckoutCache {
 		m.install.checkoutCacheRoot = root
 	}
 	return m.install.checkouts
-}
-
-func (m *Model) cleanupInstallCheckoutCache() {
-	if m.install.checkoutCacheRoot != "" {
-		_ = os.RemoveAll(m.install.checkoutCacheRoot)
-		m.install.checkoutCacheRoot = ""
-		m.install.checkouts = nil
-	}
 }
 
 func (m Model) gitSourceForInstall(result remote.SearchResult) (remote.GitSource, error) {

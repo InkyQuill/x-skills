@@ -2,9 +2,11 @@ package syncer
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -609,9 +611,12 @@ func snapshotPlanTree(t *testing.T, paths ...string) map[string]planSnapshotEntr
 	t.Helper()
 	snapshot := map[string]planSnapshotEntry{}
 	for _, root := range paths {
-		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return nil
+				if errors.Is(err, os.ErrNotExist) && path == root {
+					return nil
+				}
+				return err
 			}
 			entry := planSnapshotEntry{mode: info.Mode(), size: info.Size(), modTime: info.ModTime().UnixNano()}
 			switch {
@@ -631,8 +636,23 @@ func snapshotPlanTree(t *testing.T, paths ...string) map[string]planSnapshotEntr
 			snapshot[path] = entry
 			return nil
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	return snapshot
+}
+
+func TestClassifyDestinationRejectsBrokenSymlink(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	path := filepath.Join(cfg.ProjectRoot, "broken")
+	if err := os.Symlink(filepath.Join(cfg.ProjectRoot, "missing"), path); err != nil {
+		t.Fatal(err)
+	}
+	_, err := classifyDestination(cfg, path, filepath.Join(cfg.ArchiveSkillsRoot(), "review"), "candidate", false, false)
+	if err == nil || !strings.Contains(err.Error(), "resolve destination symlink") {
+		t.Fatalf("error = %v, want actionable broken symlink error", err)
+	}
 }
 
 func assertPlanSnapshot(t *testing.T, before map[string]planSnapshotEntry, paths ...string) {

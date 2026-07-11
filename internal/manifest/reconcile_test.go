@@ -39,6 +39,26 @@ func TestReconcileLocalUsesUnionOfProjectRootsAndExcludesGlobalAndRecommended(t 
 	}
 }
 
+func TestReconcileLocalUsesCommitWhenSourceRefIsEmpty(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeReconcileArchive(t, cfg, "pinned", &remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "owner", Repo: "repo", SkillPath: "skills/pinned", Commit: "abc123",
+	})
+	linkReconcileSkill(t, cfg, config.ScopeProject, config.TargetAgents, "pinned")
+	if _, err := ReconcileLocal(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadLocal(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skills) != 1 || got.Skills[0].Source.Ref != "abc123" {
+		t.Fatalf("skills = %#v, want commit fallback ref", got.Skills)
+	}
+}
+
 func TestReconcileLocalRemovesPresentArchiveAfterLastProjectOccurrence(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

@@ -577,7 +577,7 @@ type rowSegment struct {
 
 func selectableRow(segments []rowSegment, focused bool, selected bool, width int) string {
 	if !focused && !selected {
-		return tuiui.TruncateANSI(joinRowSegments(segments, lipgloss.NoColor{}), width)
+		return tuiui.TruncateANSI(ansi.Strip(joinRowSegments(segments, lipgloss.NoColor{})), width)
 	}
 
 	rowStyle := selectedBg
@@ -594,7 +594,7 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 		}
 		text := segment.text
 		if segment.render != nil {
-			text = segment.render(background)
+			text = ansi.Strip(segment.render(background))
 		} else {
 			text = ansi.Strip(text)
 		}
@@ -618,10 +618,10 @@ func joinRowSegments(segments []rowSegment, background lipgloss.TerminalColor) s
 	var row strings.Builder
 	for _, segment := range segments {
 		if segment.render != nil {
-			row.WriteString(segment.render(background))
+			row.WriteString(ansi.Strip(segment.render(background)))
 			continue
 		}
-		row.WriteString(segment.text)
+		row.WriteString(ansi.Strip(segment.text))
 	}
 	return row.String()
 }

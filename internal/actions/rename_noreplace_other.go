@@ -3,15 +3,10 @@
 package actions
 
 import (
-	"errors"
-	"os"
+	"fmt"
+	"runtime"
 )
 
 func renameNoReplace(oldPath, newPath string) error {
-	if _, err := os.Lstat(newPath); err == nil {
-		return os.ErrExist
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return os.Rename(oldPath, newPath)
+	return fmt.Errorf("atomic no-replace rename is unsupported on %s", runtime.GOOS)
 }

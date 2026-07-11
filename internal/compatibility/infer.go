@@ -118,9 +118,20 @@ func isClaudeHookMetadata(skillDir, path string) bool {
 func executableLines(content string) []string {
 	lines := make([]string, 0)
 	inFence := false
+	inFrontMatter := false
 	exampleSectionLevel := 0
-	for _, line := range strings.Split(content, "\n") {
+	for index, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if index == 0 && trimmed == "---" {
+			inFrontMatter = true
+			continue
+		}
+		if inFrontMatter {
+			if trimmed == "---" {
+				inFrontMatter = false
+			}
+			continue
+		}
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
 			continue
@@ -159,6 +170,6 @@ func markdownHeading(line string) (int, string, bool) {
 	if level == 0 || level == len(line) || line[level] != ' ' {
 		return 0, "", false
 	}
-	title := strings.TrimSpace(strings.TrimRight(line[level+1:], "#"))
+	title := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(line[level+1:]), "#"))
 	return level, title, true
 }

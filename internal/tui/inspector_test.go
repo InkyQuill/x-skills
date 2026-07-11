@@ -6,6 +6,7 @@ import (
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -154,7 +155,7 @@ func TestInspectorPadsUnicodeKeysByDisplayWidth(t *testing.T) {
 		t.Fatalf("line count = %d, want 4:\n%s", len(lines), plain(got))
 	}
 	for _, line := range lines[2:] {
-		keyColumn := tuiui.TruncateANSI(line, inspectorKeyWidth)
+		keyColumn := ansi.Cut(line, 0, inspectorKeyWidth)
 		if gotWidth := lipgloss.Width(keyColumn); gotWidth != inspectorKeyWidth {
 			t.Fatalf("key column width = %d, want %d for %q:\n%s", gotWidth, inspectorKeyWidth, line, plain(got))
 		}

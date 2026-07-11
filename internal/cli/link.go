@@ -56,6 +56,7 @@ func linkNames(
 	locations, locationErr := resolveLinkLocations(cfg, opts.at)
 	var results []actions.MutationResult
 	var failures []mutationFailure
+	projectMutated := false
 	for _, name := range names {
 		if !repo.HasSkill(cfg, name) {
 			failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("repo skill %q not found", name)})
@@ -81,10 +82,13 @@ func linkNames(
 			}
 			results = append(results, result)
 			if root.Scope == config.ScopeProject {
-				if _, err := manifest.ReconcileLocal(cfg); err != nil {
-					failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
-				}
+				projectMutated = true
 			}
+		}
+	}
+	if projectMutated {
+		if _, err := manifest.ReconcileLocal(cfg); err != nil {
+			failures = append(failures, mutationFailure{name: "local manifest", err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
 		}
 	}
 	return results, failures

@@ -45,6 +45,13 @@ func TestTruncateANSIKeepsEscapeSequencesOutOfWidth(t *testing.T) {
 	}
 }
 
+func TestPadRightANSIUsesDisplayWidth(t *testing.T) {
+	got := PadRightANSI("値", 4)
+	if got != "値  " || lipgloss.Width(got) != 4 {
+		t.Fatalf("PadRightANSI() = %q width %d, want display width 4", got, lipgloss.Width(got))
+	}
+}
+
 func TestRenderWithBackground(t *testing.T) {
 	profile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI256)

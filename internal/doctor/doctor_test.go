@@ -322,6 +322,19 @@ func TestDiagnoseBuiltInsReportsMissingInactiveAndActive(t *testing.T) {
 	}
 }
 
+func TestDiagnoseProjectFilterSkipsGlobalBuiltIns(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	issues, err := Diagnose(cfg, Filter{Scope: config.ScopeProject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Kind == KindMissingBuiltIn || issue.Kind == KindInactiveBuiltIn {
+			t.Fatalf("project-filtered diagnosis contains global built-in issue: %#v", issue)
+		}
+	}
+}
+
 func TestFixBuiltInsArchivesOnlyOrLinksToExplicitGlobalDestinations(t *testing.T) {
 	t.Run("archive only", func(t *testing.T) {
 		cfg := config.Default(t.TempDir(), t.TempDir())

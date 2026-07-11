@@ -253,12 +253,12 @@ func renameUsageOrder(cfg config.Config, path string) int {
 	return len(cfg.ManagedRoots())
 }
 
-func replaceRenameLink(usage renameUsage) error {
+func replaceRenameLink(usage renameUsage) (err error) {
 	temp, err := temporaryRenameSibling(usage.path, "link")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temp)
+	defer func() { err = joinRenameCleanupError(err, renameArchiveFilesystem.remove(temp)) }()
 	if err := renameArchiveFilesystem.symlink(usage.newText, temp); err != nil {
 		return err
 	}
@@ -424,13 +424,13 @@ func replaceYAMLScalar(data []byte, node *yaml.Node, oldName, newName string) ([
 	return result, nil
 }
 
-func writeRenameFile(path string, data []byte, mode os.FileMode) error {
+func writeRenameFile(path string, data []byte, mode os.FileMode) (err error) {
 	temp, err := os.CreateTemp(filepath.Dir(path), ".x-skills-rename-manifest-")
 	if err != nil {
 		return err
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { err = joinRenameCleanupError(err, renameArchiveFilesystem.remove(tempPath)) }()
 	if err := temp.Chmod(mode); err != nil {
 		_ = temp.Close()
 		return err
@@ -445,6 +445,13 @@ func writeRenameFile(path string, data []byte, mode os.FileMode) error {
 	return renameArchiveFilesystem.rename(tempPath, path)
 }
 
+func joinRenameCleanupError(primary, cleanup error) error {
+	if cleanup == nil || errors.Is(cleanup, os.ErrNotExist) {
+		return primary
+	}
+	return errors.Join(primary, fmt.Errorf("remove rename temporary artifact: %w", cleanup))
+}
+
 func rollbackArchiveRename(oldPath, newPath string, relinked []renameUsage, manifests []renameManifest) error {
 	errs := []error{}
 	for _, manifest := range slices.Backward(manifests) {
@@ -457,6 +464,11 @@ func rollbackArchiveRename(oldPath, newPath string, relinked []renameUsage, mani
 		}
 	}
 	for _, usage := range slices.Backward(relinked) {
+		text, err := os.Readlink(usage.path)
+		if err != nil || text != usage.newText {
+			errs = append(errs, fmt.Errorf("restore link %q: rollback drift: current target no longer matches renamed target", usage.path))
+			continue
+		}
 		if err := renameArchiveFilesystem.remove(usage.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove renamed link %q: %w", usage.path, err))
 			continue

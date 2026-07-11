@@ -3,6 +3,7 @@ package doctor
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,7 +72,7 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 		}
 		issues = append(issues, rootIssues...)
 	}
-	builtInIssues, err := diagnoseBuiltIns(cfg)
+	builtInIssues, err := diagnoseBuiltIns(cfg, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -87,12 +88,15 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 	return issues, nil
 }
 
-func diagnoseBuiltIns(cfg config.Config) ([]Issue, error) {
+func diagnoseBuiltIns(cfg config.Config, filter Filter) ([]Issue, error) {
+	if filter.Scope == config.ScopeProject {
+		return nil, nil
+	}
 	catalog, err := builtin.List()
 	if err != nil {
 		return nil, err
 	}
-	globalRoots := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal})
+	globalRoots := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal, Target: filter.Target})
 	issues := make([]Issue, 0, len(catalog))
 	for _, skill := range catalog {
 		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), skill.Name)
@@ -124,6 +128,9 @@ func builtInActiveGlobally(archivePath, name string, globalRoots []roots.ActiveR
 func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
 	if !opts.Yes {
 		return nil, fmt.Errorf("doctor fix requires confirmation; rerun with -y")
+	}
+	if err := ValidateBuiltInDestinations(opts.BuiltInDestinations); err != nil {
+		return nil, err
 	}
 
 	issues, err := Diagnose(cfg, opts.Filter)
@@ -355,13 +362,17 @@ func literalGitignorePattern(path string) (string, error) {
 	return pattern.String(), nil
 }
 
-func appendGitignoreEntry(projectRoot, entry string) error {
+func appendGitignoreEntry(projectRoot, entry string) (err error) {
 	path := filepath.Join(projectRoot, ".gitignore")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("open .gitignore: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close .gitignore: %w", closeErr))
+		}
+	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

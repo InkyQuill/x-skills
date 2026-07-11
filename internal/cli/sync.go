@@ -76,7 +76,7 @@ func newSyncCommand(opts *options) *cobra.Command {
 			if !interactive && !all && len(names) == 0 {
 				return fmt.Errorf("non-interactive sync requires --all or --skill")
 			}
-			groups, err := syncer.Discover(cfg, destinations)
+			groups, err := syncer.DiscoverContext(cmd.Context(), cfg, destinations)
 			if err != nil {
 				return err
 			}
@@ -96,7 +96,7 @@ func newSyncCommand(opts *options) *cobra.Command {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "sync cancelled")
 				return nil
 			}
-			plan, err := syncer.Preflight(cfg, groups, destinations, selection, nil)
+			plan, err := syncer.PreflightContext(cmd.Context(), cfg, groups, destinations, selection, nil)
 			if err != nil {
 				return err
 			}
@@ -108,7 +108,7 @@ func newSyncCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				plan, err = syncer.Preflight(cfg, groups, destinations, selection, resolutions)
+				plan, err = syncer.PreflightContext(cmd.Context(), cfg, groups, destinations, selection, resolutions)
 				if err != nil {
 					return err
 				}
@@ -129,12 +129,15 @@ func newSyncCommand(opts *options) *cobra.Command {
 				return nil
 			}
 			result := syncer.Apply(cmd.Context(), cfg, plan)
-			if result.PlanError != nil || result.ManifestError != nil || len(result.Failed) > 0 {
-				failures := []error{result.PlanError, result.ManifestError}
-				for _, failed := range result.Failed {
-					failures = append(failures, fmt.Errorf("sync %s: %w", failed.Name, failed.Err))
-				}
-				return errors.Join(failures...)
+			failures := []error{result.PlanError, result.ManifestError}
+			for _, failed := range result.Failed {
+				failures = append(failures, fmt.Errorf("sync %s: %w", failed.Name, failed.Err))
+			}
+			if result.Cancelled {
+				failures = append(failures, fmt.Errorf("sync cancelled after %d completed skill(s)", len(result.Succeeded)))
+			}
+			if err := errors.Join(failures...); err != nil {
+				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "synced: %d skill(s)\n", len(result.Succeeded))
 			return err

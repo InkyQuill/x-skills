@@ -1481,7 +1481,7 @@ func TestDoctorFixIgnoresSecondFixWhileCommandIsInFlight(t *testing.T) {
 	if second != nil {
 		t.Fatalf("second fix returned mutation command: %#v", second)
 	}
-	if m.modal != nil || m.status != "applying Doctor fixes..." {
+	if m.modal != nil || m.status != "doctor fix already running" {
 		t.Fatalf("in-flight state changed: modal=%T status=%q", m.modal, m.status)
 	}
 }

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -15,6 +17,16 @@ func TruncateANSI(value string, width int) string {
 		return value
 	}
 	return ansi.Truncate(value, width, "...")
+}
+
+// PadRightANSI pads value to width using terminal display cells rather than
+// bytes or runes. Values wider than width are returned unchanged.
+func PadRightANSI(value string, width int) string {
+	padding := width - lipgloss.Width(value)
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
 }
 
 // RenderWithBackground renders value with style, adding background unless it

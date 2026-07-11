@@ -171,6 +171,17 @@ func resolveRestoreConflicts(cmd *cobra.Command, opts *options, plan *manifest.R
 		if name == "" {
 			name = conflict.SuggestedName
 		}
+		originalName := conflict.Name
+		for _, changes := range [][]manifest.Change{plan.Normalizations, plan.Removals} {
+			for _, change := range changes {
+				if change.Path == conflict.Path && change.Kind == manifest.ChangeMigrate && name == change.Name {
+					originalName = change.Name
+				}
+			}
+		}
+		if name == conflict.Name || name == originalName {
+			return fmt.Errorf("preserve name must differ from %q", originalName)
+		}
 		setRestoreArchiveName(plan, conflict.Path, name)
 	}
 	return nil

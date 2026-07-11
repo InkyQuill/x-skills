@@ -327,17 +327,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.toggleRepoRecommendations()
 		}
 	case keyRepoRename:
-		if m.view == ViewRepo && !m.renameInFlight {
+		if m.view == ViewRepo {
+			if m.renameInFlight {
+				m.status = "rename already running"
+				return m, nil
+			}
 			m.openRepoRenameModal()
 		}
 	case "s":
-		if !m.restoreInFlight {
-			m.modal = newRestoreWorkbenchModal(m.cfg)
+		if m.restoreInFlight {
+			m.status = "restore already running"
+			return m, nil
 		}
+		m.modal = newRestoreWorkbenchModal(m.cfg)
 	case "S":
-		if !m.syncInFlight {
-			m.modal = newSyncWorkbenchModal(m.cfg)
+		if m.syncInFlight {
+			m.status = "sync already running"
+			return m, nil
 		}
+		m.modal = newSyncWorkbenchModal(m.cfg)
 	case "m":
 		if m.view == ViewActive {
 			m.openMigrateModal()
@@ -356,6 +364,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		if m.view == ViewDoctor {
 			if m.doctorFixInFlight {
+				m.status = "doctor fix already running"
 				return m, nil
 			}
 			m.openDoctorFixModal()

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -119,8 +120,26 @@ func TestApplyRollsBackLinksForFailedSkillButKeepsPreservedArchives(t *testing.T
 	}
 	assertApplyFile(t, filepath.Join(first, "content.txt"), "old destination")
 	assertApplyFile(t, filepath.Join(preserved, "content.txt"), "old destination")
-	if _, err := os.Lstat(second); !errors.Is(err, os.ErrNotExist) && err == nil {
-		t.Fatalf("failed destination unexpectedly exists")
+	if _, err := os.Lstat(second); err == nil || (!errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR)) {
+		t.Fatalf("failed destination unexpectedly exists or returned unexpected error: %v", err)
+	}
+}
+
+func TestApplyDoesNotReconcileAfterPreMutationFailure(t *testing.T) {
+	cfg := applyConfig(t)
+	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "selected")
+	fp := applyFingerprint(t, source)
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "review")
+	if err := os.Mkdir(filepath.Join(cfg.ProjectRoot, manifest.LocalFilename), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fs := defaultApplyFilesystem()
+	fs.afterStage = func(string) error { return errors.New("injected staging rejection") }
+	result := Apply(context.Background(), cfg, Plan{Migrations: []Change{{
+		CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: archive,
+	}}}, ApplyOptions{filesystem: fs})
+	if len(result.Failed) != 1 || result.ManifestError != nil {
+		t.Fatalf("Apply result = %#v, want failure without reconciliation", result)
 	}
 }
 
@@ -332,6 +351,47 @@ func TestApplyReportsArchivePublicationWhenSourceRemovalFails(t *testing.T) {
 	}
 }
 
+func TestApplyPublicationFailureRestoresArchiveAliases(t *testing.T) {
+	cfg := applyConfig(t)
+	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "selected")
+	fp := applyFingerprint(t, source)
+	archive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "review", "old archive")
+	archiveFP := applyFingerprint(t, archive)
+	usage := filepath.Join(cfg.ProjectRoot, ".codex", "skills", "review")
+	if err := os.MkdirAll(filepath.Dir(usage), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archive, usage); err != nil {
+		t.Fatal(err)
+	}
+	preserved := filepath.Join(cfg.ArchiveSkillsRoot(), "review-old")
+	plan := Plan{
+		Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: archive}},
+		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: archive,
+			DestinationStatus: actions.StatusManaged, DestinationFingerprint: archiveFP, ManagedTarget: archive,
+			Resolution: ConflictResolution{DestinationPath: archive, PreserveAs: "review-old", Action: ConflictReplace}}},
+	}
+	fs := defaultApplyFilesystem()
+	fs.rename = func(oldPath, newPath string) error {
+		if newPath == archive && strings.Contains(filepath.Base(oldPath), ".x-skills-stage") {
+			return errors.New("injected publication failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	result := Apply(context.Background(), cfg, plan, ApplyOptions{filesystem: fs})
+	if len(result.Failed) != 1 || !strings.Contains(result.Failed[0].Err.Error(), "injected publication failure") {
+		t.Fatalf("Apply result = %#v", result)
+	}
+	assertApplyFile(t, filepath.Join(archive, "content.txt"), "old archive")
+	if _, err := os.Lstat(preserved); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("preserved alias remains after rollback: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(usage)
+	if err != nil || resolved != archive {
+		t.Fatalf("usage resolves to %q, err=%v; want %q", resolved, err, archive)
+	}
+}
+
 func TestApplyReportsBackupCleanupFailureWithoutBreakingLink(t *testing.T) {
 	cfg := applyConfig(t)
 	archive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "review", "selected")
@@ -390,12 +450,12 @@ func TestApplyReportsIncompleteRollbackForRemovalAndRestoreFailures(t *testing.T
 		existingFirst bool
 		fault         func(string, string) error
 	}{
-		{name: "remove created link", fault: func(old, new string) error { return nil }},
-		{name: "restore destination backup", existingFirst: true, fault: func(old, new string) error {
+		{name: "remove created link", fault: func(old, newPath string) error { return nil }},
+		{name: "restore destination backup", existingFirst: true, fault: func(old, newPath string) error {
 			if strings.HasPrefix(filepath.Base(old), ".x-skills-backup") {
 				return errors.New("injected restore failure")
 			}
-			return os.Rename(old, new)
+			return os.Rename(old, newPath)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -174,7 +174,7 @@ func PlanRestore(ctx context.Context, cfg config.Config, request RestoreRequest)
 }
 
 func ApplyRestore(ctx context.Context, cfg config.Config, plan RestorePlan) (result RestoreResult, returnErr error) {
-	defer plan.Close()
+	defer func() { _ = plan.Close() }()
 	mutated := false
 	defer func() {
 		if !mutated {
@@ -530,7 +530,7 @@ func migrateRestoreExtra(activePath, archivePath string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(temp)
+	defer func() { _ = os.RemoveAll(temp) }()
 	if err := copyRestoreTree(source, temp); err != nil {
 		return err
 	}
@@ -573,7 +573,7 @@ func copyRestoreTree(source, destination string) error {
 			if err != nil {
 				return err
 			}
-			defer in.Close()
+			defer func() { _ = in.Close() }()
 			out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
 			if err != nil {
 				return err

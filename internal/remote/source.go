@@ -55,6 +55,9 @@ func ReadSourceMetadata(skillDir string) (SourceMetadata, bool, error) {
 	if meta.SchemaVersion == 0 {
 		meta.SchemaVersion = metadataSchemaV1
 	}
+	if meta.SchemaVersion != metadataSchemaV1 && meta.SchemaVersion != metadataSchemaV2 {
+		return SourceMetadata{}, false, fmt.Errorf("unsupported source metadata schema version %d", meta.SchemaVersion)
+	}
 	if err := normalizeCompatibility(&meta); err != nil {
 		return SourceMetadata{}, false, fmt.Errorf("parse source metadata: %w", err)
 	}

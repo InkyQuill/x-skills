@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -415,8 +417,8 @@ func TestDoctorFixWithoutYesReturnsErrorAndDoesNotMutate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected confirmation error")
 	}
-	if !strings.Contains(err.Error(), "requires confirmation") {
-		t.Fatalf("error = %q, want confirmation", err)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("error = %v, want preserved stdin EOF", err)
 	}
 	info, statErr := os.Lstat(link)
 	if statErr != nil {

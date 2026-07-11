@@ -99,6 +99,7 @@ func (w syncWorkbenchModal) View(width, height int, m Model) string {
 			body = append(body, w.cursorLine(i, conflict.Name+" → "+w.conflictNames[conflict.DestinationPath], m))
 		}
 		if w.isEditing {
+			w.input.Width = max(width-12, 1)
 			body = append(body, "", "Archive name", w.input.View())
 		}
 	case syncStageConfirmation:

@@ -82,6 +82,14 @@ func TestRecommendRejectsArchiveOnlyAndPlansWholeBatchBeforeWriting(t *testing.T
 	}
 }
 
+func TestRecommendRejectsInvalidSkillNameBeforeArchiveLookup(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	err := Recommend(cfg, []string{"../escape"})
+	if err == nil || !strings.Contains(err.Error(), "invalid skill name") {
+		t.Fatalf("Recommend() error = %v, want name validation", err)
+	}
+}
+
 func TestRecommendRestoresRecommendedWhenLocalWriteFails(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	writeRecommendationArchive(t, cfg, "new-skill", remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "repo", SkillPath: "skills/new-skill"})

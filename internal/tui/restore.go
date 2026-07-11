@@ -76,7 +76,7 @@ func (r restoreWorkbenchModal) View(width, height int, m Model) string {
 
 func (r restoreWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		r.index = clampModalIndex(r.index+delta, len(r.destinations))
+		r.index = tuiui.ClampIndex(r.index+delta, len(r.destinations))
 		m.modal = r
 		return false, nil
 	}

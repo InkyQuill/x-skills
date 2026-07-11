@@ -9,7 +9,7 @@ import (
 type resultModal struct {
 	title  string
 	lines  []string
-	scroll int
+	scroll scrollState
 }
 
 func newResultModal(title string, lines []string) modal {
@@ -30,7 +30,7 @@ func (r resultModal) View(width, height int, m Model) string {
 			{ASCII: "esc", Unicode: "Esc", Label: "close"},
 			{ASCII: "q", Label: "close"},
 		})},
-		Scroll:    r.scroll,
+		Scroll:    int(r.scroll),
 		UseScroll: true,
 	})
 }
@@ -40,11 +40,7 @@ func (r resultModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	case "enter", "esc", "q":
 		return true, nil
 	default:
-		if delta := modalMoveDelta(msg); delta != 0 {
-			r.scroll += delta
-			if r.scroll < 0 {
-				r.scroll = 0
-			}
+		if r.scroll.Handle(msg, len(r.lines), constrainedModalBodyHeight(m.height, 1)) {
 			m.modal = r
 			return false, nil
 		}

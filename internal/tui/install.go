@@ -1552,7 +1552,7 @@ func (d installDestinationModal) View(width, height int, m Model) string {
 
 func (d installDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		d.cursor = clampModalIndex(d.cursor+delta, len(d.destinations))
+		d.cursor = tuiui.ClampIndex(d.cursor+delta, len(d.destinations))
 		m.modal = d
 		return false, nil
 	}
@@ -1632,7 +1632,7 @@ func (d installBatchDestinationModal) View(width, height int, m Model) string {
 
 func (d installBatchDestinationModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		d.cursor = clampModalIndex(d.cursor+delta, len(d.destinations))
+		d.cursor = tuiui.ClampIndex(d.cursor+delta, len(d.destinations))
 		m.modal = d
 		return false, nil
 	}

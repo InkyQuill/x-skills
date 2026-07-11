@@ -62,7 +62,7 @@ func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		return true, nil
 	}
 	if delta := modalMoveDelta(msg); delta != 0 {
-		c.index = clampModalIndex(c.index+delta, len(c.choices))
+		c.index = tuiui.ClampIndex(c.index+delta, len(c.choices))
 		m.modal = c
 		return false, nil
 	}

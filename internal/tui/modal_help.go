@@ -10,7 +10,7 @@ import (
 )
 
 type helpModal struct {
-	scroll int
+	scroll scrollState
 }
 
 func newHelpModal() modal {
@@ -22,6 +22,21 @@ func (h helpModal) Title() string {
 }
 
 func (h helpModal) View(width, height int, m Model) string {
+	lines := helpLines(m)
+	return renderConstrainedModal(width, height, constrainedModalOptions{
+		Title: "Help",
+		Body:  lines,
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
+			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
+			{ASCII: "esc", Unicode: "Esc", Label: "close"},
+			{ASCII: "q", Label: "close"},
+		})},
+		Scroll:    int(h.scroll),
+		UseScroll: true,
+	})
+}
+
+func helpLines(m Model) []string {
 	lines := []string{
 		"Keyboard Shortcuts",
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "A", Label: "switch to Active view"}),
@@ -58,17 +73,7 @@ func (h helpModal) View(width, height int, m Model) string {
 		"",
 	}
 	lines = append(lines, helpRootLines(m)...)
-	return renderConstrainedModal(width, height, constrainedModalOptions{
-		Title: "Help",
-		Body:  lines,
-		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
-			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
-			{ASCII: "esc", Unicode: "Esc", Label: "close"},
-			{ASCII: "q", Label: "close"},
-		})},
-		Scroll:    h.scroll,
-		UseScroll: true,
-	})
+	return lines
 }
 
 func helpRootLines(m Model) []string {
@@ -91,11 +96,7 @@ func (h helpModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if closeOnEscapeOrQuit(msg) {
 		return true, nil
 	}
-	if delta := modalMoveDelta(msg); delta != 0 {
-		h.scroll += delta
-		if h.scroll < 0 {
-			h.scroll = 0
-		}
+	if h.scroll.Handle(msg, len(helpLines(*m)), constrainedModalBodyHeight(m.height, 1)) {
 		m.modal = h
 	}
 	return false, nil

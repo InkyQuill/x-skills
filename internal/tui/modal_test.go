@@ -120,6 +120,43 @@ func TestScrollableModalMovesWithJK(t *testing.T) {
 	}
 }
 
+func TestConflictDiffModalClampsScrollDuringUpdate(t *testing.T) {
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Text: "line one\nline two"}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 120
+	m.height = 40
+	m.modal = newConflictDiffModal("zen-of-go", diff, func(string) {})
+
+	for range 1000 {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		m = mustModel(t, updated)
+	}
+
+	modal := m.modal.(conflictDiffModal)
+	if modal.scroll != 0 {
+		t.Fatalf("conflict diff scroll = %d, want 0 for body shorter than viewport", modal.scroll)
+	}
+}
+
+func TestScrollableModalClampsRepeatedPageDownDuringUpdate(t *testing.T) {
+	lines := make([]string, 20)
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 80
+	m.height = 12
+	m.modal = newResultModal("Long result", lines)
+
+	for range 1000 {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		m = mustModel(t, updated)
+	}
+
+	modal := m.modal.(resultModal)
+	want := len(lines) - constrainedModalBodyHeight(m.height, 1)
+	if got := int(modal.scroll); got != want {
+		t.Fatalf("result scroll = %d, want %d", got, want)
+	}
+}
+
 func TestEnterOpensActiveDetailModal(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")

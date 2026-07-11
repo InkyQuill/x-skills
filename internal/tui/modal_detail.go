@@ -15,7 +15,7 @@ import (
 type detailModal struct {
 	title  string
 	lines  []string
-	scroll int
+	scroll scrollState
 }
 
 func newDetailModal(title string, lines []string) modal {
@@ -80,7 +80,7 @@ func (d detailModal) View(width, height int, m Model) string {
 			{ASCII: "esc", Unicode: "Esc", Label: "close"},
 			{ASCII: "q", Label: "close"},
 		})},
-		Scroll:    d.scroll,
+		Scroll:    int(d.scroll),
 		UseScroll: true,
 	})
 }
@@ -89,11 +89,7 @@ func (d detailModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if closeOnEscapeOrQuit(msg) {
 		return true, nil
 	}
-	if delta := modalMoveDelta(msg); delta != 0 {
-		d.scroll += delta
-		if d.scroll < 0 {
-			d.scroll = 0
-		}
+	if d.scroll.Handle(msg, len(d.lines), constrainedModalBodyHeight(m.height, 1)) {
 		m.modal = d
 	}
 	return false, nil

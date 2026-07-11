@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
 type modal interface {
@@ -36,17 +38,15 @@ func modalMoveDelta(msg tea.KeyMsg) int {
 	}
 }
 
-func clampModalIndex(index int, count int) int {
-	if count <= 0 {
-		return 0
+type scrollState int
+
+func (s *scrollState) Handle(msg tea.KeyMsg, bodyHeight, viewportHeight int) bool {
+	delta := modalMoveDelta(msg)
+	if delta == 0 {
+		return false
 	}
-	if index < 0 {
-		return 0
-	}
-	if index >= count {
-		return count - 1
-	}
-	return index
+	*s = scrollState(tuiui.ClampScroll(int(*s)+delta, bodyHeight, viewportHeight))
+	return true
 }
 
 type constrainedModalOptions struct {
@@ -114,6 +114,18 @@ func modalContentHeight(height int) int {
 	return maxHeight
 }
 
+func constrainedModalBodyHeight(height, footerLines int) int {
+	footerHeight := footerLines
+	if footerHeight > 0 {
+		footerHeight++
+	}
+	bodyHeight := modalContentHeight(height) - 1 - footerHeight
+	if bodyHeight < 1 {
+		return 1
+	}
+	return bodyHeight
+}
+
 func truncateModalLines(lines []string, width int) []string {
 	truncated := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -126,34 +138,13 @@ func visibleModalBody(lines []string, height int, focus int, scroll int, useScro
 	if height <= 0 || len(lines) == 0 {
 		return nil
 	}
-	if len(lines) <= height {
-		return lines
-	}
 	start := scroll
 	if !useScroll {
-		if focus < 0 {
-			focus = 0
-		}
-		if focus >= len(lines) {
-			focus = len(lines) - 1
-		}
+		focus = tuiui.ClampIndex(focus, len(lines))
 		start = focus - height/2
-		if start < 0 {
-			start = 0
-		}
-		if start+height > len(lines) {
-			start = len(lines) - height
-		}
-	} else {
-		if start < 0 {
-			start = 0
-		}
-		maxStart := len(lines) - height
-		if start > maxStart {
-			start = maxStart
-		}
 	}
-	body := append([]string(nil), lines[start:start+height]...)
+	start = tuiui.ClampScroll(start, len(lines), height)
+	body := tuiui.VisibleLines(lines, start, height)
 	if start > 0 {
 		body[0] = mutedStyle.Render("↑ more")
 	}

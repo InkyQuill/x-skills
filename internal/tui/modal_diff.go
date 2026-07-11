@@ -62,8 +62,6 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 		fileColumnWidth    = 24
 		columnDividerWidth = 3
 		minDiffWidth       = 20
-		verticalChrome     = 12
-		minBodyHeight      = 4
 	)
 	if conflictDiffTooSmall(width, height) {
 		lines := []string{
@@ -92,10 +90,7 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 	if diffWidth < minDiffWidth {
 		diffWidth = minDiffWidth
 	}
-	bodyHeight := height - verticalChrome
-	if bodyHeight < minBodyHeight {
-		bodyHeight = minBodyHeight
-	}
+	bodyHeight := conflictDiffBodyHeight(height)
 	acceptLabel := "save active"
 	if c.incomingLabel == "Incoming remote" {
 		acceptLabel = "use incoming"
@@ -119,7 +114,7 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 	if len(c.diff.Files) > 0 {
 		diffLines = coloredDiffLines(c.diff.Files[c.selected].Text, c.incomingLabel)
 	}
-	c.scroll = clampScroll(c.scroll, len(diffLines), bodyHeight)
+	c.scroll = tuiui.ClampScroll(c.scroll, len(diffLines), bodyHeight)
 	for row := 0; row < bodyHeight; row++ {
 		fileCell := ""
 		if row < len(c.diff.Files) {
@@ -195,7 +190,30 @@ func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		m.modal = nil
 		return false, c.apply(m, actions.ConflictResolutionUseActive)
 	}
+	c.scroll = tuiui.ClampScroll(c.scroll, c.diffLineCount(), conflictDiffBodyHeight(m.height))
+	if m.modal != nil {
+		m.modal = c
+	}
 	return false, nil
+}
+
+func conflictDiffBodyHeight(height int) int {
+	const (
+		verticalChrome = 12
+		minimum        = 4
+	)
+	bodyHeight := height - verticalChrome
+	if bodyHeight < minimum {
+		return minimum
+	}
+	return bodyHeight
+}
+
+func (c conflictDiffModal) diffLineCount() int {
+	if len(c.diff.Files) == 0 {
+		return 1
+	}
+	return len(coloredDiffLines(c.diff.Files[c.selected].Text, c.incomingLabel))
 }
 
 func diffLegend(incomingLabel string) string {
@@ -237,18 +255,4 @@ func colorDiffLine(line string, incomingLabel string) string {
 	default:
 		return mutedStyle.Render("          " + strings.TrimPrefix(line, " "))
 	}
-}
-
-func clampScroll(scroll, count, height int) int {
-	if scroll < 0 {
-		return 0
-	}
-	maxScroll := count - height
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if scroll > maxScroll {
-		return maxScroll
-	}
-	return scroll
 }

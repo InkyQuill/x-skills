@@ -323,7 +323,7 @@ func (c migrateConfirmModal) targetRows(width int, m Model) []string {
 
 func (c migrateConfirmModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		c.scroll = clampModalIndex(c.scroll+delta, len(c.targets))
+		c.scroll = tuiui.ClampIndex(c.scroll+delta, len(c.targets))
 		m.modal = c
 		return false, nil
 	}
@@ -629,7 +629,7 @@ func linkChoice(selected bool, label string) string {
 
 func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		r.index = clampModalIndex(r.index+delta, len(r.locations))
+		r.index = tuiui.ClampIndex(r.index+delta, len(r.locations))
 		m.modal = r
 		return false, nil
 	}
@@ -777,7 +777,7 @@ func (r repoUsageModal) View(width, height int, m Model) string {
 
 func (r repoUsageModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		r.index = clampModalIndex(r.index+delta, len(r.targets))
+		r.index = tuiui.ClampIndex(r.index+delta, len(r.targets))
 		m.modal = r
 		return false, nil
 	}
@@ -1097,7 +1097,7 @@ func (d doctorBuiltInFixModal) checkboxLine(index int, label string, m Model) st
 
 func (d doctorBuiltInFixModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
-		d.cursor = clampModalIndex(d.cursor+delta, len(d.destinations)+1)
+		d.cursor = tuiui.ClampIndex(d.cursor+delta, len(d.destinations)+1)
 		m.modal = d
 		return false, nil
 	}

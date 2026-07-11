@@ -93,7 +93,19 @@ type installArchiveMsg struct {
 	identity     installArchiveIdentity
 	archiveState string
 	batch        *installArchiveBatchResult
+	stale        bool
 	err          error
+}
+
+type installBatchProgressMsg struct {
+	token     int
+	completed int
+	total     int
+	name      string
+}
+
+type installBatchCancelledMsg struct {
+	token int
 }
 
 type installArchiveRowOperation func(context.Context) installArchiveMsg
@@ -139,10 +151,12 @@ type installArchiveIdentity struct {
 }
 
 type installArchiveBatchResult struct {
-	total    int
-	success  []string
-	failures []string
-	next     *installArchiveBatchNext
+	total       int
+	completed   int
+	currentName string
+	success     []string
+	failures    []string
+	next        *installArchiveBatchNext
 }
 
 type installArchiveBatchNext struct {
@@ -248,8 +262,8 @@ func (m Model) runInstallSearch() tea.Cmd {
 }
 
 func (m *Model) startInstallSearch() tea.Cmd {
+	m.cancelInstallWork()
 	m.install.searchToken++
-	m.install.previewToken++
 	clear(m.selected[ViewInstall])
 	if len([]rune(strings.TrimSpace(m.install.Query))) < 2 {
 		m.install.Searching = false
@@ -464,15 +478,26 @@ func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiv
 	if len(commands) == 0 {
 		return nil
 	}
-	token := m.install.archiveToken
+	token := m.install.bumpUseToken()
+	m.install.archiveToken = token
+	generation := m.install.ensureUseGeneration()
 	return func(ctx context.Context) installArchiveMsg {
-		return runInstallArchiveBatch(ctx, commands, next, total, token)
+		return runInstallArchiveBatch(ctx, commands, next, total, token, generation)
 	}
 }
 
-func runInstallArchiveBatch(ctx context.Context, commands []installArchiveRowCommand, next *installArchiveBatchNext, total, token int) installArchiveMsg {
+func runInstallArchiveBatch(
+	ctx context.Context,
+	commands []installArchiveRowCommand,
+	next *installArchiveBatchNext,
+	total, token int,
+	generation *installUseGeneration,
+) installArchiveMsg {
 	result := &installArchiveBatchResult{total: total, next: next}
 	for i, command := range commands {
+		if generation != nil && !generation.isCurrent(token) {
+			return installArchiveMsg{token: token, batch: result, stale: true}
+		}
 		msg := runInstallArchiveRow(ctx, command.operation)
 		if msg.err != nil {
 			switch msg.archiveState {
@@ -492,10 +517,14 @@ func runInstallArchiveBatch(ctx context.Context, commands []installArchiveRowCom
 				return installArchiveMsg{token: token, batch: result}
 			default:
 				result.failures = append(result.failures, command.row.Result.Name+": "+msg.err.Error())
+				result.completed++
+				result.currentName = command.row.Result.Name
 				continue
 			}
 		}
 		result.success = append(result.success, msg.name)
+		result.completed++
+		result.currentName = command.row.Result.Name
 	}
 	return installArchiveMsg{token: token, batch: result}
 }
@@ -1658,6 +1687,10 @@ func (m *Model) applyInstallArchiveResult(msg installArchiveMsg) tea.Cmd {
 		m.install.archiveInFlightToken = 0
 	}
 	if msg.token == 0 || msg.token != m.install.archiveToken {
+		return nil
+	}
+	if msg.stale {
+		m.install.pendingArchiveBatch = nil
 		return nil
 	}
 	if msg.batch != nil {

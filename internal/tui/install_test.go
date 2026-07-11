@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -545,9 +546,65 @@ func TestInstallArchiveBatchAttributesFailureToOperationRow(t *testing.T) {
 		},
 	}
 
-	msg := runInstallArchiveBatch(context.Background(), commands, nil, 1, 7)
+	msg := runInstallArchiveBatch(context.Background(), commands, nil, 1, 7, nil)
 	if msg.batch == nil || !reflect.DeepEqual(msg.batch.failures, []string{"alpha: boom"}) {
 		t.Fatalf("msg = %#v", msg)
+	}
+}
+
+func TestArchiveInstallRowsStopsWhenGenerationChanges(t *testing.T) {
+	generation := &installUseGeneration{}
+	token := generation.next()
+	var first, second atomic.Int32
+	commands := []installArchiveRowCommand{
+		{row: installResultView{Result: remote.SearchResult{Name: "one"}}, operation: func(context.Context) installArchiveMsg {
+			first.Add(1)
+			generation.value.Add(1)
+			return installArchiveMsg{name: "one"}
+		}},
+		{row: installResultView{Result: remote.SearchResult{Name: "two"}}, operation: func(context.Context) installArchiveMsg {
+			second.Add(1)
+			return installArchiveMsg{name: "two"}
+		}},
+	}
+
+	msg := runInstallArchiveBatch(context.Background(), commands, nil, 2, token, generation)
+
+	if first.Load() != 1 || second.Load() != 0 {
+		t.Fatalf("operation calls = (%d, %d), want (1, 0)", first.Load(), second.Load())
+	}
+	if !msg.stale || msg.batch == nil || msg.batch.completed != 1 {
+		t.Fatalf("msg = %#v, want stale after one completed row", msg)
+	}
+}
+
+func TestInstallBatchProgress(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.archiveInFlightToken = 7
+
+	updated, _ := m.Update(installBatchProgressMsg{token: 7, completed: 3, total: 8, name: "skill-name"})
+	m = mustModel(t, updated)
+
+	if m.status != "archiving 3/8: skill-name" {
+		t.Fatalf("status = %q, want per-item progress", m.status)
+	}
+}
+
+func TestLeavingInstallInvalidatesMutationGeneration(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	generation := m.install.ensureUseGeneration()
+	token := m.install.bumpUseToken()
+	previewToken := m.install.previewToken
+
+	m.setView(ViewRepo)
+
+	if generation.isCurrent(token) {
+		t.Fatal("mutation generation remains current after leaving Install")
+	}
+	if m.install.previewToken == previewToken {
+		t.Fatal("preview generation was not invalidated after leaving Install")
 	}
 }
 
@@ -3977,7 +4034,7 @@ func TestInstallArchiveOnlyAsyncConflictUpdatesOnlyMatchingDuplicateSource(t *te
 	}
 }
 
-func TestInstallArchiveOnlyResultOutsideInstallReloadsStateAndKeepsView(t *testing.T) {
+func TestInstallArchiveOnlyResultOutsideInstallIsIgnoredAndKeepsView(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
 	gitTUITestCommit(t, repoDir, "initial")
@@ -4010,14 +4067,14 @@ func TestInstallArchiveOnlyResultOutsideInstallReloadsStateAndKeepsView(t *testi
 	if m.view != ViewActive {
 		t.Fatalf("view = %q, want active", m.view)
 	}
-	if m.status != "archived svelte-coder" {
+	if m.status != "" {
 		t.Fatalf("status = %q", m.status)
 	}
-	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
-		t.Fatalf("archive state = %q, want archived", got)
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateNotArchived {
+		t.Fatalf("archive state = %q, want stale result ignored", got)
 	}
-	if len(m.repo) != 1 || m.repo[0].Name != "svelte-coder" {
-		t.Fatalf("repo = %#v, want archived skill after reload", m.repo)
+	if len(m.repo) != 0 {
+		t.Fatalf("repo = %#v, want stale result not reloaded", m.repo)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); err != nil {
 		t.Fatal(err)

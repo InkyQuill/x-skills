@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 
@@ -107,6 +108,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyInstallUpdateDiffResult(msg)
 	case installArchiveMsg:
 		return m, m.applyInstallArchiveResult(msg)
+	case installBatchProgressMsg:
+		if msg.token == m.install.archiveInFlightToken {
+			m.status = fmt.Sprintf("archiving %d/%d: %s", msg.completed, msg.total, msg.name)
+			m.install.Message = m.status
+		}
+		return m, nil
+	case installBatchCancelledMsg:
+		if msg.token == m.install.archiveInFlightToken {
+			m.install.archiveInFlight = false
+			m.install.archiveInFlightToken = 0
+		}
+		return m, nil
 	case installArchiveStateMsg:
 		m.applyInstallArchiveStateResult(msg)
 		return m, nil
@@ -119,7 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
-		m.cleanupInstallCheckoutCache()
+		m.cancelInstallWork()
 		return m, tea.Quit
 	}
 
@@ -153,7 +166,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q":
-		m.cleanupInstallCheckoutCache()
+		m.cancelInstallWork()
 		return m, tea.Quit
 	case keyActive:
 		m.setView(ViewActive)
@@ -326,7 +339,7 @@ func (m *Model) setView(view ViewName) {
 		return
 	}
 	if m.view == ViewInstall && view != ViewInstall {
-		m.install.previewToken++
+		m.cancelInstallWork()
 	}
 	m.view = view
 	m.cursor = 0
@@ -337,6 +350,12 @@ func (m *Model) setView(view ViewName) {
 		ViewInstall: {},
 	}
 	m.filter = newFilterState()
+}
+
+func (m *Model) cancelInstallWork() {
+	m.install.previewToken++
+	m.install.archiveToken++
+	m.install.bumpUseToken()
 }
 
 func (m *Model) moveCursor(delta int) {

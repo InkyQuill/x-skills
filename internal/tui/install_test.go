@@ -4897,6 +4897,52 @@ func TestInstallArchiveStateCheckoutCancelledWhenQuitting(t *testing.T) {
 	})
 }
 
+func TestInstallArchiveStateCheckoutCancelledByNewQuery(t *testing.T) {
+	replacementStarted := make(chan context.Context, 1)
+	releaseReplacement := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		replacementStarted <- r.Context()
+		select {
+		case <-releaseReplacement:
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []remote.SearchResult{}})
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var replacementCmd tea.Cmd
+	testInstallArchiveStateCheckoutCancellation(t, func(m *Model) {
+		m.install.Query = "replacement"
+		m.install.searchClient = remote.NewSearchClient(server.URL, http.DefaultClient)
+		replacementCmd = m.startInstallSearch()
+		if replacementCmd == nil {
+			t.Fatal("replacement search cmd is nil")
+		}
+	})
+
+	replacementResult := make(chan installSearchResultMsg, 1)
+	go func() { replacementResult <- replacementCmd().(installSearchResultMsg) }()
+	select {
+	case ctx := <-replacementStarted:
+		select {
+		case <-ctx.Done():
+			t.Fatalf("replacement context canceled before completion: %v", ctx.Err())
+		default:
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement search did not start")
+	}
+	close(releaseReplacement)
+	select {
+	case msg := <-replacementResult:
+		if msg.err != nil {
+			t.Fatalf("replacement search failed: %v", msg.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement search did not complete")
+	}
+}
+
 func testInstallArchiveStateCheckoutCancellation(t *testing.T, cancel func(*Model)) {
 	t.Helper()
 	cfg := config.Default(t.TempDir(), t.TempDir())

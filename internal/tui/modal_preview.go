@@ -41,10 +41,6 @@ func (p previewModal) Title() string {
 	return p.title
 }
 
-func (p previewModal) renderContent() string {
-	return p.content
-}
-
 func (p *previewModal) refreshContent() {
 	if p.rendered {
 		rendered, err := glamour.Render(renderedPreviewMarkdown(p.raw), "dark")

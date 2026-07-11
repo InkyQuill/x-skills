@@ -159,7 +159,7 @@ interpolated into a `CloneURL` string passed to `git clone` as a CLI argument, i
 `os.MkdirTemp`-generated temp directory. No injection or traversal vector found here.
 
 **Passed:** retained as originally verified. Rechecked by `go test ./... -count=1`,
-`go vet ./...`, and `staticcheck ./...` when available.
+`go vet ./...`, and `staticcheck ./...` using Staticcheck 2026.1.
 
 ## Everything else reviewed (model.go, views.go, actions.go, rows.go, filter.go
 

@@ -53,6 +53,12 @@ the prior ADR numbers it supersedes. It does not reproduce obsolete alternatives
 or implementation chronology unless they are necessary to understand the
 decision.
 
+The TUI and remote-install grilling Q&A is treated as ADR source material.
+Settled decisions that remain relevant are distilled into the matching thematic
+ADR, including the constraint or trade-off that led to the decision. The final
+ADRs do not retain the interview format, repeated confirmations, rejected
+branches, or answers superseded by the implemented product.
+
 ## Consolidation Rules
 
 - Preserve a statement only when it describes current behavior, an active
@@ -60,8 +66,10 @@ decision.
   the architecture.
 - Prefer the implemented code and tests over older specifications when they
   disagree.
-- Convert mockups and grilling answers into concise behavioral requirements;
-  do not retain the original transcript.
+- Convert mockups into concise behavioral requirements in the maintained TUI
+  documentation.
+- Distill unique, still-current grilling answers into ADR context, decisions,
+  and consequences; do not retain the original Q&A transcript.
 - Delete completed plans after their remaining current facts are represented in
   maintained documentation.
 - Update all incoming links and documentation tests in the same change.
@@ -76,6 +84,8 @@ The consolidation is complete when:
 - no Python implementation or packaging files remain;
 - no `docs/superpowers/specs` or `docs/superpowers/plans` files remain;
 - only the four thematic ADRs remain under `docs/adr`;
+- each still-current decision found only in the grilling Q&A is represented in
+  one of the thematic ADRs;
 - repository references point to maintained documents;
 - the backlog contains only unfinished work;
 - documentation tests, Go tests, vet, formatting, and link/reference scans pass.

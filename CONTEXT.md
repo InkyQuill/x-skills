@@ -148,14 +148,6 @@ _Avoid_: Duplicate install
 Replacing an archived skill with a newer copy from the same proven remote source.
 _Avoid_: Reinstall, overwrite
 
-**Update Status**:
-The Repo view state derived from source metadata and upstream checks: up to date, update available, missing upstream, or unknown.
-_Avoid_: Version status
-
-**Missing Upstream**:
-An update status where the GitHub source is reachable but the archived skill's recorded upstream path no longer contains a valid `SKILL.md`.
-_Avoid_: Deleted skill, broken repo
-
 **Replace**:
 Discarding an existing archived skill and storing incoming content at the same archive name.
 _Avoid_: Update

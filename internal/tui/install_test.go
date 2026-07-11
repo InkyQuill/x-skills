@@ -2150,6 +2150,60 @@ func TestInstallAndUseRollsBackPartialLinksAfterLateFailure(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseRollsBackNewArchiveAfterLateFailure(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "svelte-coder")
+
+	backupPath, err := prepareInstallUseArchiveRollback(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backupPath != "" {
+		t.Fatalf("backup path = %q, want empty", backupPath)
+	}
+	makeSkill(t, filepath.Dir(archivePath), filepath.Base(archivePath), "New.")
+
+	if err := rollbackInstallUseArchive(archivePath, backupPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive remains after rollback or unexpected error: %v", err)
+	}
+}
+
+func TestInstallAndUseRollsBackReplacedArchiveAfterLateFailure(t *testing.T) {
+	archivePath := makeSkill(t, t.TempDir(), "svelte-coder", "Old.")
+	oldSkillPath := filepath.Join(archivePath, "SKILL.md")
+	oldBytes, err := os.ReadFile(oldSkillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backupPath, err := prepareInstallUseArchiveRollback(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive remains while rollback backup is prepared or unexpected error: %v", err)
+	}
+	makeSkill(t, filepath.Dir(archivePath), filepath.Base(archivePath), "New.")
+
+	if err := rollbackInstallUseArchive(archivePath, backupPath); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, oldSkillPath, string(oldBytes))
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s = %q, want %q", path, got, want)
+	}
+}
+
 func TestInstallAndUseBatchRollsBackFailedRowPartialLinks(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")

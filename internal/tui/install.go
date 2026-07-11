@@ -933,19 +933,25 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	useGeneration := m.install.ensureUseGeneration()
 	return func() tea.Msg {
 		backupPath := ""
+		archiveRollbackPrepared := false
 		if !useGeneration.isCurrent(token) {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		if archiveCmd != nil {
-			var err error
-			backupPath, err = prepareInstallUseArchiveRollback(archivePath)
-			if err != nil {
-				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
+			if row.ArchiveState != remote.ArchiveStateArchived {
+				var err error
+				backupPath, err = prepareInstallUseArchiveRollback(archivePath)
+				if err != nil {
+					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
+				}
+				archiveRollbackPrepared = true
 			}
 			archiveMsg := archiveCmd().(installArchiveMsg)
 			if archiveMsg.err != nil {
-				if rollbackErr := rollbackInstallUseArchive(archivePath, backupPath); rollbackErr != nil {
-					archiveMsg.err = errors.Join(archiveMsg.err, rollbackErr)
+				if archiveRollbackPrepared {
+					if rollbackErr := rollbackInstallUseArchive(archivePath, backupPath); rollbackErr != nil {
+						archiveMsg.err = errors.Join(archiveMsg.err, rollbackErr)
+					}
 				}
 				return installUseMsg{
 					token:        token,
@@ -959,13 +965,13 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 			}
 		}
 		if !useGeneration.isCurrent(token) {
-			if archiveCmd != nil {
+			if archiveRollbackPrepared {
 				_ = rollbackInstallUseArchive(archivePath, backupPath)
 			}
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		if err := preflightInstallUseDestinations(cfg, row.Result.Name, destinations); err != nil {
-			if archiveCmd != nil {
+			if archiveRollbackPrepared {
 				err = errors.Join(err, rollbackInstallUseArchive(archivePath, backupPath))
 			}
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
@@ -973,8 +979,12 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 		createdPaths := make([]string, 0, len(destinations))
 		for _, dest := range destinations {
 			if !useGeneration.isCurrent(token) {
-				if err := rollbackInstallUseLinks(createdPaths); err != nil {
-					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+				err := rollbackInstallUseLinks(createdPaths)
+				if archiveRollbackPrepared {
+					err = errors.Join(err, rollbackInstallUseArchive(archivePath, backupPath))
+				}
+				if err != nil {
+					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("rollback stale install-use: %w", err)}
 				}
 				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 			}
@@ -983,7 +993,7 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 				if rollbackErr := rollbackInstallUseLinks(createdPaths); rollbackErr != nil {
 					err = errors.Join(err, fmt.Errorf("rollback partial install-use links: %w", rollbackErr))
 				}
-				if archiveCmd != nil {
+				if archiveRollbackPrepared {
 					err = errors.Join(err, rollbackInstallUseArchive(archivePath, backupPath))
 				}
 				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
@@ -991,15 +1001,19 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 			if result.Path != "" {
 				createdPaths = append(createdPaths, result.Path)
 			}
-			if backupPath != "" {
-				_ = os.RemoveAll(backupPath)
-			}
 			if !useGeneration.isCurrent(token) {
-				if err := rollbackInstallUseLinks(createdPaths); err != nil {
-					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+				err := rollbackInstallUseLinks(createdPaths)
+				if archiveRollbackPrepared {
+					err = errors.Join(err, rollbackInstallUseArchive(archivePath, backupPath))
+				}
+				if err != nil {
+					return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: fmt.Errorf("rollback stale install-use: %w", err)}
 				}
 				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 			}
+		}
+		if err := discardInstallUseArchiveRollback(backupPath); err != nil {
+			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 		}
 		return installUseMsg{token: token, name: row.Result.Name, destinations: destinations}
 	}
@@ -1170,7 +1184,7 @@ func prepareInstallUseArchiveRollback(archivePath string) (string, error) {
 	if err := os.Remove(backupPath); err != nil {
 		return "", fmt.Errorf("prepare install-use archive backup: %w", err)
 	}
-	if err := os.CopyFS(backupPath, os.DirFS(archivePath)); err != nil {
+	if err := os.Rename(archivePath, backupPath); err != nil {
 		return "", fmt.Errorf("backup install-use archive: %w", err)
 	}
 	return backupPath, nil
@@ -1185,6 +1199,16 @@ func rollbackInstallUseArchive(archivePath, backupPath string) error {
 	}
 	if err := os.Rename(backupPath, archivePath); err != nil {
 		return fmt.Errorf("restore install-use archive: %w", err)
+	}
+	return nil
+}
+
+func discardInstallUseArchiveRollback(backupPath string) error {
+	if backupPath == "" {
+		return nil
+	}
+	if err := os.RemoveAll(backupPath); err != nil {
+		return fmt.Errorf("discard install-use archive backup: %w", err)
 	}
 	return nil
 }

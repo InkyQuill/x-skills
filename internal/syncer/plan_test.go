@@ -1,6 +1,8 @@
 package syncer
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +19,7 @@ func TestPreflightPlansManagedReuseAndDestinationClassificationsWithoutMutation(
 	cfg, candidate, destinations := planFixture(t, "review")
 	archive := makePlanSkill(t, cfg.ArchiveSkillsRoot(), "review", "selected")
 	candidate.Fingerprint = mustPlanFingerprint(t, archive)
+	bindPlanCandidate(&candidate)
 	candidate.Occurrences[0].Status = actions.StatusManaged
 	candidate.Occurrences[0].Path = filepath.Join(cfg.ProjectRoot, ".codex", "skills", "review")
 	mustPlanSymlink(t, archive, candidate.Occurrences[0].Path)
@@ -49,6 +52,7 @@ func TestPreflightPlansUnmanagedMigrationAndMissingLink(t *testing.T) {
 	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
 	candidate.Occurrences[0].Path = source
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
 	before := snapshotPlanTree(t, cfg.ProjectRoot, cfg.ArchiveRoot)
 
 	plan, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil)
@@ -71,6 +75,7 @@ func TestPreflightReportsManagedAndUnmanagedDestinationConflicts(t *testing.T) {
 	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
 	candidate.Occurrences[0].Path = source
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
 	makePlanSkill(t, destinations[0].Path, "review", "unmanaged conflict")
 	otherArchive := makePlanSkill(t, cfg.ArchiveSkillsRoot(), "other", "managed conflict")
 	mustPlanSymlink(t, otherArchive, filepath.Join(destinations[1].Path, "review"))
@@ -97,6 +102,7 @@ func TestPreflightAppliesExplicitConflictResolutionsAndValidatesUniqueNames(t *t
 	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
 	candidate.Occurrences[0].Path = source
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
 	makePlanSkill(t, destinations[0].Path, "review", "first conflict")
 	makePlanSkill(t, destinations[1].Path, "review", "second conflict")
 	makePlanSkill(t, cfg.ArchiveSkillsRoot(), "review-from-agents", "occupied")
@@ -134,9 +140,11 @@ func TestPreflightCancelStopsPlanningAndSuggestionsAreUnique(t *testing.T) {
 	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
 	candidate.Occurrences[0].Path = source
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
 	makePlanSkill(t, destinations[0].Path, "review", "conflict")
 	makePlanSkill(t, cfg.ArchiveSkillsRoot(), "review-from-agents", "occupied")
 	makePlanSkill(t, cfg.ArchiveSkillsRoot(), "review-from-agents-2", "occupied")
+	before := snapshotPlanTree(t, cfg.ProjectRoot, cfg.ArchiveRoot)
 
 	plan, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil)
 	if err != nil {
@@ -154,6 +162,7 @@ func TestPreflightCancelStopsPlanningAndSuggestionsAreUnique(t *testing.T) {
 	if !plan.Cancelled || len(plan.Migrations) != 0 || len(plan.Links) != 0 {
 		t.Fatalf("cancelled plan = %#v", plan)
 	}
+	assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
 }
 
 func TestPreflightRejectsAmbiguousVariantsAndUnusedResolutions(t *testing.T) {
@@ -163,6 +172,7 @@ func TestPreflightRejectsAmbiguousVariantsAndUnusedResolutions(t *testing.T) {
 	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
 	candidate.Occurrences[0].Path = source
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
 	other := candidate
 	other.ID = "review:other"
 	other.Fingerprint = "other"
@@ -185,6 +195,7 @@ func TestPreflightRejectsPreserveNameReservedByPlannedArchive(t *testing.T) {
 	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
 	candidate.Occurrences[0].Path = source
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
 	makePlanSkill(t, destinations[0].Path, "review", "conflict")
 	resolution := []ConflictResolution{{
 		DestinationPath: filepath.Join(destinations[0].Path, "review"),
@@ -197,6 +208,226 @@ func TestPreflightRejectsPreserveNameReservedByPlannedArchive(t *testing.T) {
 	}
 }
 
+func TestPreflightRevalidatesCandidateIdentityAndOccurrences(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*NameGroup)
+	}{
+		{name: "group name differs", mutate: func(group *NameGroup) { group.Name = "other" }},
+		{name: "forged ID", mutate: func(group *NameGroup) { group.Variants[0].ID = "review:forged" }},
+		{name: "occurrence name differs", mutate: func(group *NameGroup) { group.Variants[0].Occurrences[0].Name = "other" }},
+		{name: "occurrence content drifted", mutate: func(group *NameGroup) {
+			_ = os.WriteFile(filepath.Join(group.Variants[0].Occurrences[0].Path, "SKILL.md"), []byte("changed"), 0o644)
+		}},
+		{name: "managed occurrence outside archive", mutate: func(group *NameGroup) { group.Variants[0].Occurrences[0].Status = actions.StatusManaged }},
+		{name: "occurrence outside declared Skills Folder", mutate: func(group *NameGroup) {
+			group.Variants[0].Occurrences[0].Root.Path = filepath.Dir(filepath.Dir(group.Variants[0].Occurrences[0].Root.Path))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, candidate, destinations := planFixture(t, "review")
+			source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+			candidate.Occurrences[0].Path = source
+			candidate.Fingerprint = mustPlanFingerprint(t, source)
+			bindPlanCandidate(&candidate)
+			group := NameGroup{Name: "review", Variants: []Candidate{candidate}}
+			tt.mutate(&group)
+			if _, err := Preflight(cfg, []NameGroup{group}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil); err == nil {
+				t.Fatal("Preflight accepted stale or inconsistent candidate data")
+			}
+		})
+	}
+}
+
+func TestPreflightRejectsDuplicateGroupsAndCandidateIDs(t *testing.T) {
+	t.Parallel()
+
+	cfg, candidate, destinations := planFixture(t, "review")
+	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+	candidate.Occurrences[0].Path = source
+	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
+	group := NameGroup{Name: "review", Variants: []Candidate{candidate}}
+
+	if _, err := Preflight(cfg, []NameGroup{group, group}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil); err == nil {
+		t.Fatal("Preflight accepted duplicate name groups and candidate IDs")
+	}
+	otherGroup := NameGroup{Name: "other", Variants: []Candidate{{ID: candidate.ID, Name: "other", Fingerprint: candidate.Fingerprint, Occurrences: candidate.Occurrences}}}
+	if _, err := Preflight(cfg, []NameGroup{group, otherGroup}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil); err == nil {
+		t.Fatal("Preflight accepted a candidate ID reused across groups")
+	}
+}
+
+func TestPreflightRequiresExplicitResolutionForDivergentArchive(t *testing.T) {
+	t.Parallel()
+
+	cfg, candidate, destinations := planFixture(t, "review")
+	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+	candidate.Occurrences[0].Path = source
+	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
+	archive := makePlanSkill(t, cfg.ArchiveSkillsRoot(), "review", "different archive")
+	destination := filepath.Join(destinations[0].Path, "review")
+	mustPlanSymlink(t, archive, destination)
+	before := snapshotPlanTree(t, cfg.ProjectRoot, cfg.ArchiveRoot)
+
+	plan, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Migrations) != 0 || len(plan.Skipped) != 0 || len(plan.Conflicts) != 1 || plan.Conflicts[0].DestinationPath != archive {
+		t.Fatalf("divergent archive plan = %#v", plan)
+	}
+	if plan.Conflicts[0].SuggestedPreserveAs != "review-from-archive" {
+		t.Fatalf("archive suggestion = %q", plan.Conflicts[0].SuggestedPreserveAs)
+	}
+	assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
+
+	resolution := []ConflictResolution{{DestinationPath: archive, Action: ConflictReplace, PreserveAs: "review-preserved"}}
+	plan, err = Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, resolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Migrations) != 1 || len(plan.Conflicts) != 1 || plan.Conflicts[0].Resolution.Action != ConflictReplace {
+		t.Fatalf("resolved archive plan = %#v", plan)
+	}
+	if len(plan.Skipped) != 0 {
+		t.Fatalf("changed archive was incorrectly treated as managed no-op: %#v", plan.Skipped)
+	}
+	assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
+}
+
+func TestPreflightValidatesDestinationSetBeforePlanning(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, cfg config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot
+	}{
+		{name: "duplicate", mutate: func(_ *testing.T, _ config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot {
+			return []roots.ActiveRoot{destinations[0], destinations[0]}
+		}},
+		{name: "canonical alias", mutate: func(t *testing.T, cfg config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot {
+			alias := filepath.Join(filepath.Dir(cfg.ProjectRoot), "agents-alias")
+			if err := os.MkdirAll(destinations[0].Path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(destinations[0].Path, alias); err != nil {
+				t.Fatal(err)
+			}
+			aliased := destinations[0]
+			aliased.Path = alias
+			return []roots.ActiveRoot{destinations[0], aliased}
+		}},
+		{name: "outside configured project roots", mutate: func(t *testing.T, cfg config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot {
+			outside := destinations[0]
+			outside.Path = filepath.Join(cfg.HomeDir, "outside")
+			return []roots.ActiveRoot{outside}
+		}},
+		{name: "root is file", mutate: func(t *testing.T, _ config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot {
+			if err := os.MkdirAll(filepath.Dir(destinations[0].Path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(destinations[0].Path, []byte("file"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return destinations[:1]
+		}},
+		{name: "existing ancestor is file", mutate: func(t *testing.T, cfg config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot {
+			if err := os.MkdirAll(cfg.ProjectRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cfg.ProjectRoot, ".agents"), []byte("file"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return destinations[:1]
+		}},
+		{name: "unwritable root", mutate: func(t *testing.T, _ config.Config, destinations []roots.ActiveRoot) []roots.ActiveRoot {
+			if err := os.MkdirAll(destinations[0].Path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(destinations[0].Path, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			return destinations[:1]
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, candidate, destinations := planFixture(t, "review")
+			source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+			candidate.Occurrences[0].Path = source
+			candidate.Fingerprint = mustPlanFingerprint(t, source)
+			bindPlanCandidate(&candidate)
+			destinations = tt.mutate(t, cfg, destinations)
+			if _, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations, Selection{CandidateIDs: []string{candidate.ID}}, nil); err == nil {
+				t.Fatal("Preflight accepted invalid destination set")
+			}
+		})
+	}
+}
+
+func TestPreflightRejectsOverlappingConfiguredDestinations(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	cfg := config.Default(filepath.Join(base, "project"), filepath.Join(base, "home"))
+	if err := os.MkdirAll(filepath.Join(cfg.HomeDir, ".x-skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configData := "version: 1\nactive_roots:\n" +
+		"  - scope: project\n    target: agents\n    path: .skills\n" +
+		"  - scope: project\n    target: claude\n    path: .skills/nested\n"
+	if err := os.WriteFile(filepath.Join(cfg.HomeDir, ".x-skills", "config.yaml"), []byte(configData), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destinations := roots.ActiveRoots(loaded, roots.Filter{Scope: config.ScopeProject})[:2]
+	source := makePlanSkill(t, filepath.Join(loaded.ProjectRoot, ".codex", "skills"), "review", "selected")
+	var sourceRoot roots.ActiveRoot
+	for _, root := range roots.ActiveRoots(loaded, roots.Filter{Scope: config.ScopeProject}) {
+		if root.Target == config.TargetCodex {
+			sourceRoot = root
+		}
+	}
+	candidate := Candidate{Name: "review", Occurrences: []actions.ActiveSkill{{Name: "review", Root: sourceRoot, Path: source, Status: actions.StatusUnmanaged}}}
+	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
+
+	if _, err := Preflight(loaded, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations, Selection{CandidateIDs: []string{candidate.ID}}, nil); err == nil {
+		t.Fatal("Preflight accepted overlapping destination roots")
+	}
+}
+
+func TestPreflightValidatesVariantByNameStructure(t *testing.T) {
+	t.Parallel()
+
+	cfg, candidate, destinations := planFixture(t, "review")
+	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+	candidate.Occurrences[0].Path = source
+	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
+	groups := []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}
+
+	tests := []Selection{
+		{VariantByName: map[string]string{"review": "review:unknown"}},
+		{VariantByName: map[string]string{"other": candidate.ID}},
+	}
+	for _, selection := range tests {
+		if _, err := Preflight(cfg, groups, destinations[:1], selection, nil); err == nil {
+			t.Fatalf("Preflight accepted invalid variant selection %#v", selection)
+		}
+	}
+}
+
 func planFixture(t *testing.T, name string) (config.Config, Candidate, []roots.ActiveRoot) {
 	t.Helper()
 	base := t.TempDir()
@@ -206,7 +437,8 @@ func planFixture(t *testing.T, name string) (config.Config, Candidate, []roots.A
 		{Scope: config.ScopeProject, Target: config.TargetClaude, Path: filepath.Join(cfg.ProjectRoot, ".claude", "skills"), Label: ".Cl"},
 	}
 	sourcePath := filepath.Join(cfg.ProjectRoot, ".codex", "skills", name)
-	return cfg, Candidate{ID: name + ":candidate", Name: name, Occurrences: []actions.ActiveSkill{{Name: name, Path: sourcePath, Status: actions.StatusUnmanaged}}}, destinations
+	sourceRoot := roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetCodex, Path: filepath.Dir(sourcePath), Label: ".Cd"}
+	return cfg, Candidate{ID: name + ":candidate", Name: name, Occurrences: []actions.ActiveSkill{{Name: name, Root: sourceRoot, Path: sourcePath, Status: actions.StatusUnmanaged}}}, destinations
 }
 
 func makePlanSkill(t *testing.T, root, name, body string) string {
@@ -240,29 +472,56 @@ func mustPlanFingerprint(t *testing.T, path string) string {
 	return fp
 }
 
-func snapshotPlanTree(t *testing.T, paths ...string) map[string]os.FileInfo {
+func bindPlanCandidate(candidate *Candidate) {
+	candidate.ID = candidate.Name + ":" + candidate.Fingerprint
+}
+
+type planSnapshotEntry struct {
+	mode    os.FileMode
+	size    int64
+	modTime int64
+	content string
+}
+
+func snapshotPlanTree(t *testing.T, paths ...string) map[string]planSnapshotEntry {
 	t.Helper()
-	snapshot := map[string]os.FileInfo{}
+	snapshot := map[string]planSnapshotEntry{}
 	for _, root := range paths {
 		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err == nil {
-				snapshot[path] = info
+			if err != nil {
+				return nil
 			}
+			entry := planSnapshotEntry{mode: info.Mode(), size: info.Size(), modTime: info.ModTime().UnixNano()}
+			switch {
+			case info.Mode()&os.ModeSymlink != 0:
+				target, readErr := os.Readlink(path)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				entry.content = "link:" + target
+			case info.Mode().IsRegular():
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				entry.content = fmt.Sprintf("sha256:%x", sha256.Sum256(content))
+			}
+			snapshot[path] = entry
 			return nil
 		})
 	}
 	return snapshot
 }
 
-func assertPlanSnapshot(t *testing.T, before map[string]os.FileInfo, paths ...string) {
+func assertPlanSnapshot(t *testing.T, before map[string]planSnapshotEntry, paths ...string) {
 	t.Helper()
 	after := snapshotPlanTree(t, paths...)
 	if len(after) != len(before) {
 		t.Fatalf("filesystem entry count changed: before %d, after %d", len(before), len(after))
 	}
-	for path, beforeInfo := range before {
-		afterInfo, ok := after[path]
-		if !ok || beforeInfo.Mode() != afterInfo.Mode() || beforeInfo.Size() != afterInfo.Size() {
+	for path, beforeEntry := range before {
+		afterEntry, ok := after[path]
+		if !ok || beforeEntry != afterEntry {
 			t.Fatalf("filesystem changed at %s", path)
 		}
 	}

@@ -80,8 +80,15 @@ func Preflight(
 	selection Selection,
 	resolutions []ConflictResolution,
 ) (Plan, error) {
+	destinations, err := validateDestinations(cfg, destinations)
+	if err != nil {
+		return Plan{}, err
+	}
 	selected, err := selectedCandidates(groups, selection)
 	if err != nil {
+		return Plan{}, err
+	}
+	if err := validateSelectedCandidates(cfg, selected); err != nil {
 		return Plan{}, err
 	}
 	resolutionByPath, err := indexResolutions(cfg, resolutions)
@@ -109,10 +116,48 @@ func Preflight(
 	var plan Plan
 	usedResolutions := make(map[string]struct{}, len(resolutions))
 	for _, candidate := range selected {
-		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), candidate.Name)
+		archivePath, err := canonicalEntryPath(filepath.Join(cfg.ArchiveSkillsRoot(), candidate.Name))
+		if err != nil {
+			return Plan{}, fmt.Errorf("canonicalize archive path for %q: %w", candidate.Name, err)
+		}
+		archiveExists, err := pathExists(archivePath)
+		if err != nil {
+			return Plan{}, fmt.Errorf("inspect archive for %q: %w", candidate.Name, err)
+		}
 		archiveMatches, err := pathMatchesFingerprint(archivePath, candidate.Fingerprint)
 		if err != nil {
 			return Plan{}, fmt.Errorf("inspect archive for %q: %w", candidate.Name, err)
+		}
+		archiveReplacement := false
+		if archiveExists && !archiveMatches {
+			resolution := resolutionByPath[archivePath]
+			if resolution.Action != "" {
+				usedResolutions[archivePath] = struct{}{}
+			}
+			suggestion, err := suggestPreserveName(candidate.Name, "archive", reservedNames)
+			if err != nil {
+				return Plan{}, err
+			}
+			conflict := Conflict{
+				CandidateID: candidate.ID, Name: candidate.Name,
+				DestinationPath: archivePath, DestinationStatus: actions.StatusManaged,
+				SuggestedPreserveAs: suggestion, Resolution: resolution,
+			}
+			switch resolution.Action {
+			case ConflictCancel:
+				return Plan{Cancelled: true}, nil
+			case ConflictKeep:
+				plan.Skipped = append(plan.Skipped, Skip{CandidateID: candidate.ID, Name: candidate.Name, DestinationPath: archivePath, Reason: SkipKeptDestination})
+				continue
+			case "":
+				plan.Conflicts = append(plan.Conflicts, conflict)
+				continue
+			case ConflictReplace:
+				plan.Conflicts = append(plan.Conflicts, conflict)
+				archiveReplacement = true
+			default:
+				return Plan{}, fmt.Errorf("unknown conflict action %q", resolution.Action)
+			}
 		}
 		if !archiveMatches {
 			source, ok := migrationSource(candidate)
@@ -130,7 +175,7 @@ func Preflight(
 
 		for _, destination := range destinations {
 			destinationPath := filepath.Join(destination.Path, candidate.Name)
-			classification, err := classifyDestination(cfg, destinationPath, archivePath, candidate.Fingerprint)
+			classification, err := classifyDestination(cfg, destinationPath, archivePath, candidate.Fingerprint, archiveMatches, archiveReplacement)
 			if err != nil {
 				return Plan{}, err
 			}
@@ -178,8 +223,28 @@ func Preflight(
 
 func selectedCandidates(groups []NameGroup, selection Selection) ([]Candidate, error) {
 	byID := make(map[string]Candidate)
+	groupNames := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
+		if err := repo.ValidateName(group.Name); err != nil {
+			return nil, fmt.Errorf("validate candidate group name: %w", err)
+		}
+		if _, exists := groupNames[group.Name]; exists {
+			return nil, fmt.Errorf("duplicate candidate group %q", group.Name)
+		}
+		groupNames[group.Name] = struct{}{}
 		for _, candidate := range group.Variants {
+			if candidate.Name != group.Name {
+				return nil, fmt.Errorf("candidate %q does not belong to group %q", candidate.Name, group.Name)
+			}
+			if err := repo.ValidateName(candidate.Name); err != nil {
+				return nil, fmt.Errorf("validate candidate name: %w", err)
+			}
+			if candidate.ID != candidate.Name+":"+candidate.Fingerprint {
+				return nil, fmt.Errorf("candidate %q has invalid ID %q", candidate.Name, candidate.ID)
+			}
+			if _, exists := byID[candidate.ID]; exists {
+				return nil, fmt.Errorf("duplicate candidate ID %q", candidate.ID)
+			}
 			byID[candidate.ID] = candidate
 		}
 	}
@@ -209,12 +274,81 @@ func selectedCandidates(groups []NameGroup, selection Selection) ([]Candidate, e
 	return selected, nil
 }
 
+func validateSelectedCandidates(cfg config.Config, candidates []Candidate) error {
+	configuredRoots := make(map[string]string)
+	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject}) {
+		canonical, err := canonicalPath(root.Path)
+		if err != nil {
+			return fmt.Errorf("validate configured source Skills Folder %q: %w", root.Path, err)
+		}
+		configuredRoots[root.Target] = canonical
+	}
+	for _, candidate := range candidates {
+		if len(candidate.Occurrences) == 0 {
+			return fmt.Errorf("selected candidate %q has no occurrences", candidate.ID)
+		}
+		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), candidate.Name)
+		for _, occurrence := range candidate.Occurrences {
+			if occurrence.Name != candidate.Name || filepath.Base(filepath.Clean(occurrence.Path)) != candidate.Name {
+				return fmt.Errorf("occurrence %q does not match candidate %q", occurrence.Path, candidate.Name)
+			}
+			resolved, err := filepath.EvalSymlinks(occurrence.Path)
+			if err != nil {
+				return fmt.Errorf("resolve occurrence %q: %w", occurrence.Path, err)
+			}
+			matches, err := pathMatchesFingerprint(resolved, candidate.Fingerprint)
+			if err != nil {
+				return fmt.Errorf("fingerprint occurrence %q: %w", occurrence.Path, err)
+			}
+			if !matches {
+				return fmt.Errorf("occurrence %q no longer matches candidate %q", occurrence.Path, candidate.ID)
+			}
+			if occurrence.Root.Scope != config.ScopeProject {
+				return fmt.Errorf("occurrence %q is not project-scoped", occurrence.Path)
+			}
+			configuredRoot, ok := configuredRoots[occurrence.Root.Target]
+			if !ok {
+				return fmt.Errorf("occurrence %q has unknown Skills Folder target %q", occurrence.Path, occurrence.Root.Target)
+			}
+			occurrenceRoot, err := canonicalPath(occurrence.Root.Path)
+			if err != nil {
+				return fmt.Errorf("canonicalize occurrence Skills Folder %q: %w", occurrence.Root.Path, err)
+			}
+			occurrenceParent, err := canonicalPath(filepath.Dir(occurrence.Path))
+			if err != nil {
+				return fmt.Errorf("canonicalize occurrence parent %q: %w", occurrence.Path, err)
+			}
+			if occurrenceRoot != configuredRoot || occurrenceParent != configuredRoot {
+				return fmt.Errorf("occurrence %q is outside configured Skills Folder %q", occurrence.Path, configuredRoot)
+			}
+			switch occurrence.Status {
+			case actions.StatusManaged:
+				if !sameCanonicalPath(resolved, archivePath) {
+					return fmt.Errorf("managed occurrence %q does not target archive %q", occurrence.Path, archivePath)
+				}
+			case actions.StatusUnmanaged:
+				if isArchivedPath(cfg, resolved) {
+					return fmt.Errorf("unmanaged occurrence %q points into archive", occurrence.Path)
+				}
+			default:
+				return fmt.Errorf("occurrence %q has unsupported status %q", occurrence.Path, occurrence.Status)
+			}
+		}
+	}
+	return nil
+}
+
 func indexResolutions(cfg config.Config, resolutions []ConflictResolution) (map[string]ConflictResolution, error) {
 	indexed := make(map[string]ConflictResolution, len(resolutions))
 	for _, resolution := range resolutions {
 		if resolution.DestinationPath == "" {
 			return nil, fmt.Errorf("conflict resolution destination is required")
 		}
+		canonicalDestination, err := canonicalEntryPath(resolution.DestinationPath)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize conflict resolution destination: %w", err)
+		}
+		resolution.DestinationPath = canonicalDestination
 		if _, exists := indexed[resolution.DestinationPath]; exists {
 			return nil, fmt.Errorf("duplicate conflict resolution for %q", resolution.DestinationPath)
 		}
@@ -233,6 +367,92 @@ func indexResolutions(cfg config.Config, resolutions []ConflictResolution) (map[
 		indexed[resolution.DestinationPath] = resolution
 	}
 	return indexed, nil
+}
+
+func validateDestinations(cfg config.Config, destinations []roots.ActiveRoot) ([]roots.ActiveRoot, error) {
+	allowed := make(map[string]roots.ActiveRoot)
+	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject}) {
+		canonical, err := canonicalPath(root.Path)
+		if err != nil {
+			return nil, fmt.Errorf("validate configured destination %q: %w", root.Path, err)
+		}
+		allowed[canonical] = root
+	}
+
+	validated := make([]roots.ActiveRoot, 0, len(destinations))
+	seen := make(map[string]struct{}, len(destinations))
+	for _, destination := range destinations {
+		if destination.Scope != config.ScopeProject {
+			return nil, fmt.Errorf("sync destination must be project-scoped: %s", destination.Path)
+		}
+		canonical, err := canonicalPath(destination.Path)
+		if err != nil {
+			return nil, fmt.Errorf("validate destination %q: %w", destination.Path, err)
+		}
+		configured, ok := allowed[canonical]
+		if !ok || configured.Target != destination.Target {
+			return nil, fmt.Errorf("destination is not a configured project Skills Folder: %s", destination.Path)
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return nil, fmt.Errorf("duplicate or aliased destination: %s", destination.Path)
+		}
+		for prior := range seen {
+			if pathsOverlap(prior, canonical) {
+				return nil, fmt.Errorf("overlapping destinations: %s and %s", prior, canonical)
+			}
+		}
+		if err := validateWritableDirectoryShape(canonical); err != nil {
+			return nil, fmt.Errorf("destination %q cannot host skills: %w", destination.Path, err)
+		}
+		seen[canonical] = struct{}{}
+		destination.Path = canonical
+		validated = append(validated, destination)
+	}
+	return validated, nil
+}
+
+func validateWritableDirectoryShape(path string) error {
+	current := path
+	for {
+		info, err := os.Stat(current)
+		switch {
+		case err == nil:
+			if !info.IsDir() {
+				return fmt.Errorf("existing path %q is not a directory", current)
+			}
+			if info.Mode().Perm()&0o222 == 0 || info.Mode().Perm()&0o111 == 0 {
+				return fmt.Errorf("existing directory %q is not writable and searchable", current)
+			}
+			return nil
+		case !errors.Is(err, os.ErrNotExist):
+			return err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("no existing directory ancestor for %q", path)
+		}
+		current = parent
+	}
+}
+
+func pathsOverlap(a, b string) bool {
+	rel, err := filepath.Rel(a, b)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true
+	}
+	rel, err = filepath.Rel(b, a)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func canonicalEntryPath(path string) (string, error) {
+	if path == "" || filepath.Base(filepath.Clean(path)) == "." {
+		return "", fmt.Errorf("invalid entry path %q", path)
+	}
+	parent, err := canonicalPath(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(filepath.Clean(path))), nil
 }
 
 func archivedNames(cfg config.Config) (map[string]struct{}, error) {
@@ -273,7 +493,7 @@ type destinationClassification struct {
 	status string
 }
 
-func classifyDestination(cfg config.Config, path, archivePath, candidateFingerprint string) (destinationClassification, error) {
+func classifyDestination(cfg config.Config, path, archivePath, candidateFingerprint string, archiveMatches, archiveReplacement bool) (destinationClassification, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return destinationClassification{kind: destinationMissing}, nil
@@ -292,7 +512,12 @@ func classifyDestination(cfg config.Config, path, archivePath, candidateFingerpr
 			status = actions.StatusManaged
 		}
 		if sameCanonicalPath(resolved, archivePath) {
-			return destinationClassification{kind: destinationManaged, status: actions.StatusManaged}, nil
+			if archiveMatches {
+				return destinationClassification{kind: destinationManaged, status: actions.StatusManaged}, nil
+			}
+			if archiveReplacement {
+				return destinationClassification{kind: destinationMatching, status: actions.StatusManaged}, nil
+			}
 		}
 	} else if !info.IsDir() {
 		return destinationClassification{kind: destinationDivergent, status: status}, nil
@@ -305,6 +530,14 @@ func classifyDestination(cfg config.Config, path, archivePath, candidateFingerpr
 		return destinationClassification{kind: destinationMatching, status: status}, nil
 	}
 	return destinationClassification{kind: destinationDivergent, status: status}, nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func pathMatchesFingerprint(path, want string) (bool, error) {

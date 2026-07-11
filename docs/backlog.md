@@ -20,7 +20,5 @@
 
 ## Testing
 
-- (Resolved 2026-07-11) Flaky staging-cleanup assertion in `TestRestoreNestedModalsNavigateBackAndFinalCancelClosesStaging`: the test globbed the shared OS temp dir for `x-skills-restore-*`, so a concurrent test's staging directory could fail the assertion. `manifest.RestorePlan` now exposes `StagingRoot()` and the restore TUI tests assert on their own plan's directory instead of glob-diffing the temp dir.
-
 - Add package documentation summaries for the Go implementation. Context: exported package documentation is absent across the current CLI/internal packages, so `go doc` and future generated reference surfaces provide no package-level orientation. Evidence: package summaries are empty for the packages returned by `go list ./...`.
 - Investigate a mock or virtual filesystem layer for mutation and error-path tests. Context: current tests use real syscalls in `t.TempDir`, which is simple and reliable, but permission failures and platform-specific filesystem errors remain hard to exercise directly. Evidence: code quality review of filesystem-heavy packages such as `internal/repo`, `internal/actions`, and `internal/symlinkcheck`.

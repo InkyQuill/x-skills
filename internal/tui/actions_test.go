@@ -282,7 +282,7 @@ func TestRestoreMultipleConflictsAreNavigableAndRenameBackPreservesPreview(t *te
 
 func requireRestoreStagingRoot(t *testing.T, plan manifest.RestorePlan) string {
 	t.Helper()
-	staging := plan.StagingRoot()
+	staging := plan.StagingRootForTest()
 	if staging == "" {
 		t.Fatal("restore planning did not create a staging root")
 	}

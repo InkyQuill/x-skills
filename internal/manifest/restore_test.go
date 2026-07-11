@@ -14,7 +14,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
 
-func TestPlanRestoreExposesStagingRootUntilClosed(t *testing.T) {
+func TestPlanRestoreExposesStagingRootForTest(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
 	root := restoreRoot(t, cfg, config.TargetAgents)
@@ -23,9 +23,10 @@ func TestPlanRestoreExposesStagingRootUntilClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	staging := plan.StagingRoot()
+	t.Cleanup(func() { _ = plan.Close() })
+	staging := plan.StagingRootForTest()
 	if staging == "" {
-		t.Fatal("StagingRoot() is empty after planning")
+		t.Fatal("StagingRootForTest() is empty after planning")
 	}
 	if info, err := os.Stat(staging); err != nil || !info.IsDir() {
 		t.Fatalf("staging root is not a directory: info=%v err=%v", info, err)
@@ -36,8 +37,8 @@ func TestPlanRestoreExposesStagingRootUntilClosed(t *testing.T) {
 	if _, err := os.Stat(staging); !os.IsNotExist(err) {
 		t.Fatalf("staging root still exists after Close: %v", err)
 	}
-	if got := plan.StagingRoot(); got != "" {
-		t.Fatalf("StagingRoot() after Close = %q, want empty", got)
+	if got := plan.StagingRootForTest(); got != "" {
+		t.Fatalf("StagingRootForTest() after Close = %q, want empty", got)
 	}
 }
 
@@ -113,17 +114,6 @@ func TestPlanRestoreClassifiesBrokenExtraAsRemoval(t *testing.T) {
 	defer plan.Close()
 	if len(plan.Removals) != 1 || plan.Removals[0].Kind != ChangeRemove {
 		t.Fatalf("removals = %#v", plan.Removals)
-	}
-}
-
-func TestRestorePlanCloseDiscardsStaging(t *testing.T) {
-	plan := RestorePlan{checkoutRoot: t.TempDir()}
-	path := plan.checkoutRoot
-	if err := plan.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("staging remains: %v", err)
 	}
 }
 

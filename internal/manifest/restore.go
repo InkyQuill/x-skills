@@ -70,12 +70,10 @@ type MigrationConflict struct {
 	SuggestedName   string
 }
 
-// StagingRoot reports the temporary checkout directory backing the plan's
-// resolved skills; it is empty once Close has released it.
-func (plan *RestorePlan) StagingRoot() string {
-	if plan == nil {
-		return ""
-	}
+// StagingRootForTest returns the staging path recorded by this plan value for
+// filesystem assertions in tests. It does not report shared lifecycle state:
+// copies do not observe another copy's Close clearing the path.
+func (plan RestorePlan) StagingRootForTest() string {
 	return plan.checkoutRoot
 }
 

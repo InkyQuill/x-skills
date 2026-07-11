@@ -827,7 +827,7 @@ func TestInstallBatchProgress(t *testing.T) {
 		}},
 	}
 
-	cmd := newInstallArchiveBatchCmd(commands, nil, 2, token, generation)
+	cmd := newInstallArchiveBatchCmd(t.Context(), commands, nil, 2, token, generation)
 	progress, ok := cmd().(installBatchProgressMsg)
 	if !ok {
 		t.Fatalf("first batch message = %T, want installBatchProgressMsg", cmd())
@@ -866,7 +866,7 @@ func TestInstallBatchCancellationSuppressesStaleConflict(t *testing.T) {
 		},
 	}}
 
-	msg := newInstallArchiveBatchCmd(commands, nil, 1, token, generation)()
+	msg := newInstallArchiveBatchCmd(t.Context(), commands, nil, 1, token, generation)()
 	cancelled, ok := msg.(installBatchCancelledMsg)
 	if !ok {
 		t.Fatalf("batch message = %T, want installBatchCancelledMsg", msg)
@@ -4878,6 +4878,80 @@ func TestInstallInputCtrlCQuits(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Fatalf("cmd msg = %T, want tea.QuitMsg", msg)
+	}
+}
+
+func TestInstallArchiveStateCheckoutCancelledWhenLeavingInstall(t *testing.T) {
+	testInstallArchiveStateCheckoutCancellation(t, func(m *Model) {
+		m.setView(ViewRepo)
+	})
+}
+
+func TestInstallArchiveStateCheckoutCancelledWhenQuitting(t *testing.T) {
+	testInstallArchiveStateCheckoutCancellation(t, func(m *Model) {
+		updated, cmd := m.handleKey(keyRunes("q"))
+		*m = mustModel(t, updated)
+		if cmd == nil {
+			t.Fatal("quit cmd is nil")
+		}
+	})
+}
+
+func testInstallArchiveStateCheckoutCancellation(t *testing.T, cancel func(*Model)) {
+	t.Helper()
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Archived.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	previousCheckout := installArchiveStateCheckout
+	installArchiveStateCheckout = func(ctx context.Context, _ *remote.CheckoutCache, _ remote.GitSource) (remote.Checkout, error) {
+		close(started)
+		<-ctx.Done()
+		return remote.Checkout{}, ctx.Err()
+	}
+	t.Cleanup(func() { installArchiveStateCheckout = previousCheckout })
+
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.searchToken = 1
+	m.install.checkouts = remote.NewCheckoutCache(t.TempDir())
+	cmd := m.applyInstallSearchResult(installSearchResultMsg{
+		token: 1,
+		query: "svelte",
+		results: []remote.SearchResult{{
+			Name:  "svelte-coder",
+			Owner: "vercel-labs",
+			Repo:  "skills",
+			Path:  "skills/svelte-coder",
+		}},
+	})
+	if cmd == nil {
+		t.Fatal("archive state check cmd is nil")
+	}
+
+	result := make(chan installArchiveStatesMsg, 1)
+	go func() { result <- cmd().(installArchiveStatesMsg) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("checkout did not start")
+	}
+
+	cancel(&m)
+	select {
+	case msg := <-result:
+		if len(msg.results) != 1 || !errors.Is(msg.results[0].Err, context.Canceled) {
+			t.Fatalf("checkout error = %#v, want context.Canceled", msg.results)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("checkout was not cancelled promptly")
 	}
 }
 

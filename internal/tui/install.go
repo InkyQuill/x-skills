@@ -53,6 +53,8 @@ type installState struct {
 	pendingUse           *pendingInstallUseIntent
 	pendingArchiveBatch  *installArchiveBatchContinuation
 	pendingUseBatch      *installUseBatchContinuation
+	operationCancel      context.CancelFunc
+	operationGeneration  int
 }
 
 type installUseGeneration struct {
@@ -119,11 +121,26 @@ func runInstallArchiveRow(ctx context.Context, operation installArchiveRowOperat
 	return operation(ctx)
 }
 
-func installArchiveOperationCmd(operation installArchiveRowOperation, timeout time.Duration) tea.Cmd {
+func installArchiveOperationCmd(parent context.Context, operation installArchiveRowOperation, timeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		return runInstallArchiveRow(ctx, operation)
+	}
+}
+
+func (s *installState) operationContext() (context.Context, int) {
+	s.cancelOperations()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.operationCancel = cancel
+	s.operationGeneration++
+	return ctx, s.operationGeneration
+}
+
+func (s *installState) cancelOperations() {
+	if s.operationCancel != nil {
+		s.operationCancel()
+		s.operationCancel = nil
 	}
 }
 
@@ -261,13 +278,14 @@ func (s *installState) bumpUseToken() int {
 	return s.useToken
 }
 
-func (m Model) runInstallSearch() tea.Cmd {
+func (m *Model) runInstallSearch() tea.Cmd {
 	token := m.install.searchToken
 	query := m.install.Query
 	owner := m.install.Owner
 	client := m.install.searchClient
+	parent, _ := m.install.operationContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installSearchTimeout)
+		ctx, cancel := context.WithTimeout(parent, installSearchTimeout)
 		defer cancel()
 
 		results, err := client.Search(ctx, remote.SearchRequest{Query: query, Owner: owner, Limit: remote.DefaultSearchLimit})
@@ -365,6 +383,9 @@ func (m Model) installActionRows() []installResultView {
 }
 
 func (m *Model) previewInstallResult() tea.Cmd {
+	if m.install.useInFlight || m.install.archiveInFlight {
+		return nil
+	}
 	row, ok := m.selectedInstallResult()
 	if !ok {
 		return nil
@@ -383,8 +404,9 @@ func (m *Model) previewInstallResult() tea.Cmd {
 			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
 		}
 	}
+	parent, _ := m.install.operationContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installPreviewTimeout)
+		ctx, cancel := context.WithTimeout(parent, installPreviewTimeout)
 		defer cancel()
 
 		checkout, err := checkouts.Checkout(ctx, source)
@@ -429,7 +451,8 @@ func (m *Model) archiveInstallSingleResult(row installResultView) tea.Cmd {
 	}
 	m.install.archiveInFlight = true
 	m.install.archiveInFlightToken = m.install.archiveToken
-	return installArchiveOperationCmd(operation, installArchiveTimeout)
+	parent, _ := m.install.operationContext()
+	return installArchiveOperationCmd(parent, operation, installArchiveTimeout)
 }
 
 func (m *Model) archiveInstallBatch(rows []installResultView) tea.Cmd {
@@ -504,19 +527,22 @@ func (m *Model) archiveInstallRowsWithProgress(
 	token := m.install.bumpUseToken()
 	m.install.archiveToken = token
 	generation := m.install.ensureUseGeneration()
-	return newInstallArchiveBatchCmdWithProgress(commands, next, total, token, generation, progress)
+	parent, _ := m.install.operationContext()
+	return newInstallArchiveBatchCmdWithProgress(parent, commands, next, total, token, generation, progress)
 }
 
 func newInstallArchiveBatchCmd(
+	parent context.Context,
 	commands []installArchiveRowCommand,
 	next *installArchiveBatchNext,
 	total, token int,
 	generation *installUseGeneration,
 ) tea.Cmd {
-	return newInstallArchiveBatchCmdWithProgress(commands, next, total, token, generation, nil)
+	return newInstallArchiveBatchCmdWithProgress(parent, commands, next, total, token, generation, nil)
 }
 
 func newInstallArchiveBatchCmdWithProgress(
+	parent context.Context,
 	commands []installArchiveRowCommand,
 	next *installArchiveBatchNext,
 	total, token int,
@@ -537,7 +563,7 @@ func newInstallArchiveBatchCmdWithProgress(
 		if generation != nil && !generation.isCurrent(token) {
 			return installBatchCancelledMsg{token: token}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+		ctx, cancel := context.WithTimeout(parent, installArchiveTimeout)
 		msg := runInstallArchiveRow(ctx, commands[0].operation)
 		cancel()
 		if generation != nil && !generation.isCurrent(token) {
@@ -568,7 +594,7 @@ func newInstallArchiveBatchCmdWithProgress(
 			completed: result.completed,
 			total:     result.total,
 			name:      result.currentName,
-			next:      newInstallArchiveBatchCmdWithProgress(commands[1:], next, total, token, generation, result),
+			next:      newInstallArchiveBatchCmdWithProgress(parent, commands[1:], next, total, token, generation, result),
 		}
 	}
 }
@@ -919,7 +945,8 @@ func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName 
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = "archiving " + row.Result.Name + "..."
 	m.install.Message = m.status
-	return installArchiveOperationCmd(operation, installArchiveTimeout)
+	parent, _ := m.install.operationContext()
+	return installArchiveOperationCmd(parent, operation, installArchiveTimeout)
 }
 
 func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
@@ -943,8 +970,9 @@ func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
 	cfg := m.cfg
 	m.status = "comparing update for " + row.Result.Name + "..."
 	m.install.Message = m.status
+	parent, _ := m.install.operationContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+		ctx, cancel := context.WithTimeout(parent, installArchiveTimeout)
 		defer cancel()
 
 		checkout, err := checkouts.Checkout(ctx, source)
@@ -1039,7 +1067,8 @@ func (m *Model) applyInstallArchiveWithConflict(row installResultView, archiveNa
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = "archiving " + archiveName + "..."
 	m.install.Message = m.status
-	return installArchiveOperationCmd(operation, installArchiveTimeout)
+	parent, _ := m.install.operationContext()
+	return installArchiveOperationCmd(parent, operation, installArchiveTimeout)
 }
 
 func (m *Model) installAndUse(row installResultView, destinations []installDestination, useExistingArchive bool) tea.Cmd {
@@ -1090,12 +1119,13 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	m.install.useInFlight = true
 	m.install.useInFlightToken = token
 	useGeneration := m.install.ensureUseGeneration()
+	parent, _ := m.install.operationContext()
 	return func() tea.Msg {
 		if !useGeneration.isCurrent(token) {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		if archiveOperation != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+			ctx, cancel := context.WithTimeout(parent, installArchiveTimeout)
 			archiveMsg := runInstallArchiveRow(ctx, archiveOperation)
 			cancel()
 			if archiveMsg.err != nil {
@@ -1222,6 +1252,7 @@ func (m *Model) installAndUseRowsWithProgress(
 	m.install.useInFlightToken = token
 	cfg := m.cfg
 	useGeneration := m.install.ensureUseGeneration()
+	parent, _ := m.install.operationContext()
 	return func() tea.Msg {
 		result := &installUseBatchResult{total: len(rows)}
 		if progress != nil {
@@ -1238,7 +1269,7 @@ func (m *Model) installAndUseRowsWithProgress(
 				return installUseMsg{token: token, destinations: destinations, stale: true}
 			}
 			if archiveOperations[i] != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+				ctx, cancel := context.WithTimeout(parent, installArchiveTimeout)
 				archiveMsg := runInstallArchiveRow(ctx, archiveOperations[i])
 				cancel()
 				if archiveMsg.err != nil {
@@ -1719,8 +1750,9 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 		return nil
 	}
 	m.ensureInstallCheckoutCache()
+	parent, _ := m.install.operationContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+		ctx, cancel := context.WithTimeout(parent, installArchiveTimeout)
 		defer cancel()
 		return m.checkInstallArchiveStates(ctx, msg.token, stateCheckResults, 3)
 	}

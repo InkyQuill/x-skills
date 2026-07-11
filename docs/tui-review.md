@@ -6,11 +6,8 @@ and a targeted deep-dive on `install.go` (the largest, network/disk-touching fil
 
 ## Current-state verification (2026-07-11)
 
-The review below is retained as the original finding ledger. Against the current dirty working tree:
-
-- `go test ./internal/tui/... -race -count=1` passes, so finding 1 is no longer blocking.
-- The row/command alignment risk in finding 5 is repaired by pairing each operation with its row, but production code still synchronously asserts `installArchiveMsg`; the typed-operation cleanup remains planned.
-- Findings 2–4 and 6–8 remain applicable.
+The review below is retained as the original finding ledger. Findings 1–8 are resolved;
+finding 9 remains passed. Each finding records its resolving commit and verification.
 - Implementation is split between [TUI production readiness](superpowers/plans/2026-07-11-tui-production-readiness.md) and [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md).
 
 ## Blocking issues
@@ -34,6 +31,9 @@ this is release-ready. `go vet` and `staticcheck` are otherwise clean on the pac
 **Action:** fix `wrapInspectorText`/`blockInspectorValue` in `internal/tui/inspector.go`
 so wrapped lines don't carry trailing padding, then `git add` the new files.
 
+**Resolved:** `4a8d3b3` (`feat: complete Go skill management workflows`). Verified by
+`go test ./internal/tui/... -race -count=1`.
+
 ## High-severity findings (install.go — the Install/marketplace tab)
 
 ### 2. Cancelled/stale batch archive operations still run to completion
@@ -52,6 +52,9 @@ window where the old batch's checkout cache use can race the new search's.
 bail out per-row (like the install/use path already does) instead of only filtering the
 final message.
 
+**Resolved:** `6f500b9` (`fix(tui): cancel stale install batches`). Verified by
+`go test ./internal/tui/... -race -count=1`.
+
 ### 3. Search results can trigger an unbounded burst of concurrent git checkouts
 
 `applyInstallSearchResult` (`install.go:1384+`) calls `installArchiveStateCheck` for
@@ -66,6 +69,10 @@ janky and could trip GitHub's abuse-rate limiting.
 **Fix direction:** cap concurrency (e.g. a small worker pool) and coalesce checkouts by
 `(owner, repo)` before firing state checks.
 
+**Resolved:** `88b4cda` (`fix(tui): bound install state checks`) and `cf77f99`
+(`fix(tui): retain install checkout cache`). Verified by
+`go test ./internal/tui/... -race -count=1`.
+
 ## Medium-severity findings
 
 ### 4. Silent failures in the background "update available" check
@@ -78,6 +85,9 @@ during this background recheck produces **zero** user-visible feedback — the r
 looks up-to-date, with no way for the user to tell "no update" apart from "check
 failed." Worth at minimum surfacing a muted "check failed" pill, or logging.
 
+**Resolved:** `88b4cda` (`fix(tui): bound install state checks`). Verified by
+`go test ./internal/tui/... -race -count=1`.
+
 ### 5. Unchecked type assertions rely on an unenforced invariant
 
 `cmd().(installArchiveMsg)` appears three times (`install.go:441, 895, 1009`) unwrapping
@@ -89,6 +99,9 @@ that row from `commands` while later indexing (`rows[i]` at lines ~446/452/459/4
 assumes `commands` and `rows` stay index-aligned — misattributing results to the wrong
 skill name. Not currently triggered; worth a comment or an assertion so it fails loudly
 if that invariant is ever broken.
+
+**Resolved:** `deba854` (`refactor(tui): type install archive operations`). Verified by
+`go test ./internal/tui/... -race -count=1`.
 
 ### 6. Reload is always synchronous, and the async path is dead code
 
@@ -104,6 +117,10 @@ both paths, or delete it if synchronous loading is an intentional simplification
 which case at least show a status line while it's mid-scan, since `reloadResultMsg` and
 its token-matching plumbing already assume async is the goal).
 
+**Resolved:** `60f00a5` (`fix(tui): refresh through async snapshots`) and `b123187`
+(`fix(tui): compose reload continuation commands`). Verified by
+`go test ./internal/tui/... -race -count=1`.
+
 ## Low-severity / polish
 
 ### 7. No explicit cancellation on navigating away from Install
@@ -117,12 +134,20 @@ outlive user intent by up to a minute per operation. Low severity because it's b
 and self-cleans, but worth a `context.WithCancel` wired to `tea.Quit`/view-change if this
 ships as a long-lived TUI people leave running.
 
+**Resolved:** this commit (`fix(tui): cancel obsolete background work`). Verified by
+`go test ./internal/tui/... -race -count=1`.
+
 ### 8. Large multi-select batches have no aggregate timeout or progress detail
 
 `archiveInstallRows` and `installAndUseRowsWithProgress` run strictly sequentially, each
 row with its own ~60s timeout but no cap on the whole batch. A 30-skill multi-select with
 a few slow network calls can make the UI appear to hang for minutes with only a generic
 "archiving N skills..." status, no per-item progress or the ability to cancel mid-batch.
+
+**Resolved:** `f12994c` (`fix(tui): emit install batch progress`) and this commit
+(`fix(tui): cancel obsolete background work`). Batches deliberately retain per-operation
+timeouts without an aggregate wall-clock deadline. Verified by
+`go test ./internal/tui/... -race -count=1`.
 
 ### 9. `git-status`-visible security check: passed
 
@@ -132,6 +157,9 @@ solid: `internal/remote/add.go:209` (`validateArchiveName`) rejects absolute pat
 `Owner`/`Repo` from search results are never joined into filesystem paths — only
 interpolated into a `CloneURL` string passed to `git clone` as a CLI argument, into a
 `os.MkdirTemp`-generated temp directory. No injection or traversal vector found here.
+
+**Passed:** retained as originally verified. Rechecked by `go test ./... -count=1`,
+`go vet ./...`, and `staticcheck ./...` when available.
 
 ## Everything else reviewed (model.go, views.go, actions.go, rows.go, filter.go
 

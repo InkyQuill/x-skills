@@ -436,6 +436,7 @@ func (m *Model) setView(view ViewName) {
 }
 
 func (m *Model) cancelInstallWork() {
+	m.install.cancelOperations()
 	m.install.previewToken++
 	m.install.archiveToken++
 	m.install.bumpUseToken()

@@ -484,9 +484,7 @@ func TestInstallArchiveUsesSelectedRows(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("fallback archive cmd is nil")
 	}
-	msg := cmd().(installArchiveMsg)
-	updated, _ = m.Update(msg)
-	m = mustModel(t, updated)
+	m = runInstallArchiveBatchCommands(t, m, cmd)
 	if m.status != "archived vue-coder" {
 		t.Fatalf("fallback status = %q, want cursor row archived", m.status)
 	}
@@ -505,9 +503,7 @@ func TestInstallArchiveUsesSelectedRows(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("selected archive cmd is nil")
 	}
-	msg = cmd().(installArchiveMsg)
-	updated, _ = m.Update(msg)
-	m = mustModel(t, updated)
+	m = runInstallArchiveBatchCommands(t, m, cmd)
 	if m.status != "archived 2 skills" {
 		t.Fatalf("selected status = %q, want batch status", m.status)
 	}
@@ -581,13 +577,100 @@ func TestArchiveInstallRowsStopsWhenGenerationChanges(t *testing.T) {
 func TestInstallBatchProgress(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)
-	m.install.archiveInFlightToken = 7
+	generation := m.install.ensureUseGeneration()
+	token := m.install.bumpUseToken()
+	m.install.archiveToken = token
+	m.install.archiveInFlight = true
+	m.install.archiveInFlightToken = token
+	var first, second atomic.Int32
+	commands := []installArchiveRowCommand{
+		{row: installResultView{Result: remote.SearchResult{Name: "one"}}, operation: func(context.Context) installArchiveMsg {
+			first.Add(1)
+			return installArchiveMsg{name: "one"}
+		}},
+		{row: installResultView{Result: remote.SearchResult{Name: "two"}}, operation: func(context.Context) installArchiveMsg {
+			second.Add(1)
+			return installArchiveMsg{name: "two"}
+		}},
+	}
 
-	updated, _ := m.Update(installBatchProgressMsg{token: 7, completed: 3, total: 8, name: "skill-name"})
+	cmd := newInstallArchiveBatchCmd(commands, nil, 2, token, generation)
+	progress, ok := cmd().(installBatchProgressMsg)
+	if !ok {
+		t.Fatalf("first batch message = %T, want installBatchProgressMsg", cmd())
+	}
+	if first.Load() != 1 || second.Load() != 0 {
+		t.Fatalf("operation calls before progress = (%d, %d), want (1, 0)", first.Load(), second.Load())
+	}
+
+	updated, next := m.Update(progress)
 	m = mustModel(t, updated)
-
-	if m.status != "archiving 3/8: skill-name" {
+	if next == nil {
+		t.Fatal("next row command is nil")
+	}
+	if m.status != "archiving 1/2: one" {
 		t.Fatalf("status = %q, want per-item progress", m.status)
+	}
+	_ = next()
+	if second.Load() != 1 {
+		t.Fatalf("second operation calls = %d, want 1 after progress applied", second.Load())
+	}
+}
+
+func TestInstallBatchCancellationSuppressesStaleConflict(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	generation := m.install.ensureUseGeneration()
+	token := m.install.bumpUseToken()
+	m.install.archiveToken = token
+	m.install.archiveInFlight = true
+	m.install.archiveInFlightToken = token
+	commands := []installArchiveRowCommand{{
+		row: installResultView{Result: remote.SearchResult{Name: "one"}},
+		operation: func(context.Context) installArchiveMsg {
+			generation.next()
+			return installArchiveMsg{name: "one", archiveState: remote.ArchiveStateNameConflict, err: errors.New("conflict")}
+		},
+	}}
+
+	msg := newInstallArchiveBatchCmd(commands, nil, 1, token, generation)()
+	cancelled, ok := msg.(installBatchCancelledMsg)
+	if !ok {
+		t.Fatalf("batch message = %T, want installBatchCancelledMsg", msg)
+	}
+	updated, cmd := m.Update(cancelled)
+	m = mustModel(t, updated)
+	if cmd != nil || m.modal != nil || m.install.pendingArchiveBatch != nil {
+		t.Fatalf("stale conflict continued: cmd=%v modal=%T pending=%#v", cmd, m.modal, m.install.pendingArchiveBatch)
+	}
+}
+
+func TestInstallBatchProgressContinuesAfterResolvedConflict(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	identity := installArchiveIdentity{name: "conflict"}
+	m.install.archiveToken = 1
+	m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
+		identity:    identity,
+		total:       4,
+		completed:   1,
+		currentName: "first",
+		success:     []string{"first"},
+		remaining: []installResultView{
+			{Result: remote.SearchResult{Name: "third"}},
+			{Result: remote.SearchResult{Name: "fourth"}},
+		},
+	}
+	cmd := m.continueInstallArchiveBatchAfterResolved(identity, "second", nil)
+	if cmd == nil {
+		t.Fatal("continuation command is nil")
+	}
+	progress, ok := cmd().(installBatchProgressMsg)
+	if !ok {
+		t.Fatalf("continuation message = %T, want progress", cmd())
+	}
+	if progress.completed != 3 || progress.total != 4 || progress.name != "third" {
+		t.Fatalf("progress = %#v, want 3/4 at third", progress)
 	}
 }
 
@@ -833,9 +916,7 @@ func TestInstallArchiveBatchMixedFailuresShowsResults(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("archive batch cmd is nil")
 	}
-	msg := cmd().(installArchiveMsg)
-	updated, _ = m.Update(msg)
-	m = mustModel(t, updated)
+	m = runInstallArchiveBatchCommands(t, m, cmd)
 
 	if m.status != "archived 1 of 2 skills" {
 		t.Fatalf("status = %q, want archived 1 of 2 skills", m.status)
@@ -4545,6 +4626,20 @@ func testSearchServer(t *testing.T, results []remote.SearchResult) string {
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func runInstallArchiveBatchCommands(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	for range 100 {
+		if cmd == nil {
+			return m
+		}
+		updated, next := m.Update(cmd())
+		m = mustModel(t, updated)
+		cmd = next
+	}
+	t.Fatal("archive batch did not finish after 100 messages")
+	return m
+}
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)

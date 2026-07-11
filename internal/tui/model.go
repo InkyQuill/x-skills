@@ -112,6 +112,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.token == m.install.archiveInFlightToken {
 			m.status = fmt.Sprintf("archiving %d/%d: %s", msg.completed, msg.total, msg.name)
 			m.install.Message = m.status
+			return m, msg.next
 		}
 		return m, nil
 	case installBatchCancelledMsg:
@@ -356,6 +357,10 @@ func (m *Model) cancelInstallWork() {
 	m.install.previewToken++
 	m.install.archiveToken++
 	m.install.bumpUseToken()
+	m.install.archiveInFlight = false
+	m.install.archiveInFlightToken = 0
+	m.install.useInFlight = false
+	m.install.useInFlightToken = 0
 }
 
 func (m *Model) moveCursor(delta int) {

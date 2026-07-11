@@ -102,6 +102,7 @@ type installBatchProgressMsg struct {
 	completed int
 	total     int
 	name      string
+	next      tea.Cmd
 }
 
 type installBatchCancelledMsg struct {
@@ -189,6 +190,8 @@ type installArchiveBatchContinuation struct {
 	remaining   []installResultView
 	success     []string
 	failures    []string
+	completed   int
+	currentName string
 }
 
 type installUseBatchContinuation struct {
@@ -450,15 +453,15 @@ func (m *Model) archiveInstallBatch(rows []installResultView) tea.Cmd {
 		}
 		return m.openInstallArchiveBatchNext(next)
 	}
-	operation := m.archiveInstallRows(actionRows, next, len(rows))
-	if operation == nil {
+	cmd := m.archiveInstallRows(actionRows, next, len(rows))
+	if cmd == nil {
 		return nil
 	}
 	m.install.archiveInFlight = true
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = fmt.Sprintf("archiving %d skills...", len(actionRows))
 	m.install.Message = m.status
-	return installArchiveOperationCmd(operation, installArchiveTimeout)
+	return cmd
 }
 
 type installArchiveRowCommand struct {
@@ -466,7 +469,16 @@ type installArchiveRowCommand struct {
 	operation installArchiveRowOperation
 }
 
-func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiveBatchNext, total int) installArchiveRowOperation {
+func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiveBatchNext, total int) tea.Cmd {
+	return m.archiveInstallRowsWithProgress(rows, next, total, nil)
+}
+
+func (m *Model) archiveInstallRowsWithProgress(
+	rows []installResultView,
+	next *installArchiveBatchNext,
+	total int,
+	progress *installArchiveBatchResult,
+) tea.Cmd {
 	commands := make([]installArchiveRowCommand, 0, len(rows))
 	for _, row := range rows {
 		operation := m.archiveInstallRow(row)
@@ -481,8 +493,72 @@ func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiv
 	token := m.install.bumpUseToken()
 	m.install.archiveToken = token
 	generation := m.install.ensureUseGeneration()
-	return func(ctx context.Context) installArchiveMsg {
-		return runInstallArchiveBatch(ctx, commands, next, total, token, generation)
+	return newInstallArchiveBatchCmdWithProgress(commands, next, total, token, generation, progress)
+}
+
+func newInstallArchiveBatchCmd(
+	commands []installArchiveRowCommand,
+	next *installArchiveBatchNext,
+	total, token int,
+	generation *installUseGeneration,
+) tea.Cmd {
+	return newInstallArchiveBatchCmdWithProgress(commands, next, total, token, generation, nil)
+}
+
+func newInstallArchiveBatchCmdWithProgress(
+	commands []installArchiveRowCommand,
+	next *installArchiveBatchNext,
+	total, token int,
+	generation *installUseGeneration,
+	progress *installArchiveBatchResult,
+) tea.Cmd {
+	if len(commands) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		result := &installArchiveBatchResult{total: total, next: next}
+		if progress != nil {
+			result.completed = progress.completed
+			result.currentName = progress.currentName
+			result.success = append(result.success, progress.success...)
+			result.failures = append(result.failures, progress.failures...)
+		}
+		if generation != nil && !generation.isCurrent(token) {
+			return installBatchCancelledMsg{token: token}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
+		msg := runInstallArchiveRow(ctx, commands[0].operation)
+		cancel()
+		if generation != nil && !generation.isCurrent(token) {
+			return installBatchCancelledMsg{token: token}
+		}
+		if msg.err != nil {
+			switch msg.archiveState {
+			case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
+				result.next = &installArchiveBatchNext{
+					row:       commands[0].row,
+					action:    msg.archiveState,
+					remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[1:])...), installArchiveBatchNextRows(next)...),
+				}
+				return installArchiveMsg{token: token, batch: result}
+			default:
+				result.failures = append(result.failures, commands[0].row.Result.Name+": "+msg.err.Error())
+			}
+		} else {
+			result.success = append(result.success, msg.name)
+		}
+		result.completed++
+		result.currentName = commands[0].row.Result.Name
+		if len(commands) == 1 {
+			return installArchiveMsg{token: token, batch: result}
+		}
+		return installBatchProgressMsg{
+			token:     token,
+			completed: result.completed,
+			total:     result.total,
+			name:      result.currentName,
+			next:      newInstallArchiveBatchCmdWithProgress(commands[1:], next, total, token, generation, result),
+		}
 	}
 }
 
@@ -1764,11 +1840,13 @@ func (m *Model) applyInstallArchiveBatchResult(result *installArchiveBatchResult
 	m.refreshInstallArchiveStates()
 	if result.next != nil {
 		m.install.pendingArchiveBatch = &installArchiveBatchContinuation{
-			identity:  installArchiveIdentityFromResult(result.next.row.Result),
-			total:     result.total,
-			remaining: append([]installResultView(nil), result.next.remaining...),
-			success:   append([]string(nil), result.success...),
-			failures:  append([]string(nil), result.failures...),
+			identity:    installArchiveIdentityFromResult(result.next.row.Result),
+			total:       result.total,
+			remaining:   append([]installResultView(nil), result.next.remaining...),
+			success:     append([]string(nil), result.success...),
+			failures:    append([]string(nil), result.failures...),
+			completed:   result.completed,
+			currentName: result.currentName,
 		}
 		m.install.archiveInFlight = false
 		m.install.archiveInFlightToken = 0
@@ -1825,9 +1903,11 @@ func (m *Model) continueInstallArchiveBatchAfterResolved(identity installArchive
 	}
 	m.install.pendingArchiveBatch = nil
 	result := &installArchiveBatchResult{
-		total:    pending.total,
-		success:  append([]string(nil), pending.success...),
-		failures: append([]string(nil), pending.failures...),
+		total:       pending.total,
+		completed:   pending.completed,
+		currentName: pending.currentName,
+		success:     append([]string(nil), pending.success...),
+		failures:    append([]string(nil), pending.failures...),
 	}
 	if err != nil {
 		failure := err.Error()
@@ -1841,28 +1921,20 @@ func (m *Model) continueInstallArchiveBatchAfterResolved(identity installArchive
 	} else if name != "" {
 		result.success = append(result.success, name)
 	}
+	result.completed++
+	result.currentName = name
 	if len(pending.remaining) == 0 {
 		return m.applyInstallArchiveBatchResult(result)
 	}
-	operation := m.archiveInstallRows(pending.remaining, nil, pending.total)
-	if operation == nil {
+	cmd := m.archiveInstallRowsWithProgress(pending.remaining, nil, pending.total, result)
+	if cmd == nil {
 		return m.applyInstallArchiveBatchResult(result)
 	}
 	m.install.archiveInFlight = true
 	m.install.archiveInFlightToken = m.install.archiveToken
 	m.status = fmt.Sprintf("archiving %d skills...", len(pending.remaining))
 	m.install.Message = m.status
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
-		defer cancel()
-		msg := runInstallArchiveRow(ctx, operation)
-		if msg.batch == nil {
-			return msg
-		}
-		msg.batch.success = append(result.success, msg.batch.success...)
-		msg.batch.failures = append(result.failures, msg.batch.failures...)
-		return msg
-	}
+	return cmd
 }
 
 func (m *Model) continueInstallUseBatchAfterArchiveResolution(identity installArchiveIdentity, archiveName string, err error) tea.Cmd {

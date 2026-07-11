@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -253,12 +254,7 @@ func TestApplyReportsRetainedMigrationAfterLateLinkRollback(t *testing.T) {
 		if update.Action != LinkCreate {
 			return
 		}
-		if err := os.MkdirAll(filepath.Dir(secondRoot), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(secondRoot, []byte("block"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		makeApplySkillAt(t, second, "appeared after validation")
 	}})
 	if len(result.Failed) != 1 || !result.Failed[0].ArchiveChanged || !result.Failed[0].SourceRemoved || !result.Failed[0].LinksRolledBack {
 		t.Fatalf("Apply did not report coherent partial success: %#v", result)
@@ -270,6 +266,7 @@ func TestApplyReportsRetainedMigrationAfterLateLinkRollback(t *testing.T) {
 	if _, err := os.Lstat(first); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("first link was not rolled back: %v", err)
 	}
+	assertApplyFile(t, filepath.Join(second, "content.txt"), "appeared after validation")
 }
 
 func TestApplyReportsArchivePublicationWhenSourceRemovalFails(t *testing.T) {
@@ -328,6 +325,106 @@ func TestApplyReportsBackupCleanupFailureWithoutBreakingLink(t *testing.T) {
 		t.Fatalf("Apply cleanup result = %#v", result)
 	}
 	assertApplyLink(t, destination, archive)
+}
+
+func TestApplyRevalidatesLaterSkillAfterProgressCallbackDrift(t *testing.T) {
+	t.Parallel()
+	cfg := applyConfig(t)
+	alphaArchive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "alpha", "alpha")
+	betaArchive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "beta", "beta")
+	alphaFP := applyFingerprint(t, alphaArchive)
+	betaFP := applyFingerprint(t, betaArchive)
+	alphaDestination := filepath.Join(cfg.ProjectRoot, ".agents", "skills", "alpha")
+	betaDestination := filepath.Join(cfg.ProjectRoot, ".agents", "skills", "beta")
+	plan := Plan{Links: []Change{
+		{CandidateID: "alpha:" + alphaFP, Name: "alpha", Fingerprint: alphaFP, Action: LinkCreate, ArchivePath: alphaArchive, DestinationPath: alphaDestination},
+		{CandidateID: "beta:" + betaFP, Name: "beta", Fingerprint: betaFP, Action: LinkCreate, ArchivePath: betaArchive, DestinationPath: betaDestination},
+	}}
+	result := Apply(context.Background(), cfg, plan, ApplyOptions{Progress: func(update Progress) {
+		if update.Skill == "alpha" {
+			makeApplySkillAt(t, betaDestination, "late beta")
+		}
+	}})
+	if len(result.Succeeded) != 1 || result.Succeeded[0].Name != "alpha" || len(result.Failed) != 1 || result.Failed[0].Name != "beta" {
+		t.Fatalf("Apply later drift result = %#v", result)
+	}
+	assertApplyFile(t, filepath.Join(betaDestination, "content.txt"), "late beta")
+}
+
+func TestApplyReportsIncompleteRollbackForRemovalAndRestoreFailures(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		existingFirst bool
+		fault         func(string, string) error
+	}{
+		{name: "remove created link", fault: func(old, new string) error { return nil }},
+		{name: "restore destination backup", existingFirst: true, fault: func(old, new string) error {
+			if strings.HasPrefix(filepath.Base(old), ".x-skills-backup") {
+				return errors.New("injected restore failure")
+			}
+			return os.Rename(old, new)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := applyConfig(t)
+			archive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "review", "selected")
+			fp := applyFingerprint(t, archive)
+			first := filepath.Join(cfg.ProjectRoot, ".agents", "skills", "review")
+			second := filepath.Join(cfg.ProjectRoot, ".codex", "skills", "review")
+			action := LinkCreate
+			if test.existingFirst {
+				makeApplySkillAt(t, first, "selected")
+				action = LinkNormalize
+			}
+			plan := Plan{Links: []Change{
+				{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: action, ArchivePath: archive, DestinationPath: first},
+				{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: LinkCreate, ArchivePath: archive, DestinationPath: second},
+			}}
+			fs := defaultApplyFilesystem()
+			if test.name == "remove created link" {
+				fs.removeAll = func(path string) error {
+					if path == first {
+						return errors.New("injected remove failure")
+					}
+					return os.RemoveAll(path)
+				}
+			} else {
+				fs.rename = test.fault
+			}
+			drifted := false
+			result := Apply(context.Background(), cfg, plan, ApplyOptions{filesystem: fs, Progress: func(update Progress) {
+				if !drifted {
+					drifted = true
+					makeApplySkillAt(t, second, "late")
+				}
+			}})
+			if len(result.Failed) != 1 || result.Failed[0].LinksRolledBack || !result.Failed[0].LinksRollbackIncomplete {
+				t.Fatalf("Apply rollback result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestApplyRejectsStagedMigrationFingerprintDriftBeforePublication(t *testing.T) {
+	t.Parallel()
+	cfg := applyConfig(t)
+	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "selected")
+	fp := applyFingerprint(t, source)
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "review")
+	plan := Plan{Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp,
+		Action: "migrate", SourcePath: source, ArchivePath: archive}}}
+	fs := defaultApplyFilesystem()
+	fs.afterStage = func(staged string) error {
+		return os.WriteFile(filepath.Join(staged, "content.txt"), []byte("injected drift"), 0o644)
+	}
+	result := Apply(context.Background(), cfg, plan, ApplyOptions{filesystem: fs})
+	if len(result.Failed) != 1 || result.Failed[0].ArchiveChanged || result.Failed[0].SourceRemoved {
+		t.Fatalf("Apply staged drift result = %#v", result)
+	}
+	assertApplyFile(t, filepath.Join(source, "content.txt"), "selected")
+	if _, err := os.Lstat(archive); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archive published: %v", err)
+	}
 }
 
 func applyFingerprint(t *testing.T, path string) string {

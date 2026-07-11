@@ -27,6 +27,27 @@ Passed:
 - `go build -o /tmp/x-skills-plan4-task3 ./cmd/x-skills`
 - `git diff --check`
 
+## Final Transaction Boundary Remediation
+
+The final Critical/High re-review findings were reproduced and fixed with focused failing regressions.
+
+- Every skill is revalidated against current configuration and live filesystem state at its own execution boundary, so progress from an earlier skill cannot stale a later skill's approved source, archive, or destination.
+- Every link archive and destination is reclassified immediately before its destructive backup/link step. Content that appears after initial validation is neither moved nor deleted; the current skill fails safely and any earlier links for it are rolled back.
+- Migration trees are staged without publishing, fingerprinted against the approved candidate immediately before archive publication, and the source is fingerprinted again immediately before deletion. Unexpected staged or source content is never silently absorbed or removed.
+- `LinksRolledBack` is set only after every removal and backup restoration succeeds. `LinksRollbackIncomplete` explicitly reports a rollback attempt with one or more failed operations.
+- A narrow injected-filesystem seam covers rollback link-removal and destination-backup restoration failures deterministically while production defaults remain direct `os` operations.
+- Added regression coverage for a callback-created second destination, progress-induced later-skill drift, staged migration drift, complete rollback, incomplete rollback after created-link removal failure, and incomplete rollback after backup-restoration failure.
+
+Fresh final verification passed:
+
+- `go test ./internal/syncer -race -count=1`
+- `go test -race -count=1 ./...`
+- `go vet ./...`
+- `staticcheck ./...`
+- `go build -o /tmp/x-skills-plan4-task3-final-remediation ./cmd/x-skills`
+- `gofmt -l .`
+- `git diff --check`
+
 The Zen of Go audit found no blocking issues. The implementation is synchronous, leaves concurrency to callers, checks cancellation at the promised skill boundary, wraps filesystem errors with operation context, and tests observable filesystem and result contracts.
 
 ## Review Remediation

@@ -25,15 +25,17 @@ type Progress struct {
 }
 
 type ApplyOptions struct {
-	Progress func(Progress)
+	Progress   func(Progress)
+	filesystem applyFilesystem
 }
 
 type SkillResult struct {
-	Name            string
-	Err             error
-	ArchiveChanged  bool
-	SourceRemoved   bool
-	LinksRolledBack bool
+	Name                    string
+	Err                     error
+	ArchiveChanged          bool
+	SourceRemoved           bool
+	LinksRolledBack         bool
+	LinksRollbackIncomplete bool
 }
 
 type Result struct {
@@ -60,6 +62,17 @@ func Apply(ctx context.Context, cfg config.Config, plan Plan, options ...ApplyOp
 	if len(options) > 0 {
 		option = options[0]
 	}
+	filesystem := option.filesystem
+	defaults := defaultApplyFilesystem()
+	if filesystem.removeAll == nil {
+		filesystem.removeAll = defaults.removeAll
+	}
+	if filesystem.rename == nil {
+		filesystem.rename = defaults.rename
+	}
+	if filesystem.afterStage == nil {
+		filesystem.afterStage = defaults.afterStage
+	}
 	work := indexApplyWork(plan)
 	result := Result{}
 	completed := 0
@@ -73,16 +86,21 @@ func Apply(ctx context.Context, cfg config.Config, plan Plan, options ...ApplyOp
 			result.Cancelled = true
 			break
 		}
+		if err := validateApplyPlan(cfg, skill.plan()); err != nil {
+			result.Failed = append(result.Failed, SkillResult{Name: skill.name, Err: fmt.Errorf("revalidate skill before apply: %w", err)})
+			continue
+		}
 		emit := func(action string) {
 			completed++
 			if option.Progress != nil {
 				option.Progress(Progress{Completed: completed, Total: total, Skill: skill.name, Action: action})
 			}
 		}
-		mutation, err := applySkill(skill, emit)
+		mutation, err := applySkill(cfg, filesystem, skill, emit)
 		if err != nil {
 			result.Failed = append(result.Failed, SkillResult{Name: skill.name, Err: err,
-				ArchiveChanged: mutation.archiveChanged, SourceRemoved: mutation.sourceRemoved, LinksRolledBack: mutation.linksRolledBack})
+				ArchiveChanged: mutation.archiveChanged, SourceRemoved: mutation.sourceRemoved, LinksRolledBack: mutation.linksRolledBack,
+				LinksRollbackIncomplete: mutation.linksRollbackIncomplete})
 			mutated = true
 			continue
 		}
@@ -307,6 +325,10 @@ type applyWork struct {
 	replacements []Conflict
 }
 
+func (work applyWork) plan() Plan {
+	return Plan{Migrations: work.migrations, Links: work.links, Conflicts: work.replacements}
+}
+
 func indexApplyWork(plan Plan) []applyWork {
 	byName := make(map[string]*applyWork)
 	order := make([]string, 0)
@@ -345,12 +367,23 @@ type destinationBackup struct {
 }
 
 type skillMutation struct {
-	archiveChanged  bool
-	sourceRemoved   bool
-	linksRolledBack bool
+	archiveChanged          bool
+	sourceRemoved           bool
+	linksRolledBack         bool
+	linksRollbackIncomplete bool
 }
 
-func applySkill(work applyWork, emit func(string)) (skillMutation, error) {
+type applyFilesystem struct {
+	removeAll  func(string) error
+	rename     func(string, string) error
+	afterStage func(string) error
+}
+
+func defaultApplyFilesystem() applyFilesystem {
+	return applyFilesystem{removeAll: os.RemoveAll, rename: os.Rename, afterStage: func(string) error { return nil }}
+}
+
+func applySkill(cfg config.Config, filesystem applyFilesystem, work applyWork, emit func(string)) (skillMutation, error) {
 	var mutation skillMutation
 	plannedArchives := make(map[string]struct{}, len(work.migrations))
 	for _, migration := range work.migrations {
@@ -384,6 +417,15 @@ func applySkill(work applyWork, emit func(string)) (skillMutation, error) {
 		if err != nil {
 			return mutation, fmt.Errorf("stage migration %q: %w", migration.Name, err)
 		}
+		if err := filesystem.afterStage(staged); err != nil {
+			_ = os.RemoveAll(staged)
+			return mutation, fmt.Errorf("inspect staged migration %q: %w", migration.Name, err)
+		}
+		stagedFingerprint, err := fingerprint.Directory(staged)
+		if err != nil || stagedFingerprint != migration.Fingerprint {
+			_ = os.RemoveAll(staged)
+			return mutation, fmt.Errorf("staged migration %q drifted from approved fingerprint", migration.Name)
+		}
 		conflict, replacing := archiveConflicts[migration.ArchivePath]
 		preserved := ""
 		if replacing {
@@ -402,7 +444,15 @@ func applySkill(work applyWork, emit func(string)) (skillMutation, error) {
 			return mutation, errors.Join(fmt.Errorf("publish migration %q: %w", migration.Name, err), restoreErr)
 		}
 		mutation.archiveChanged = true
-		if err := os.RemoveAll(migration.SourcePath); err != nil {
+		currentSource, err := filepath.EvalSymlinks(migration.SourcePath)
+		if err != nil {
+			return mutation, fmt.Errorf("revalidate migrated source %q before removal: %w", migration.SourcePath, err)
+		}
+		currentFingerprint, err := fingerprint.Directory(currentSource)
+		if err != nil || currentFingerprint != migration.Fingerprint {
+			return mutation, fmt.Errorf("migration source %q drifted before removal", migration.SourcePath)
+		}
+		if err := filesystem.removeAll(migration.SourcePath); err != nil {
 			return mutation, fmt.Errorf("remove migrated source %q: %w", migration.SourcePath, err)
 		}
 		mutation.sourceRemoved = true
@@ -428,23 +478,27 @@ func applySkill(work applyWork, emit func(string)) (skillMutation, error) {
 
 	backups := make([]destinationBackup, 0, len(work.links))
 	rollback := func(cause error) error {
-		mutation.linksRolledBack = true
 		var rollbackErrs []error
 		for i := len(backups) - 1; i >= 0; i-- {
 			backup := backups[i]
-			if err := os.RemoveAll(backup.path); err != nil {
+			if err := filesystem.removeAll(backup.path); err != nil {
 				rollbackErrs = append(rollbackErrs, err)
 				continue
 			}
 			if !backup.created {
-				if err := os.Rename(backup.backup, backup.path); err != nil {
+				if err := filesystem.rename(backup.backup, backup.path); err != nil {
 					rollbackErrs = append(rollbackErrs, err)
 				}
 			}
 		}
+		mutation.linksRolledBack = len(rollbackErrs) == 0
+		mutation.linksRollbackIncomplete = len(rollbackErrs) != 0
 		return errors.Join(append([]error{cause}, rollbackErrs...)...)
 	}
 	for _, link := range work.links {
+		if err := validateLinkImmediately(cfg, work, link); err != nil {
+			return mutation, rollback(err)
+		}
 		backup := destinationBackup{path: link.DestinationPath, created: true}
 		if _, err := os.Lstat(link.DestinationPath); err == nil {
 			dir, err := os.MkdirTemp(filepath.Dir(link.DestinationPath), ".x-skills-backup-")
@@ -454,7 +508,7 @@ func applySkill(work applyWork, emit func(string)) (skillMutation, error) {
 			if err := os.Remove(dir); err != nil {
 				return mutation, rollback(fmt.Errorf("prepare destination backup: %w", err))
 			}
-			if err := os.Rename(link.DestinationPath, dir); err != nil {
+			if err := filesystem.rename(link.DestinationPath, dir); err != nil {
 				return mutation, rollback(fmt.Errorf("back up destination %q: %w", link.DestinationPath, err))
 			}
 			backup.created = false
@@ -479,6 +533,40 @@ func applySkill(work applyWork, emit func(string)) (skillMutation, error) {
 		}
 	}
 	return mutation, nil
+}
+
+func validateLinkImmediately(cfg config.Config, work applyWork, link Change) error {
+	replacement := Conflict{}
+	archiveReplacement := false
+	for _, conflict := range work.replacements {
+		if sameCanonicalPath(conflict.DestinationPath, link.DestinationPath) {
+			replacement = conflict
+		}
+		if sameCanonicalPath(conflict.DestinationPath, link.ArchivePath) {
+			archiveReplacement = true
+		}
+	}
+	archiveMatches, err := pathMatchesFingerprint(link.ArchivePath, link.Fingerprint)
+	if err != nil || !archiveMatches {
+		return fmt.Errorf("link archive %q drifted before mutation", link.ArchivePath)
+	}
+	classification, err := classifyDestination(cfg, link.DestinationPath, link.ArchivePath, link.Fingerprint, true, false)
+	if err != nil {
+		return err
+	}
+	if replacement.Resolution.Action != "" {
+		if classification.kind != destinationDivergent || classification.status != replacement.DestinationStatus {
+			return fmt.Errorf("replacement destination %q drifted before mutation", link.DestinationPath)
+		}
+		return nil
+	}
+	if link.Action == LinkCreate && classification.kind != destinationMissing {
+		return fmt.Errorf("link destination %q appeared after validation", link.DestinationPath)
+	}
+	if link.Action == LinkNormalize && classification.kind != destinationMatching && !(archiveReplacement && classification.kind == destinationManaged) {
+		return fmt.Errorf("link destination %q drifted before normalization", link.DestinationPath)
+	}
+	return nil
 }
 
 func stageTree(source, parent string) (string, error) {

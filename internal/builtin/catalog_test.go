@@ -97,7 +97,7 @@ func TestArchiveRejectsDivergentArchiveWithoutReplacingIt(t *testing.T) {
 	}
 }
 
-func TestArchivePublishDoesNotReplaceConcurrentDestination(t *testing.T) {
+func testArchivePublishDoesNotReplaceConcurrentDestination(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	original := publishArchive
 	publishArchive = func(staged, destination string) error {
@@ -118,6 +118,28 @@ func TestArchivePublishDoesNotReplaceConcurrentDestination(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("concurrent destination was replaced with %d entries", len(entries))
+	}
+}
+
+func TestUnsupportedPublisherReturnsSafeErrorWithoutMovingStagedArchive(t *testing.T) {
+	root := t.TempDir()
+	staged := filepath.Join(root, "staged")
+	destination := filepath.Join(root, "destination")
+	if err := os.Mkdir(staged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := publishArchiveUnsupported(staged, destination)
+	if !errors.Is(err, ErrAtomicPublishUnsupported) {
+		t.Fatalf("publishArchiveUnsupported() error = %v, want ErrAtomicPublishUnsupported", err)
+	}
+	for _, path := range []string{staged, destination} {
+		if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+			t.Fatalf("path %q changed after unsupported publish: info=%v err=%v", path, info, statErr)
+		}
 	}
 }
 

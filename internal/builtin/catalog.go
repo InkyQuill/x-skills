@@ -18,6 +18,10 @@ import (
 
 var ErrArchiveConflict = errors.New("built-in archive conflict")
 
+// ErrAtomicPublishUnsupported means this platform lacks an atomic directory
+// rename operation that refuses to replace an existing destination.
+var ErrAtomicPublishUnsupported = errors.New("atomic no-replace archive publish unsupported")
+
 type Skill struct {
 	Name string
 }

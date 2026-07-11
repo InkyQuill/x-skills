@@ -6,6 +6,7 @@ import (
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestInspectorRendersKeyValueHierarchy(t *testing.T) {
@@ -92,6 +93,37 @@ func TestInspectorRendersBlockValueWithoutTruncatingDescription(t *testing.T) {
 		t.Fatalf("block description was truncated:\n%s", view)
 	}
 	assertRawLinesWithinWidth(t, got, 42)
+}
+
+func TestBlockInspectorValueDoesNotPadUnequalLines(t *testing.T) {
+	profile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+	style := inspectorValueStyle
+	inspectorValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	t.Cleanup(func() { inspectorValueStyle = style })
+
+	got := blockInspectorValue("a longer line\nshort")(20)
+	lines := strings.Split(got, "\n")
+	want := []string{"a longer line", "short"}
+
+	if len(lines) != len(want) {
+		t.Fatalf("line count = %d, want %d: %q", len(lines), len(want), plain(got))
+	}
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "\x1b[") {
+			t.Errorf("line %d does not preserve its own ANSI style: %q", i, line)
+		}
+		if strings.HasSuffix(line, " ") {
+			t.Errorf("line %d has trailing style padding: %q", i, plain(line))
+		}
+		if content := plain(line); content != want[i] {
+			t.Errorf("line %d content = %q, want %q", i, content, want[i])
+		}
+		if width := lipgloss.Width(line); width != lipgloss.Width(want[i]) {
+			t.Errorf("line %d ANSI width = %d, want %d", i, width, lipgloss.Width(want[i]))
+		}
+	}
 }
 
 func TestInspectorPadsUnicodeKeysByDisplayWidth(t *testing.T) {

@@ -6,11 +6,11 @@ Run `x-skills tui`. The Bubble Tea interface works from the current project and 
 
 - Active merges identical physical occurrences while keeping divergent same-name copies separate. Its inspector shows status, scope/root usages, path, compatibility, and description. Actions preview, migrate, unlink, recommend/unrecommend, and open Sync.
 - Repo lists archived skills. Its inspector includes source identity and source ref/commit where known, compatibility, and active usages. Actions preview, link/unlink usages, remove, rename, and recommend/unrecommend. Remote check/update actions and update status are not implemented on this page.
-- Doctor groups current diagnostics and shows issue details and suggested commands. Fixable items can be selected and repaired; built-in repair uses a global destination choice or Archive only.
+- Doctor groups current diagnostics and shows issue details and suggested commands. Doctor rows are not selectable: `f` confirms counts/categories and applies safe repair to all current issues. Built-in repair additionally asks for global destination choices or Archive only.
 - Install searches skills.sh, filters results, previews remote `SKILL.md`, displays source/audit/archive state, and archives or installs-and-links one or many results. Generic Git additions remain CLI-first.
 - Sync collects non-destination project Skills Folders, groups candidates by name and fingerprint, resolves divergent variants, selects destinations, previews the plan, and applies it transactionally.
 
-Actions use current-page selection: all checked rows on the visible page are the target; when none are checked, the cursor row is the fallback. Hidden selections are not borrowed from another page. Filtering narrows visible rows and actions operate on the page's resulting selection semantics.
+On selection-capable pages, actions use current-page selection: all checked rows on the visible page are the target; when none are checked, the cursor row is the fallback. Hidden selections are not borrowed from another page. Filtering narrows visible rows and actions operate on the page's resulting selection semantics. Doctor is the exception: it has no row selection, and its fix action covers all current issues after confirmation.
 
 ## Inspectors, modals, and layout
 

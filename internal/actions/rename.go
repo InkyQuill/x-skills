@@ -1,6 +1,8 @@
 package actions
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"gopkg.in/yaml.v3"
 )
@@ -21,15 +24,17 @@ type RenameResult struct {
 }
 
 type renameFilesystem struct {
-	rename  func(string, string) error
-	remove  func(string) error
-	symlink func(string, string) error
+	rename         func(string, string) error
+	remove         func(string) error
+	symlink        func(string, string) error
+	beforeMutation func(string) error
 }
 
 var renameArchiveFilesystem = renameFilesystem{
-	rename:  os.Rename,
-	remove:  os.Remove,
-	symlink: os.Symlink,
+	rename:         os.Rename,
+	remove:         os.Remove,
+	symlink:        os.Symlink,
+	beforeMutation: func(string) error { return nil },
 }
 
 type renameManifest struct {
@@ -42,18 +47,27 @@ type renameManifest struct {
 }
 
 type renameUsage struct {
-	oldPath string
-	newPath string
+	path    string
+	oldText string
+	newText string
 }
 
 func RenameArchive(cfg config.Config, oldName, newName string) (RenameResult, error) {
+	return RenameArchiveContext(context.Background(), cfg, oldName, newName)
+}
+
+func RenameArchiveContext(ctx context.Context, cfg config.Config, oldName, newName string) (RenameResult, error) {
 	result := RenameResult{OtherProjectsMayUseArchive: true, RelinkedPaths: []string{}, ManifestUpdates: []string{}}
 	oldPath, newPath, err := renameArchivePaths(cfg, oldName, newName)
 	if err != nil {
 		return result, err
 	}
 	result.ArchivePath = newPath
-	usages, err := managedRenameUsages(cfg, oldName, newName)
+	archiveFingerprint, err := fingerprint.Directory(oldPath)
+	if err != nil {
+		return result, fmt.Errorf("snapshot archive identity: %w", err)
+	}
+	usages, err := managedRenameUsages(cfg, oldPath, newPath)
 	if err != nil {
 		return result, err
 	}
@@ -62,6 +76,21 @@ func RenameArchive(cfg config.Config, oldName, newName string) (RenameResult, er
 		return result, err
 	}
 
+	if err := checkRenameContext(ctx); err != nil {
+		return result, err
+	}
+	if err := renameArchiveFilesystem.beforeMutation("archive"); err != nil {
+		return result, err
+	}
+	currentFingerprint, err := fingerprint.Directory(oldPath)
+	if err != nil || currentFingerprint != archiveFingerprint {
+		return result, fmt.Errorf("archive identity drifted before mutation")
+	}
+	for _, usage := range usages {
+		if err := revalidateRenameUsageTarget(usage, oldPath); err != nil {
+			return result, err
+		}
+	}
 	if err := renameArchiveFilesystem.rename(oldPath, newPath); err != nil {
 		return result, fmt.Errorf("rename archive %q to %q: %w", oldPath, newPath, err)
 	}
@@ -74,8 +103,17 @@ func RenameArchive(cfg config.Config, oldName, newName string) (RenameResult, er
 		return result, cause
 	}
 	for _, usage := range usages {
-		if err := replaceRenameLink(usage, newPath); err != nil {
-			return rollback(fmt.Errorf("relink visible usage %q: %w", usage.oldPath, err))
+		if err := checkRenameContext(ctx); err != nil {
+			return rollback(err)
+		}
+		if err := renameArchiveFilesystem.beforeMutation("usage"); err != nil {
+			return rollback(err)
+		}
+		if err := revalidateRenameUsage(usage); err != nil {
+			return rollback(err)
+		}
+		if err := replaceRenameLink(usage); err != nil {
+			return rollback(fmt.Errorf("relink visible usage %q: %w", usage.path, err))
 		}
 		relinked = append(relinked, usage)
 	}
@@ -83,13 +121,16 @@ func RenameArchive(cfg config.Config, oldName, newName string) (RenameResult, er
 		if !manifests[i].changed {
 			continue
 		}
+		if err := checkRenameContext(ctx); err != nil {
+			return rollback(err)
+		}
 		if err := writeRenameFile(manifests[i].path, manifests[i].next, manifests[i].mode); err != nil {
 			return rollback(fmt.Errorf("update %s: %w", manifests[i].label, err))
 		}
 		result.ManifestUpdates = append(result.ManifestUpdates, manifests[i].label)
 	}
 	for _, usage := range relinked {
-		result.RelinkedPaths = append(result.RelinkedPaths, usage.newPath)
+		result.RelinkedPaths = append(result.RelinkedPaths, usage.path)
 	}
 	return result, nil
 }
@@ -117,26 +158,66 @@ func renameArchivePaths(cfg config.Config, oldName, newName string) (string, str
 	return oldPath, newPath, nil
 }
 
-func managedRenameUsages(cfg config.Config, oldName, newName string) ([]renameUsage, error) {
-	active, err := ScanActive(cfg, ScanFilter{})
-	if err != nil {
-		return nil, fmt.Errorf("scan visible Skills Folders: %w", err)
-	}
+func managedRenameUsages(cfg config.Config, oldPath, newPath string) ([]renameUsage, error) {
 	paths := []renameUsage{}
-	for _, occurrence := range active {
-		if occurrence.Status == StatusManaged && filepath.Base(occurrence.Path) == oldName {
-			newPath := filepath.Join(filepath.Dir(occurrence.Path), newName)
-			if _, err := os.Lstat(newPath); err == nil {
-				return nil, fmt.Errorf("visible usage destination exists: %s", newPath)
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("inspect visible usage destination %q: %w", newPath, err)
+	canonicalOld, err := filepath.EvalSymlinks(oldPath)
+	if err != nil {
+		return nil, err
+	}
+	for _, root := range cfg.ManagedRoots() {
+		if !root.Enabled {
+			continue
+		}
+		entries, err := os.ReadDir(root.Path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("scan Skills Folder %q: %w", root.Path, err)
+		}
+		for _, entry := range entries {
+			path := filepath.Join(root.Path, entry.Name())
+			info, err := os.Lstat(path)
+			if err != nil || info.Mode()&os.ModeSymlink == 0 {
+				continue
 			}
-			paths = append(paths, renameUsage{oldPath: occurrence.Path, newPath: newPath})
+			resolved, err := filepath.EvalSymlinks(path)
+			if err != nil || !samePath(resolved, canonicalOld) {
+				continue
+			}
+			text, err := os.Readlink(path)
+			if err != nil {
+				return nil, err
+			}
+			newText := newPath
+			if !filepath.IsAbs(text) {
+				newText, err = filepath.Rel(filepath.Dir(path), newPath)
+				if err != nil {
+					return nil, err
+				}
+			}
+			paths = append(paths, renameUsage{path: path, oldText: text, newText: newText})
 		}
 	}
 	sort.SliceStable(paths, func(i, j int) bool {
-		return renameUsageOrder(cfg, paths[i].oldPath) < renameUsageOrder(cfg, paths[j].oldPath)
+		return renameUsageOrder(cfg, paths[i].path) < renameUsageOrder(cfg, paths[j].path)
 	})
+	return paths, nil
+}
+
+func VisibleArchiveUsagePaths(cfg config.Config, name string) ([]string, error) {
+	oldPath, err := repo.SkillPath(cfg, name)
+	if err != nil {
+		return nil, err
+	}
+	usages, err := managedRenameUsages(cfg, oldPath, oldPath)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(usages))
+	for _, usage := range usages {
+		paths = append(paths, usage.path)
+	}
 	return paths, nil
 }
 
@@ -149,23 +230,44 @@ func renameUsageOrder(cfg config.Config, path string) int {
 	return len(cfg.ManagedRoots())
 }
 
-func replaceRenameLink(usage renameUsage, target string) error {
-	temp, err := temporaryRenameSibling(usage.newPath, "link")
+func replaceRenameLink(usage renameUsage) error {
+	temp, err := temporaryRenameSibling(usage.path, "link")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(temp)
-	if err := renameArchiveFilesystem.symlink(target, temp); err != nil {
+	if err := renameArchiveFilesystem.symlink(usage.newText, temp); err != nil {
 		return err
 	}
-	if err := renameArchiveFilesystem.rename(temp, usage.newPath); err != nil {
-		return err
-	}
-	if err := renameArchiveFilesystem.remove(usage.oldPath); err != nil {
-		_ = renameArchiveFilesystem.remove(usage.newPath)
-		return err
+	return renameArchiveFilesystem.rename(temp, usage.path)
+}
+
+func revalidateRenameUsage(usage renameUsage) error {
+	text, err := os.Readlink(usage.path)
+	if err != nil || text != usage.oldText {
+		return fmt.Errorf("visible usage %q drifted before mutation", usage.path)
 	}
 	return nil
+}
+
+func revalidateRenameUsageTarget(usage renameUsage, oldPath string) error {
+	if err := revalidateRenameUsage(usage); err != nil {
+		return err
+	}
+	resolved, err := filepath.EvalSymlinks(usage.path)
+	if err != nil || !samePath(resolved, oldPath) {
+		return fmt.Errorf("visible usage %q target drifted before mutation", usage.path)
+	}
+	return nil
+}
+
+func checkRenameContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 func temporaryRenameSibling(path, kind string) (string, error) {
@@ -250,11 +352,42 @@ func renameManifestIdentity(data []byte, oldName, newName string) ([]byte, bool,
 	if newExists {
 		return nil, false, fmt.Errorf("skill %q already exists", newName)
 	}
-	for _, node := range oldNodes {
-		node.Value = newName
+	next := slices.Clone(data)
+	for _, node := range slices.Backward(oldNodes) {
+		var err error
+		next, err = replaceYAMLScalar(next, node, oldName, newName)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-	next, err := yaml.Marshal(root)
-	return next, true, err
+	return next, true, nil
+}
+
+func replaceYAMLScalar(data []byte, node *yaml.Node, oldName, newName string) ([]byte, error) {
+	lines := bytes.SplitAfter(data, []byte("\n"))
+	if node.Line < 1 || node.Line > len(lines) {
+		return nil, errors.New("invalid YAML scalar position")
+	}
+	start := 0
+	for i := 0; i < node.Line-1; i++ {
+		start += len(lines[i])
+	}
+	line := lines[node.Line-1]
+	column := node.Column - 1
+	if column < 0 || column >= len(line) {
+		return nil, errors.New("invalid YAML scalar column")
+	}
+	rel := bytes.Index(line[column:], []byte(oldName))
+	if rel < 0 {
+		return nil, fmt.Errorf("cannot locate manifest identity %q", oldName)
+	}
+	from := start + column + rel
+	to := from + len(oldName)
+	result := make([]byte, 0, len(data)-len(oldName)+len(newName))
+	result = append(result, data[:from]...)
+	result = append(result, newName...)
+	result = append(result, data[to:]...)
+	return result, nil
 }
 
 func writeRenameFile(path string, data []byte, mode os.FileMode) error {
@@ -288,13 +421,12 @@ func rollbackArchiveRename(oldPath, newPath string, relinked []renameUsage, mani
 		}
 	}
 	for _, usage := range slices.Backward(relinked) {
-		newUsagePath := filepath.Join(filepath.Dir(usage.oldPath), filepath.Base(newPath))
-		if err := renameArchiveFilesystem.remove(newUsagePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, fmt.Errorf("remove renamed link %q: %w", newUsagePath, err))
+		if err := renameArchiveFilesystem.remove(usage.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("remove renamed link %q: %w", usage.path, err))
 			continue
 		}
-		if err := renameArchiveFilesystem.symlink(oldPath, usage.oldPath); err != nil {
-			errs = append(errs, fmt.Errorf("restore link %q: %w", usage.oldPath, err))
+		if err := renameArchiveFilesystem.symlink(usage.oldText, usage.path); err != nil {
+			errs = append(errs, fmt.Errorf("restore link %q: %w", usage.path, err))
 		}
 	}
 	if err := renameArchiveFilesystem.rename(newPath, oldPath); err != nil {

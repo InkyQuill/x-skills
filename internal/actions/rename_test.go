@@ -1,6 +1,8 @@
 package actions
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,7 +11,194 @@ import (
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/remote"
 )
+
+func TestRenameArchivePreservesSkillAndSourceMetadataIdentity(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	if err := remote.WriteSourceMetadata(archive, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "repo", SkillPath: "skills/original"}); err != nil {
+		t.Fatal(err)
+	}
+	skillBefore, _ := os.ReadFile(filepath.Join(archive, "SKILL.md"))
+	metaBefore, _ := os.ReadFile(filepath.Join(archive, remote.MetadataFile))
+	fingerprintBefore, err := fingerprint.Directory(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenameArchive(cfg, "old", "new"); err != nil {
+		t.Fatal(err)
+	}
+	newArchive := filepath.Join(cfg.ArchiveSkillsRoot(), "new")
+	skillAfter, _ := os.ReadFile(filepath.Join(newArchive, "SKILL.md"))
+	metaAfter, _ := os.ReadFile(filepath.Join(newArchive, remote.MetadataFile))
+	fingerprintAfter, err := fingerprint.Directory(newArchive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(skillBefore, skillAfter) || !bytes.Equal(metaBefore, metaAfter) {
+		t.Fatal("archive content identity changed during rename")
+	}
+	if fingerprintAfter != fingerprintBefore {
+		t.Fatalf("fingerprint = %q, want %q", fingerprintAfter, fingerprintBefore)
+	}
+}
+
+func TestRenameArchiveReportsManifestWriteAndRollbackFailure(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	archive := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	makeRenameLink(t, filepath.Join(project, ".agents", "skills"), "alias", archive)
+	writeRenameManifest(t, filepath.Join(project, ".x-skills.local.yaml"), "old", "archive")
+	original := renameArchiveFilesystem
+	renameArchiveFilesystem.rename = func(oldPath, newPath string) error {
+		if strings.Contains(oldPath, ".x-skills-rename-manifest-") {
+			return errors.New("injected manifest rename failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	renameArchiveFilesystem.symlink = func(target, path string) error {
+		if strings.Contains(target, "old") {
+			return errors.New("injected symlink rollback failure")
+		}
+		return os.Symlink(target, path)
+	}
+	t.Cleanup(func() { renameArchiveFilesystem = original })
+	_, err := RenameArchive(cfg, "old", "new")
+	if err == nil || !strings.Contains(err.Error(), "update .x-skills.local.yaml") || !strings.Contains(err.Error(), "restore .x-skills.local.yaml") || !strings.Contains(err.Error(), "injected symlink rollback failure") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRenameArchiveDiscoversAliasesByTargetAndPreservesLinkStyle(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	archive := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	root := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "friendly-name")
+	relative, err := filepath.Rel(root, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(relative, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RenameArchive(cfg, "old", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(result.RelinkedPaths, []string{alias}) {
+		t.Fatalf("relinked paths = %#v", result.RelinkedPaths)
+	}
+	text, err := os.Readlink(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.Rel(root, filepath.Join(cfg.ArchiveSkillsRoot(), "new"))
+	if text != want || filepath.IsAbs(text) {
+		t.Fatalf("link text = %q, want relative %q", text, want)
+	}
+}
+
+func TestRenameArchiveLeavesSameNameUnmanagedSymlinkUntouched(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	other := makeRenameSkill(t, t.TempDir(), "other")
+	path := makeRenameLink(t, filepath.Join(project, ".agents", "skills"), "old", other)
+	before, _ := os.Readlink(path)
+	result, err := RenameArchive(cfg, "old", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RelinkedPaths) != 0 {
+		t.Fatalf("relinked = %#v", result.RelinkedPaths)
+	}
+	after, err := os.Readlink(path)
+	if err != nil || after != before {
+		t.Fatalf("unmanaged link = %q, %v", after, err)
+	}
+}
+
+func TestRenameArchivePreservesManifestFormattingCommentsAndSourcePath(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	manifestPath := filepath.Join(project, ".x-skills.yaml")
+	before := "# header\nversion: 1\nskills:\n  - name: old # identity\n    source:\n      type: github\n      repository: github.com/example/skills\n      path: skills/old # source path is not identity\n"
+	if err := os.WriteFile(manifestPath, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RenameArchive(cfg, "old", "new"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(before, "name: old", "name: new", 1)
+	if string(after) != want {
+		t.Fatalf("manifest formatting changed:\n%s\nwant:\n%s", after, want)
+	}
+}
+
+func TestRenameArchiveContextCancelsBeforeMutation(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	old := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := RenameArchiveContext(ctx, cfg, "old", "new")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("archive mutated: %v", err)
+	}
+}
+
+func TestRenameArchiveRejectsArchiveAndUsageDriftBeforeMutation(t *testing.T) {
+	for _, drift := range []string{"archive", "usage"} {
+		t.Run(drift, func(t *testing.T) {
+			project := t.TempDir()
+			cfg := config.Default(project, t.TempDir())
+			archive := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+			link := makeRenameLink(t, filepath.Join(project, ".agents", "skills"), "alias", archive)
+			original := renameArchiveFilesystem
+			renameArchiveFilesystem.beforeMutation = func(boundary string) error {
+				if boundary == drift {
+					if drift == "archive" {
+						return os.WriteFile(filepath.Join(archive, "drift"), []byte("x"), 0o644)
+					}
+					if err := os.Remove(link); err != nil {
+						return err
+					}
+					return os.Symlink(t.TempDir(), link)
+				}
+				return nil
+			}
+			t.Cleanup(func() { renameArchiveFilesystem = original })
+			_, err := RenameArchive(cfg, "old", "new")
+			if err == nil || !strings.Contains(err.Error(), "drift") {
+				t.Fatalf("error = %v", err)
+			}
+			if _, statErr := os.Stat(archive); statErr != nil {
+				t.Fatalf("archive moved: %v", statErr)
+			}
+			if drift == "usage" {
+				text, readErr := os.Readlink(link)
+				if readErr != nil || text == archive {
+					t.Fatalf("tampered usage was lost: %q, %v", text, readErr)
+				}
+			}
+		})
+	}
+}
 
 func TestRenameArchiveRelinksVisibleManagedUsagesAndUpdatesManifests(t *testing.T) {
 	project := t.TempDir()
@@ -31,7 +220,7 @@ func TestRenameArchiveRelinksVisibleManagedUsagesAndUpdatesManifests(t *testing.
 	if result.ArchivePath != filepath.Join(cfg.ArchiveSkillsRoot(), "new") {
 		t.Fatalf("archive path = %q", result.ArchivePath)
 	}
-	if !slices.Equal(result.RelinkedPaths, []string{filepath.Join(projectRoot, "new"), filepath.Join(globalRoot, "new")}) {
+	if !slices.Equal(result.RelinkedPaths, []string{filepath.Join(projectRoot, "old"), filepath.Join(globalRoot, "old")}) {
 		t.Fatalf("relinked paths = %#v", result.RelinkedPaths)
 	}
 	if !result.OtherProjectsMayUseArchive || !slices.Equal(result.ManifestUpdates, []string{".x-skills.yaml", ".x-skills.local.yaml"}) {

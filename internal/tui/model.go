@@ -60,6 +60,7 @@ type Model struct {
 	recommendationInFlight bool
 	renameToken            uint64
 	renameInFlight         bool
+	renameCancel           context.CancelFunc
 	restoreToken           uint64
 	restoreInFlight        bool
 	restoreCancel          context.CancelFunc
@@ -221,6 +222,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		m.cancelRenameWork()
 		closeRestoreModalPlan(m.modal)
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
@@ -260,6 +262,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q":
+		m.cancelRenameWork()
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
 		m.cancelSyncWork()

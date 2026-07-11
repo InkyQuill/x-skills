@@ -50,6 +50,35 @@ func TestApplyMigratesPreservesLinksAndReconcilesManifest(t *testing.T) {
 	}
 }
 
+func TestApplyArchiveConflictUsesSharedRenameForVisibleAliases(t *testing.T) {
+	cfg := applyConfig(t)
+	existing := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "review", "existing")
+	globalRoot := cfg.MustActiveRoot(config.ScopeGlobal, config.TargetAgents)
+	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(globalRoot, "friendly")
+	if err := os.Symlink(existing, alias); err != nil {
+		t.Fatal(err)
+	}
+	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "incoming")
+	fp := applyFingerprint(t, source)
+	plan := Plan{
+		Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: existing}},
+		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: existing, DestinationStatus: actions.StatusManaged,
+			Resolution: ConflictResolution{DestinationPath: existing, PreserveAs: "review-preserved", Action: ConflictReplace}}},
+	}
+	result := Apply(context.Background(), cfg, plan)
+	if len(result.Failed) != 0 || result.PlanError != nil {
+		t.Fatalf("result = %#v", result)
+	}
+	resolved, err := filepath.EvalSymlinks(alias)
+	if err != nil || resolved != filepath.Join(cfg.ArchiveSkillsRoot(), "review-preserved") {
+		t.Fatalf("alias = %q, %v", resolved, err)
+	}
+	assertApplyFile(t, filepath.Join(existing, "content.txt"), "incoming")
+}
+
 func TestApplyRollsBackLinksForFailedSkillButKeepsPreservedArchives(t *testing.T) {
 	t.Parallel()
 	cfg := applyConfig(t)

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/manifest"
@@ -96,7 +97,7 @@ func Apply(ctx context.Context, cfg config.Config, plan Plan, options ...ApplyOp
 				option.Progress(Progress{Completed: completed, Total: total, Skill: skill.name, Action: action})
 			}
 		}
-		mutation, err := applySkill(cfg, filesystem, skill, emit)
+		mutation, err := applySkill(ctx, cfg, filesystem, skill, emit)
 		if err != nil {
 			result.Failed = append(result.Failed, SkillResult{Name: skill.name, Err: err,
 				ArchiveChanged: mutation.archiveChanged, SourceRemoved: mutation.sourceRemoved, LinksRolledBack: mutation.linksRolledBack,
@@ -383,7 +384,7 @@ func defaultApplyFilesystem() applyFilesystem {
 	return applyFilesystem{removeAll: os.RemoveAll, rename: os.Rename, afterStage: func(string) error { return nil }}
 }
 
-func applySkill(cfg config.Config, filesystem applyFilesystem, work applyWork, emit func(string)) (skillMutation, error) {
+func applySkill(ctx context.Context, cfg config.Config, filesystem applyFilesystem, work applyWork, emit func(string)) (skillMutation, error) {
 	var mutation skillMutation
 	plannedArchives := make(map[string]struct{}, len(work.migrations))
 	for _, migration := range work.migrations {
@@ -430,7 +431,7 @@ func applySkill(cfg config.Config, filesystem applyFilesystem, work applyWork, e
 		preserved := ""
 		if replacing {
 			preserved = filepath.Join(filepath.Dir(migration.ArchivePath), conflict.Resolution.PreserveAs)
-			if err := os.Rename(migration.ArchivePath, preserved); err != nil {
+			if _, err := actions.RenameArchiveContext(ctx, cfg, migration.Name, conflict.Resolution.PreserveAs); err != nil {
 				_ = os.RemoveAll(staged)
 				return mutation, fmt.Errorf("preserve archive %q as %q: %w", migration.ArchivePath, preserved, err)
 			}

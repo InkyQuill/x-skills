@@ -1516,7 +1516,8 @@ func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
 	if err := os.MkdirAll(activeRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(archive, filepath.Join(activeRoot, "old")); err != nil {
+	alias := filepath.Join(activeRoot, "friendly")
+	if err := os.Symlink(archive, alias); err != nil {
 		t.Fatal(err)
 	}
 	m := New(cfg)
@@ -1532,7 +1533,7 @@ func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
 		t.Fatalf("modal = %T, want textModal", m.modal)
 	}
 	view := plain(rename.View(180, 30, m))
-	if !strings.Contains(view, filepath.Join(activeRoot, "old")) || !strings.Contains(strings.ToLower(view), "other projects") {
+	if !strings.Contains(view, "friendly") || !strings.Contains(strings.ToLower(view), "other projects") {
 		t.Fatalf("rename modal omitted usage/warning:\n%s", view)
 	}
 	rename.input.SetValue("new")
@@ -1554,8 +1555,33 @@ func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
 	if m.renameInFlight || !strings.Contains(m.status, "Renamed old to new") {
 		t.Fatalf("rename completion state: inFlight=%v status=%q", m.renameInFlight, m.status)
 	}
-	resolved, err := filepath.EvalSymlinks(filepath.Join(activeRoot, "new"))
+	resolved, err := filepath.EvalSymlinks(alias)
 	if err != nil || resolved != filepath.Join(cfg.ArchiveSkillsRoot(), "new") {
 		t.Fatalf("active link = %q, %v", resolved, err)
+	}
+}
+
+func TestRepoRenameCancellationStopsBeforeMutation(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "old", "Old.")
+	m := New(cfg)
+	m.setView(ViewRepo)
+	updated, _ := m.Update(keyRunes(keyRepoRename))
+	m = mustModel(t, updated)
+	rename := m.modal.(textModal)
+	rename.input.SetValue("new")
+	m.modal = rename
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil || m.renameCancel == nil {
+		t.Fatal("rename has no owned cancellation")
+	}
+	m.cancelRenameWork()
+	msg := cmd().(renameArchiveResultMsg)
+	if !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("error = %v", msg.err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "old")); err != nil {
+		t.Fatalf("archive mutated: %v", err)
 	}
 }

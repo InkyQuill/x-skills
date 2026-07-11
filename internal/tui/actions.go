@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -60,32 +61,24 @@ func (m *Model) openRepoRenameModal() {
 		return
 	}
 	oldName := names[0]
-	lines := []string{"New archive name", "", "Visible managed usages that will be renamed:"}
-	usagePaths := m.visibleManagedUsagePaths(oldName)
-	if len(usagePaths) == 0 {
-		lines = append(lines, "  none")
-	} else {
-		for _, path := range usagePaths {
-			lines = append(lines, "  "+path)
-		}
+	lines := []string{"Other projects are not indexed and may still link to the old archive path."}
+	usagePaths, err := actions.VisibleArchiveUsagePaths(m.cfg, oldName)
+	if err != nil {
+		m.status = "inspect visible archive usages: " + err.Error()
+		return
 	}
-	lines = append(lines, "", "Other projects are not indexed and may still link to the old archive path.")
+	if len(usagePaths) == 0 {
+		lines = append(lines, "Visible managed usages: none")
+	} else {
+		names := make([]string, 0, len(usagePaths))
+		for _, path := range usagePaths {
+			names = append(names, filepath.Base(path))
+		}
+		lines = append(lines, "Visible: "+strings.Join(names, ", "))
+	}
 	m.modal = newTextModal("Rename archive: "+oldName, strings.Join(lines, "\n"), oldName, func(current *Model, newName string) tea.Cmd {
 		return current.beginRepoRename(oldName, newName)
 	})
-}
-
-func (m Model) visibleManagedUsagePaths(name string) []string {
-	paths := []string{}
-	for _, group := range m.active {
-		for _, occurrence := range group.Members {
-			if occurrence.Status == actions.StatusManaged && filepath.Base(occurrence.Path) == name {
-				paths = append(paths, occurrence.Path)
-			}
-		}
-	}
-	slices.Sort(paths)
-	return paths
 }
 
 func (m *Model) beginRepoRename(oldName, newName string) tea.Cmd {
@@ -99,12 +92,14 @@ func (m *Model) beginRepoRename(oldName, newName string) tea.Cmd {
 	m.renameToken++
 	token := m.renameToken
 	m.renameInFlight = true
+	ctx, cancel := context.WithCancel(context.Background())
+	m.renameCancel = cancel
 	m.modal = nil
 	m.status = "renaming " + oldName + "..."
 	cfg := m.cfg
 	return func() tea.Msg {
 		msg := renameArchiveResultMsg{token: token, oldName: oldName, newName: newName}
-		msg.result, msg.err = actions.RenameArchive(cfg, oldName, newName)
+		msg.result, msg.err = actions.RenameArchiveContext(ctx, cfg, oldName, newName)
 		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
 		return msg
 	}
@@ -115,6 +110,7 @@ func (m *Model) applyRenameArchiveResult(msg renameArchiveResultMsg) tea.Cmd {
 		return nil
 	}
 	m.renameInFlight = false
+	m.renameCancel = nil
 	if msg.err != nil {
 		m.status = "archive rename failed: " + msg.err.Error()
 		return nil
@@ -129,6 +125,13 @@ func (m *Model) applyRenameArchiveResult(msg renameArchiveResultMsg) tea.Cmd {
 		m.status += ", but refreshing the TUI failed: " + msg.reloadErr.Error()
 	}
 	return nil
+}
+
+func (m *Model) cancelRenameWork() {
+	if m.renameCancel != nil {
+		m.renameCancel()
+		m.renameCancel = nil
+	}
 }
 
 func (m *Model) queueProjectReconciliation() bool {

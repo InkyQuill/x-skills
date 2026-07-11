@@ -34,3 +34,21 @@
 ## Notes
 
 - The pre-existing untracked `x-skills` binary was left untouched and is not part of the commit.
+
+## Review remediation
+
+- Existing archives are no longer trusted by name alone. Archive-only entries verify their declared fingerprint, while Git/GitHub entries verify source type, repository identity, ref, and skill path before becoming available.
+- Added explicit desired-entry normalization. Managed links are retained, broken links are removed, identical unmanaged copies are replaced by managed links, and divergent unmanaged copies require a resolved preserve name.
+- Full cleanup now distinguishes managed and broken removals from unmanaged migrations. Divergent archive collisions expose `MigrationConflict` with an unused suggested preserve name; apply preflights every resolution and path before its first mutation.
+- Restore changes are bound to the exact planned path under an enabled configured project Skills Folder. Caller-edited traversal names, changed paths, occupied preserve names, and discarded staging are rejected before mutation.
+- `RestorePlan.Close`/`Discard` deterministically removes staged checkouts; apply always closes its plan copy. Planning errors also discard staging.
+- Reconciliation is deferred after the first successful mutation and runs on success, cancellation, or later failure. Reconciliation errors are joined with the original apply error so partial filesystem success is never hidden.
+- Added regression coverage for local Git fetch/apply, wrong archive identity, fingerprint mismatch, full managed/broken/unmanaged classification, unavailable desired skills with safe additions, non-mutating migration conflicts and resolved preserve names, desired-entry normalization, staged cleanup, exact-path tampering, and partial-apply reconciliation.
+
+### Remediation verification
+
+- `go test ./internal/manifest -count=1` — pass.
+- `go vet ./...` — pass.
+- `staticcheck ./...` — pass.
+- `go test -race -count=1 ./...` — pass.
+- `git diff --check` — pass.

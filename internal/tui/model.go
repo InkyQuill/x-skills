@@ -102,14 +102,10 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			updated = current
 			return
 		}
-		if cmd != nil {
-			updated = current
-			return
-		}
 		reloadCmd := current.reloadPending
 		current.reloadPending = nil
 		updated = current
-		cmd = reloadCmd
+		cmd = tea.Batch(cmd, reloadCmd)
 	}()
 
 	switch msg := msg.(type) {

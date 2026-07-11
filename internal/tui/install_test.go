@@ -924,6 +924,26 @@ func TestLeavingInstallInvalidatesMutationGeneration(t *testing.T) {
 	}
 }
 
+func commandMessage[T tea.Msg](t *testing.T, cmd tea.Cmd) T {
+	t.Helper()
+	msg := cmd()
+	if typed, ok := msg.(T); ok {
+		return typed
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("command message = %T, want requested message or tea.BatchMsg", msg)
+	}
+	for _, batchedCmd := range batch {
+		if typed, ok := batchedCmd().(T); ok {
+			return typed
+		}
+	}
+	var zero T
+	t.Fatalf("tea.BatchMsg does not contain %T", zero)
+	return zero
+}
+
 func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
@@ -972,13 +992,25 @@ func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("rename existing archive cmd is nil")
 	}
-	msg = cmd().(installArchiveMsg)
+	msg = commandMessage[installArchiveMsg](t, cmd)
 	updated, cmd = m.Update(msg)
 	m = mustModel(t, updated)
 	if cmd == nil {
-		t.Fatal("tail archive cmd is nil after resolving middle conflict")
+		t.Fatal("continuation and reload batch cmd is nil after resolving middle conflict")
 	}
-	msg = cmd().(installArchiveMsg)
+	batchMsg := cmd()
+	batch, ok := batchMsg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("continuation cmd message = %T, want tea.BatchMsg with reload", batchMsg)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("batch command count = %d, want continuation and reload", len(batch))
+	}
+	msg = batch[0]().(installArchiveMsg)
+	reloadMsg := batch[1]()
+	if _, ok := reloadMsg.(reloadResultMsg); !ok {
+		t.Fatalf("second batch message = %T, want reloadResultMsg", reloadMsg)
+	}
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -1034,7 +1066,7 @@ func TestInstallArchiveBatchContinuesAfterMiddleUpdate(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("middle update diff cmd is nil")
 	}
-	diffMsg := cmd().(installUpdateDiffMsg)
+	diffMsg := commandMessage[installUpdateDiffMsg](t, cmd)
 	updated, _ = m.Update(diffMsg)
 	m = mustModel(t, updated)
 	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 40, m)), "Archive conflict: react-coder") {
@@ -1046,13 +1078,13 @@ func TestInstallArchiveBatchContinuesAfterMiddleUpdate(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("accept incoming archive cmd is nil")
 	}
-	msg = cmd().(installArchiveMsg)
+	msg = commandMessage[installArchiveMsg](t, cmd)
 	updated, cmd = m.Update(msg)
 	m = mustModel(t, updated)
 	if cmd == nil {
 		t.Fatal("tail archive cmd is nil after resolving middle update")
 	}
-	msg = cmd().(installArchiveMsg)
+	msg = commandMessage[installArchiveMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -1106,7 +1138,7 @@ func TestInstallArchiveBatchMissingSkillContinuesWithTail(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("tail archive cmd is nil after missing skill")
 	}
-	msg := cmd().(installArchiveMsg)
+	msg := commandMessage[installArchiveMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -1331,7 +1363,7 @@ func TestInstallSearchResultAsyncStateCheckMarksUpdateAvailable(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("update diff cmd is nil")
 	}
-	diffMsg := cmd().(installUpdateDiffMsg)
+	diffMsg := commandMessage[installUpdateDiffMsg](t, cmd)
 	updated, _ = m.Update(diffMsg)
 	m = mustModel(t, updated)
 	if m.modal == nil {
@@ -3481,7 +3513,7 @@ func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("tail install-use cmd is nil after resolving middle conflict")
 	}
-	useMsg = cmd().(installUseMsg)
+	useMsg = commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 
@@ -3543,7 +3575,7 @@ func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) 
 	if cmd == nil {
 		t.Fatal("tail install-use cmd is nil after renaming incoming archive")
 	}
-	updated, _ = m.Update(cmd().(installUseMsg))
+	updated, _ = m.Update(commandMessage[installUseMsg](t, cmd))
 	m = mustModel(t, updated)
 
 	activeRoot := cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents)
@@ -3611,7 +3643,7 @@ func TestInstallAndUseBatchContinuesAfterMiddleUpdate(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("middle update diff cmd is nil")
 	}
-	diffMsg := cmd().(installUpdateDiffMsg)
+	diffMsg := commandMessage[installUpdateDiffMsg](t, cmd)
 	updated, _ = m.Update(diffMsg)
 	m = mustModel(t, updated)
 	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 40, m)), "Archive conflict: react-coder") {
@@ -3623,7 +3655,7 @@ func TestInstallAndUseBatchContinuesAfterMiddleUpdate(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("tail install-use cmd is nil after resolving middle update")
 	}
-	useMsg = cmd().(installUseMsg)
+	useMsg = commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 
@@ -3690,7 +3722,7 @@ func TestInstallAndUseBatchMissingSkillContinuesWithTail(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("tail install-use cmd is nil after missing skill")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 
@@ -4153,7 +4185,7 @@ func TestInstallAndUseArchivedRowDiscoveredUpdateRoutesToDiff(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("update conflict did not start diff command")
 	}
-	diffMsg := cmd().(installUpdateDiffMsg)
+	diffMsg := commandMessage[installUpdateDiffMsg](t, cmd)
 	updated, _ = m.Update(diffMsg)
 	m = mustModel(t, updated)
 	if view := installTestModalView(m, 120, 40); !strings.Contains(view, "Incoming remote") {

@@ -1073,3 +1073,25 @@ func TestDoctorBuiltInFixRunsInCommandAndAppliesGenerationSafeResult(t *testing.
 		t.Fatalf("stale result applied: modal=%T status=%q", m.modal, m.status)
 	}
 }
+
+func TestDoctorFixIgnoresSecondFixWhileCommandIsInFlight(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reload()
+	m.view = ViewDoctor
+	m.openDoctorFixModal()
+
+	updated, first := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if first == nil || !m.doctorFixInFlight {
+		t.Fatalf("first fix not in flight: cmd=%v inFlight=%v", first, m.doctorFixInFlight)
+	}
+	updated, second := m.Update(keyRunes("f"))
+	m = mustModel(t, updated)
+	if second != nil {
+		t.Fatalf("second fix returned mutation command: %#v", second)
+	}
+	if m.modal != nil || m.status != "applying Doctor fixes..." {
+		t.Fatalf("in-flight state changed: modal=%T status=%q", m.modal, m.status)
+	}
+}

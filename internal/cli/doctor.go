@@ -73,12 +73,29 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 func promptDoctorBuiltInDestinations(cmd *cobra.Command, cfg config.Config) ([]roots.ActiveRoot, bool, error) {
 	globalRoots := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal})
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Select global Skills Folders for built-in skills (comma-separated):")
+	if len(globalRoots) == 0 {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  1. [x] Archive only")
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), "Choice [default 1]: ")
+		line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+		if err != nil {
+			return nil, false, err
+		}
+		if choice := strings.TrimSpace(line); choice != "" && choice != "1" {
+			return nil, false, fmt.Errorf("invalid destination choice %q", choice)
+		}
+		return nil, true, nil
+	}
 	defaultIndex := 0
 	for i, root := range globalRoots {
-		checked := " "
 		if root.Target == config.TargetAgents {
-			checked = "x"
 			defaultIndex = i
+			break
+		}
+	}
+	for i, root := range globalRoots {
+		checked := " "
+		if i == defaultIndex {
+			checked = "x"
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %d. [%s] %s\n", i+1, checked, root.Label)
 	}

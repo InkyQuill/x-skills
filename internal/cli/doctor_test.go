@@ -90,6 +90,27 @@ func TestDoctorFixBuiltInsInteractiveShowsGlobalChecklistWithAgentsPreselected(t
 	}
 }
 
+func TestDoctorFixBuiltInsInteractiveDefaultsToArchiveOnlyWithoutGlobalRoots(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	configDir := filepath.Join(home, ".x-skills")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("active_roots:\n  - scope: global\n    target: agents\n    enabled: false\n  - scope: global\n    target: claude\n    enabled: false\n  - scope: global\n    target: codex\n    enabled: false\n")
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "doctor", "--fix"}, strings.NewReader("\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "[x] Archive only") || !strings.Contains(out.String(), "archived but inactive") {
+		t.Fatalf("archive-only default missing:\n%s", out.String())
+	}
+}
+
 func TestDoctorReportsAndFixesBrokenSymlink(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

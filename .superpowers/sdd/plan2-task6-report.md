@@ -96,3 +96,39 @@ ok github.com/InkyQuill/x-skills/internal/tui 0.011s
 $ git diff --check
 (no output)
 ```
+
+## Re-review remediation
+
+Addressed the two follow-up findings:
+
+- The Doctor page ignores `f` while `doctorFixInFlight` is true, preventing a second filesystem command from being created against the stale issue snapshot.
+- Interactive CLI repair with zero enabled global Skills Folders now displays `[x] Archive only`, defaults Enter to archive-only mode, and validates any explicit choice without indexing an empty slice.
+
+Follow-up TDD evidence:
+
+- `TestDoctorFixIgnoresSecondFixWhileCommandIsInFlight` initially failed because the second `f` reopened `doctorBuiltInFixModal`.
+- `TestDoctorFixBuiltInsInteractiveDefaultsToArchiveOnlyWithoutGlobalRoots` initially reproduced an index-out-of-range panic at `promptDoctorBuiltInDestinations`.
+
+Fresh post-re-review verification:
+
+```text
+$ gofmt -l .
+(no output)
+
+$ go vet ./...
+(no output)
+
+$ staticcheck ./...
+(no output)
+
+$ go test -race -count=1 ./...
+all packages passed; internal/tui completed in 1.877s, with no race reports
+
+$ go test ./internal/doctor ./internal/cli ./internal/tui -count=1 -run 'BuiltIn|Builtin|DoctorFixModal|DoctorBuiltInFix|IgnoresSecondFix|WithoutGlobalRoots'
+ok github.com/InkyQuill/x-skills/internal/doctor 0.002s
+ok github.com/InkyQuill/x-skills/internal/cli 0.009s
+ok github.com/InkyQuill/x-skills/internal/tui 0.011s
+
+$ git diff --check
+(no output)
+```

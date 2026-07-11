@@ -294,6 +294,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		if m.view == ViewDoctor {
+			if m.doctorFixInFlight {
+				return m, nil
+			}
 			m.openDoctorFixModal()
 		}
 	}

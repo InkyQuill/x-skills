@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -57,6 +58,9 @@ type Model struct {
 	pendingMutationCmd     tea.Cmd
 	recommendationToken    uint64
 	recommendationInFlight bool
+	restoreToken           uint64
+	restoreInFlight        bool
+	restoreCancel          context.CancelFunc
 }
 
 type reloadResultMsg struct {
@@ -172,6 +176,10 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, m.applyMutationReconcileResult(msg)
 	case recommendationResultMsg:
 		return m, m.applyRecommendationResult(msg)
+	case restorePlanMsg:
+		return m, m.applyRestorePlanResult(msg)
+	case restoreApplyMsg:
+		return m, m.applyRestoreResult(msg)
 	case reloadResultMsg:
 		if msg.token != m.reloadToken {
 			return m, nil
@@ -199,6 +207,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		m.cancelInstallWork()
+		m.cancelRestoreWork()
 		return m, tea.Quit
 	}
 
@@ -235,6 +244,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		m.cancelInstallWork()
+		m.cancelRestoreWork()
 		return m, tea.Quit
 	case keyActive:
 		m.setView(ViewActive)
@@ -294,6 +304,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if m.view == ViewRepo {
 			return m, m.toggleRepoRecommendations()
+		}
+	case "s", "S":
+		if !m.restoreInFlight {
+			m.modal = newRestoreWorkbenchModal(m.cfg)
 		}
 	case "m":
 		if m.view == ViewActive {

@@ -18,6 +18,81 @@ import (
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
+func TestRestoreWorkbenchUsesProjectDestinationsAndPlansAsynchronously(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	m := New(cfg)
+
+	updated, cmd := m.Update(keyRunes("s"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("opening restore workbench returned a command")
+	}
+	workbench, ok := m.modal.(restoreWorkbenchModal)
+	if !ok {
+		t.Fatalf("modal = %T, want restoreWorkbenchModal", m.modal)
+	}
+	if workbench.full {
+		t.Fatal("restore workbench Full defaulted on")
+	}
+	if len(workbench.destinations) != 3 {
+		t.Fatalf("destinations = %#v, want three project Skills Folders", workbench.destinations)
+	}
+	for _, destination := range workbench.destinations {
+		if destination.root.Scope != config.ScopeProject {
+			t.Fatalf("global destination exposed: %#v", destination)
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil || !m.restoreInFlight {
+		t.Fatal("restore planning was not staged asynchronously")
+	}
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
+	if _, ok := m.modal.(restorePlanModal); !ok {
+		t.Fatalf("modal = %T, want restorePlanModal", m.modal)
+	}
+}
+
+func TestRestorePlanStaleDeliveryCleansStaging(t *testing.T) {
+	plan := manifest.RestorePlan{}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.restoreToken = 2
+	updated, _ := m.Update(restorePlanMsg{token: 1, plan: plan})
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("stale restore plan opened modal: %T", m.modal)
+	}
+}
+
+func TestRestoreConflictRenameIsEditableBeforeApply(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{{Kind: manifest.ChangeMigrate, Name: "wanted", Path: "/project/.agents/skills/wanted"}},
+		Conflicts:      []manifest.MigrationConflict{{Name: "wanted", Path: "/project/.agents/skills/wanted", SuggestedName: "wanted-preserved"}},
+	}
+	m.openRestorePlan(plan)
+	preview := m.modal.(restorePlanModal)
+	preview.editConflict(&m, 0)
+	text, ok := m.modal.(textModal)
+	if !ok {
+		t.Fatalf("modal = %T, want editable text modal", m.modal)
+	}
+	text.input.SetValue("wanted-local")
+	m.modal = text
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("editing restore archive name started mutation")
+	}
+	preview = m.modal.(restorePlanModal)
+	if got := preview.plan.Normalizations[0].ArchiveName; got != "wanted-local" {
+		t.Fatalf("archive name = %q, want wanted-local", got)
+	}
+}
+
 func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

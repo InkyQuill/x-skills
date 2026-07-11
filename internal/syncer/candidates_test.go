@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/compatibility"
@@ -82,6 +83,57 @@ func TestDiscoverAssessesCombinedDestinationConsumersFromArchiveMetadata(t *test
 	assessment := groups[0].Variants[0].Compatibility
 	if assessment.State != compatibility.StatePartial || !assessment.Explicit {
 		t.Fatalf("compatibility = %#v, want explicit partial", assessment)
+	}
+}
+
+func TestDiscoverIgnoresCompatibilityFromDivergentArchive(t *testing.T) {
+	t.Parallel()
+
+	project := t.TempDir()
+	home := t.TempDir()
+	cfg := configuredTestConfig(t, project, home)
+	source := projectRoot(cfg, "agents")
+	destination := projectRoot(cfg, "pi")
+	writeSkill(t, source.Path, "divergent", "divergent", "active content")
+	writeSkill(t, cfg.ArchiveSkillsRoot(), "divergent", "divergent", "archived content")
+	if err := remote.WriteSourceMetadata(filepath.Join(cfg.ArchiveSkillsRoot(), "divergent"), remote.SourceMetadata{
+		Compatibility: &remote.CompatibilityProfile{Agents: []string{"pi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := Discover(cfg, []roots.ActiveRoot{destination})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := groups[0].Variants[0].Compatibility; got.Explicit {
+		t.Fatalf("compatibility = %#v, want archive metadata ignored for divergent content", got)
+	}
+}
+
+func TestDiscoverRejectsInvalidDestinationConsumer(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	destination := roots.ActiveRoot{Path: filepath.Join(cfg.ProjectRoot, ".pi", "skills"), Consumers: []string{"not valid"}}
+	_, err := Discover(cfg, []roots.ActiveRoot{destination})
+	if err == nil || !strings.Contains(err.Error(), "invalid consumer") {
+		t.Fatalf("Discover() error = %v, want invalid consumer error", err)
+	}
+}
+
+func TestDiscoverRejectsBrokenDestinationSymlink(t *testing.T) {
+	t.Parallel()
+
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	destinationPath := filepath.Join(project, "destination")
+	if err := os.Symlink(filepath.Join(project, "missing"), destinationPath); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Discover(cfg, []roots.ActiveRoot{{Path: destinationPath, Consumers: []string{"pi"}}})
+	if err == nil || !strings.Contains(err.Error(), "resolve destination Skills Folder") {
+		t.Fatalf("Discover() error = %v, want broken destination error", err)
 	}
 }
 

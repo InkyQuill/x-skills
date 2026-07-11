@@ -1,7 +1,9 @@
 package syncer
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -32,7 +34,10 @@ func Discover(cfg config.Config, destinations []roots.ActiveRoot) ([]NameGroup, 
 	if err != nil {
 		return nil, err
 	}
-	consumers := destinationConsumers(destinations)
+	consumers, err := destinationConsumers(destinations)
+	if err != nil {
+		return nil, err
+	}
 	active, err := actions.ScanActive(cfg, actions.ScanFilter{Scope: config.ScopeProject})
 	if err != nil {
 		return nil, err
@@ -76,7 +81,7 @@ func Discover(cfg config.Config, destinations []roots.ActiveRoot) ([]NameGroup, 
 	for name, variants := range grouped {
 		group := NameGroup{Name: name, Variants: make([]Candidate, 0, len(variants))}
 		for _, candidate := range variants {
-			profile, err := archiveCompatibility(cfg, name)
+			profile, err := archiveCompatibility(cfg, name, candidate.Fingerprint)
 			if err != nil {
 				return nil, err
 			}
@@ -118,25 +123,65 @@ func canonicalPath(path string) (string, error) {
 	if err == nil {
 		return filepath.Clean(resolved), nil
 	}
-	return filepath.Clean(abs), nil
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	current := abs
+	var missing []string
+	for {
+		info, statErr := os.Lstat(current)
+		switch {
+		case statErr == nil:
+			if !info.IsDir() && len(missing) > 0 {
+				return "", fmt.Errorf("existing ancestor %q is not a directory", current)
+			}
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", err
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved), nil
+		case !errors.Is(statErr, os.ErrNotExist):
+			return "", statErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
-func destinationConsumers(destinations []roots.ActiveRoot) []string {
+func destinationConsumers(destinations []roots.ActiveRoot) ([]string, error) {
 	var consumers []string
 	for _, destination := range destinations {
 		consumers = append(consumers, destination.Consumers...)
 	}
-	consumers, _ = config.NormalizeConsumers(consumers)
-	return consumers
+	consumers, err := config.NormalizeConsumers(consumers)
+	if err != nil {
+		return nil, fmt.Errorf("normalize destination consumers: %w", err)
+	}
+	return consumers, nil
 }
 
-func archiveCompatibility(cfg config.Config, name string) (*remote.CompatibilityProfile, error) {
+func archiveCompatibility(cfg config.Config, name, candidateFingerprint string) (*remote.CompatibilityProfile, error) {
 	archive := filepath.Join(cfg.ArchiveSkillsRoot(), name)
 	metadata, found, err := remote.ReadSourceMetadata(archive)
 	if err != nil {
 		return nil, fmt.Errorf("read archived skill %q metadata: %w", name, err)
 	}
 	if !found {
+		return nil, nil
+	}
+	archiveFingerprint, err := fingerprint.Directory(archive)
+	if err != nil {
+		return nil, fmt.Errorf("fingerprint archived skill %q: %w", name, err)
+	}
+	if archiveFingerprint != candidateFingerprint {
 		return nil, nil
 	}
 	return metadata.Compatibility, nil

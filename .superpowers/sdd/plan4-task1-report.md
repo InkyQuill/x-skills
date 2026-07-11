@@ -25,3 +25,14 @@ The initial focused test run failed because `Discover` and `NameGroup` did not e
 - `git diff --check` — pass
 
 The Zen of Go audit found no blocking or non-blocking findings in the task scope. The implementation keeps filesystem work synchronous and explicit, returns contextual errors, uses existing fingerprint and compatibility packages, and tests observable discovery behavior.
+
+## Review Remediation
+
+Addressed the Task 1 review findings with failing regressions before production changes.
+
+- Archived explicit compatibility is now associated with a candidate only when the archived directory fingerprint matches that candidate variant. Divergent same-name archives fall back to candidate-content inference instead of leaking unrelated metadata.
+- Invalid destination consumer IDs now propagate from `config.NormalizeConsumers` with discovery context.
+- Destination canonicalization now tolerates genuinely nonexistent path leaves by resolving their deepest existing ancestor, while reporting broken symlinks, unreadable paths, and non-directory ancestors.
+- Added focused divergent-archive, invalid-consumer, and broken-destination tests.
+
+Fresh remediation verification passed: `gofmt -l .`, `go vet ./...`, `staticcheck ./...`, `go test -race -count=1 ./...`, and `git diff --check`.

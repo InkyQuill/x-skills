@@ -95,7 +95,7 @@ func (m *Model) beginSyncPlan(workbench syncWorkbenchModal) tea.Cmd {
 	m.modal = workbench
 	cfg, token := m.cfg, m.syncToken
 	groups, destinations := workbench.groups, workbench.selectedRoots()
-	selection, resolutions := workbench.selection(), workbench.resolutions()
+	selection, resolutions := workbench.selection(), workbench.resolutionsForPlan()
 	return func() tea.Msg {
 		select {
 		case <-ctx.Done():
@@ -125,10 +125,7 @@ func (m *Model) applySyncPlan(msg syncPlanMsg) tea.Cmd {
 	w.plan = msg.plan
 	w.isLoading = false
 	if syncPlanHasUnresolvedConflicts(msg.plan) {
-		w.conflictNames = make(map[string]string, len(msg.plan.Conflicts))
-		for _, conflict := range msg.plan.Conflicts {
-			w.conflictNames[conflict.DestinationPath] = conflict.SuggestedPreserveAs
-		}
+		w.reconcileConflictNames(msg.plan)
 		w.stage, w.index = syncStageConflicts, 0
 	} else {
 		w.stage, w.index = syncStageConfirmation, 0
@@ -211,7 +208,7 @@ func (m *Model) applySyncResult(msg syncResultMsg) tea.Cmd {
 	}
 	m.status = fmt.Sprintf("synced %d skills; %d failed", len(msg.result.Succeeded), len(msg.result.Failed))
 	if msg.result.Cancelled {
-		m.status = "skill sync cancelled"
+		m.status = fmt.Sprintf("skill sync cancelled after %d skills; %d failed", len(msg.result.Succeeded), len(msg.result.Failed))
 	}
 	if msg.reloadErr != nil {
 		m.status += "; refresh failed: " + msg.reloadErr.Error()

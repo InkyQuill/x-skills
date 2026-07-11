@@ -71,7 +71,7 @@ func TestSyncApplyEscapeCancelsAndInvalidatesGeneration(t *testing.T) {
 	w := syncWorkbenchModal{token: 7, stage: syncStageConfirmation, isApplying: true}
 	m.modal = w
 	closed, _ := w.Update(tea.KeyMsg{Type: tea.KeyEsc}, &m)
-	if !closed || !cancelled || m.syncToken != 8 {
+	if closed || !cancelled || m.syncToken != 7 || !strings.Contains(m.status, "cancelling") {
 		t.Fatalf("closed=%v cancelled=%v token=%d", closed, cancelled, m.syncToken)
 	}
 }
@@ -94,8 +94,17 @@ func TestSyncReplanClearsStaleConflictResolutions(t *testing.T) {
 		conflictNames: map[string]string{"/old": "old-copy"}, plan: syncer.Plan{Conflicts: []syncer.Conflict{{DestinationPath: "/old"}}},
 	}
 	w.toggle(&Model{})
-	if w.conflictNames != nil || len(w.plan.Conflicts) != 0 {
+	if len(w.plan.Conflicts) != 0 {
 		t.Fatalf("stale plan retained: %#v", w)
+	}
+	w.reconcileConflictNames(syncer.Plan{Conflicts: []syncer.Conflict{{DestinationPath: "/new", SuggestedPreserveAs: "new-copy"}}})
+	if _, stale := w.conflictNames["/old"]; stale || w.conflictNames["/new"] != "new-copy" {
+		t.Fatalf("reconciled names = %#v", w.conflictNames)
+	}
+	w.conflictNames["/new"] = "edited-copy"
+	w.reconcileConflictNames(syncer.Plan{Conflicts: []syncer.Conflict{{DestinationPath: "/new", SuggestedPreserveAs: "new-suggestion"}}})
+	if w.conflictNames["/new"] != "edited-copy" {
+		t.Fatalf("matching edit lost: %#v", w.conflictNames)
 	}
 }
 
@@ -247,5 +256,57 @@ func TestSyncCurrentProgressUpdatesStatusAndContinues(t *testing.T) {
 	cmd := m.applySyncProgress(syncProgressMsg{token: 2, progress: syncer.Progress{Completed: 1, Total: 3, Skill: "one", Action: "link"}, next: next})
 	if cmd == nil || !strings.Contains(m.status, "1/3") || !strings.Contains(m.status, "one") {
 		t.Fatalf("status=%q cmd=%v", m.status, cmd)
+	}
+}
+
+func TestSyncEarlierStageDoesNotSubmitStaleConflictResolutions(t *testing.T) {
+	w := syncWorkbenchModal{stage: syncStageVariants, conflictNames: map[string]string{"/old": "old-copy"}}
+	if got := w.resolutionsForPlan(); got != nil {
+		t.Fatalf("resolutions = %#v", got)
+	}
+	w.stage = syncStageConflicts
+	if got := w.resolutionsForPlan(); len(got) != 1 {
+		t.Fatalf("conflict resolutions = %#v", got)
+	}
+}
+
+func TestSyncDiscoveryErrorRestoresDestinationStage(t *testing.T) {
+	w := syncWorkbenchModal{token: 2, stage: syncStageDestinations, isLoading: true}
+	m := Model{syncToken: 2, syncInFlight: true, modal: w}
+	m.applySyncCandidates(syncCandidatesMsg{token: 2, err: errors.New("scan denied")})
+	got := m.modal.(syncWorkbenchModal)
+	if got.isLoading || got.stage != syncStageDestinations || !strings.Contains(m.status, "scan denied") {
+		t.Fatalf("modal=%#v status=%q", got, m.status)
+	}
+}
+
+func TestSyncCancelledResultReportsPartialOutcome(t *testing.T) {
+	m := Model{syncToken: 3}
+	m.applySyncResult(syncResultMsg{token: 3, result: syncer.Result{Cancelled: true, Succeeded: []syncer.SkillResult{{Name: "one"}}, Failed: []syncer.SkillResult{{Name: "two"}}}})
+	if !strings.Contains(m.status, "after 1 skills") || !strings.Contains(m.status, "1 failed") {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestSyncResultReportsReloadErrorWithSuccessfulCounts(t *testing.T) {
+	m := Model{syncToken: 3}
+	m.applySyncResult(syncResultMsg{token: 3, result: syncer.Result{Succeeded: []syncer.SkillResult{{Name: "one"}}}, reloadErr: errors.New("reload failed")})
+	if !strings.Contains(m.status, "synced 1") || !strings.Contains(m.status, "reload failed") {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestSyncMultipleDivergentGroupsNavigateIndependently(t *testing.T) {
+	w := syncWorkbenchModal{stage: syncStageVariants, groups: []syncer.NameGroup{
+		{Name: "one", Variants: []syncer.Candidate{{ID: "one:a"}, {ID: "one:b"}}},
+		{Name: "two", Variants: []syncer.Candidate{{ID: "two:a"}, {ID: "two:b"}}},
+	}, selected: map[string]bool{"one:a": true, "two:a": true}, variants: map[string]string{"one": "one:a", "two": "two:a"}}
+	w.move(1)
+	if w.index != 1 {
+		t.Fatalf("index = %d", w.index)
+	}
+	w.toggle(&Model{})
+	if w.variants["one"] != "one:a" || w.variants["two"] != "two:b" {
+		t.Fatalf("variants = %#v", w.variants)
 	}
 }

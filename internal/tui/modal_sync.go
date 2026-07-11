@@ -118,8 +118,9 @@ func (w syncWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if w.isApplying {
 		if msg.String() == "esc" || msg.String() == "q" {
 			m.cancelSyncWork()
-			m.syncToken++
-			return true, nil
+			m.status = "cancelling skill sync..."
+			m.modal = w
+			return false, nil
 		}
 		return false, nil
 	}
@@ -215,6 +216,13 @@ func (w syncWorkbenchModal) resolutions() []syncer.ConflictResolution {
 		result = append(result, syncer.ConflictResolution{DestinationPath: path, PreserveAs: name, Action: syncer.ConflictReplace})
 	}
 	return result
+}
+
+func (w syncWorkbenchModal) resolutionsForPlan() []syncer.ConflictResolution {
+	if w.stage != syncStageConflicts {
+		return nil
+	}
+	return w.resolutions()
 }
 
 func (w syncWorkbenchModal) advance(m *Model) tea.Cmd {
@@ -338,7 +346,18 @@ func (w syncWorkbenchModal) chosenCandidate(group syncer.NameGroup) syncer.Candi
 
 func (w *syncWorkbenchModal) invalidatePlan() {
 	w.plan = syncer.Plan{}
-	w.conflictNames = nil
+}
+
+func (w *syncWorkbenchModal) reconcileConflictNames(plan syncer.Plan) {
+	previous := w.conflictNames
+	w.conflictNames = make(map[string]string, len(plan.Conflicts))
+	for _, conflict := range plan.Conflicts {
+		name := previous[conflict.DestinationPath]
+		if name == "" {
+			name = conflict.SuggestedPreserveAs
+		}
+		w.conflictNames[conflict.DestinationPath] = name
+	}
 }
 
 func (w *syncWorkbenchModal) back() {

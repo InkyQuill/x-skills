@@ -19,6 +19,12 @@ func Pill(left, right string, props PillProps) string {
 	return edge.Render(left) + content.Render(props.Text) + edge.Render(right)
 }
 
+// JoinPills joins already-rendered pill strings verbatim; contents and any
+// ANSI sequences are preserved untouched.
+func JoinPills(pills []string, separator string) string {
+	return strings.Join(pills, separator)
+}
+
 type Shortcut struct {
 	ASCII   string
 	Unicode string

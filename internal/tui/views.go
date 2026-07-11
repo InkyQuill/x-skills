@@ -550,7 +550,7 @@ func renderRootChips(symbols symbols, chips []string, background lipgloss.Termin
 	for _, chip := range chips {
 		rendered = append(rendered, renderRootChip(symbols, chip, background))
 	}
-	return strings.Join(rendered, " ")
+	return tuiui.JoinPills(rendered, " ")
 }
 
 func renderRootChip(symbols symbols, chip string, background lipgloss.TerminalColor) string {

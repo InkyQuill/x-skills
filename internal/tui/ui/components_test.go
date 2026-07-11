@@ -9,6 +9,28 @@ import (
 	"github.com/muesli/termenv"
 )
 
+func TestJoinPills(t *testing.T) {
+	styled := "\x1b[38;5;24m~scope\x1b[0m"
+
+	for _, tt := range []struct {
+		name      string
+		pills     []string
+		separator string
+		want      string
+	}{
+		{name: "empty", pills: nil, separator: " ", want: ""},
+		{name: "single", pills: []string{styled}, separator: " ", want: styled},
+		{name: "multiple", pills: []string{styled, "plain "}, separator: " ", want: styled + " plain "},
+		{name: "custom separator", pills: []string{"a", "b"}, separator: " | ", want: "a | b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := JoinPills(tt.pills, tt.separator); got != tt.want {
+				t.Fatalf("JoinPills(%q, %q) = %q, want %q", tt.pills, tt.separator, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFooterLineRendersAndMutesToolHints(t *testing.T) {
 	profile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI256)

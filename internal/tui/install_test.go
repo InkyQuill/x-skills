@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +25,98 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestInstallArchiveStateChecksAreBoundedAndCoalesced(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	results := []remote.SearchResult{}
+	checkoutPaths := map[string]string{}
+	for repoIndex := range 6 {
+		owner := "acme"
+		repoName := fmt.Sprintf("skills-%d", repoIndex)
+		checkoutPath := t.TempDir()
+		checkoutPaths["https://github.com/"+owner+"/"+repoName+".git"] = checkoutPath
+		for skillIndex := range 2 {
+			name := fmt.Sprintf("skill-%d-%d", repoIndex, skillIndex)
+			path := "skills/" + name
+			writeTUITestRemoteSkill(t, checkoutPath, path, name, "Incoming.")
+			archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), name, "Archived.")
+			if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+				SourceType: remote.SourceTypeGitHub,
+				Owner:      owner,
+				Repo:       repoName,
+				SkillPath:  path,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			results = append(results, remote.SearchResult{Name: name, Owner: owner, Repo: repoName, Path: path})
+		}
+	}
+
+	var active atomic.Int64
+	var maxActive atomic.Int64
+	var mu sync.Mutex
+	calls := map[string]int{}
+	previousCheckout := installArchiveStateCheckout
+	installArchiveStateCheckout = func(ctx context.Context, _ *remote.CheckoutCache, source remote.GitSource) (remote.Checkout, error) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for {
+			maximum := maxActive.Load()
+			if current <= maximum || maxActive.CompareAndSwap(maximum, current) {
+				break
+			}
+		}
+		mu.Lock()
+		calls[source.CloneURL+"@"+source.Ref]++
+		mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return remote.Checkout{}, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+		return remote.Checkout{Path: checkoutPaths[source.CloneURL], Source: source}, nil
+	}
+	t.Cleanup(func() { installArchiveStateCheckout = previousCheckout })
+
+	m := New(cfg)
+	m.install.checkouts = remote.NewCheckoutCache(t.TempDir())
+	msg := m.checkInstallArchiveStates(t.Context(), 7, results, 3)
+
+	if maxActive.Load() > 3 {
+		t.Fatalf("max concurrent checks = %d, want <= 3", maxActive.Load())
+	}
+	if got := calls["https://github.com/acme/skills-0.git@"]; got != 1 {
+		t.Fatalf("checkout calls = %d, want 1", got)
+	}
+	if len(msg.results) != len(results) {
+		t.Fatalf("state results = %d, want %d", len(msg.results), len(results))
+	}
+	for i, result := range msg.results {
+		if result.Identity != installArchiveIdentityFromResult(results[i]) {
+			t.Fatalf("result %d identity = %#v, want input order %#v", i, result.Identity, installArchiveIdentityFromResult(results[i]))
+		}
+	}
+}
+
+func TestInstallRowShowsCheckFailed(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.width = 120
+	m.height = 35
+	m.install.Results = []installResultView{{
+		Result:            remote.SearchResult{Name: "broken", Owner: "acme", Repo: "skills"},
+		ArchiveState:      remote.ArchiveStateArchived,
+		ArchiveCheckError: "checkout failed",
+	}}
+
+	view := plain(m.View())
+	if !strings.Contains(view, "check failed") {
+		t.Fatalf("install row missing check failed pill:\n%s", view)
+	}
+	if !strings.Contains(view, "checkout failed") {
+		t.Fatalf("install inspector missing check error:\n%s", view)
+	}
+}
 
 func TestInstallTabSwitchesAndRendersShell(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
@@ -1086,7 +1179,7 @@ func TestInstallSearchResultAsyncStateCheckMarksUpdateAvailable(t *testing.T) {
 	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
 		t.Fatalf("initial archive state = %q, want archived", got)
 	}
-	stateMsg := cmd().(installArchiveStateMsg)
+	stateMsg := cmd().(installArchiveStatesMsg)
 	updated, _ = m.Update(stateMsg)
 	m = mustModel(t, updated)
 	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateUpdateAvailable {

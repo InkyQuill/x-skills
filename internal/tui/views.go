@@ -213,6 +213,7 @@ func installInspectorSections(m Model) []inspectorSection {
 
 	stateRows := []inspectorRow{}
 	stateRows = appendInstallArchiveInspectorRow(stateRows, row.ArchiveState)
+	stateRows = appendTextInspectorRow(stateRows, "Check error", row.ArchiveCheckError)
 	stateRows = appendInstallAuditInspectorRow(stateRows, row.AuditPill)
 
 	repoRows := []inspectorRow{}
@@ -473,6 +474,15 @@ func renderInstallRows(m Model, width int) []string {
 			}, rowSegment{
 				render: func(background lipgloss.TerminalColor) string {
 					return renderInstallStatePillWithBackground(row.ArchiveState, background)
+				},
+			})
+		}
+		if row.ArchiveCheckError != "" {
+			segments = append(segments, rowSegment{
+				text: "  ",
+			}, rowSegment{
+				render: func(background lipgloss.TerminalColor) string {
+					return renderWithOptionalBackground(mutedStyle, "check failed", background)
 				},
 			})
 		}

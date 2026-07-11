@@ -121,8 +121,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.install.archiveInFlightToken = 0
 		}
 		return m, nil
-	case installArchiveStateMsg:
-		m.applyInstallArchiveStateResult(msg)
+	case installArchiveStatesMsg:
+		m.applyInstallArchiveStateResults(msg)
 		return m, nil
 	case installUseMsg:
 		return m, m.applyInstallUseResult(msg)

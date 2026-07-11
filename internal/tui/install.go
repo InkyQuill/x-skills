@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -126,10 +127,15 @@ func installArchiveOperationCmd(operation installArchiveRowOperation, timeout ti
 	}
 }
 
-type installArchiveStateMsg struct {
-	token    int
-	identity installArchiveIdentity
-	state    string
+type installArchiveStateResult struct {
+	Identity installArchiveIdentity
+	State    string
+	Err      error
+}
+
+type installArchiveStatesMsg struct {
+	token   int
+	results []installArchiveStateResult
 }
 
 type installUseMsg struct {
@@ -206,9 +212,10 @@ type installUseBatchContinuation struct {
 }
 
 type installResultView struct {
-	Result       remote.SearchResult
-	ArchiveState string
-	AuditPill    string
+	Result            remote.SearchResult
+	ArchiveState      string
+	ArchiveCheckError string
+	AuditPill         string
 }
 
 const (
@@ -222,6 +229,9 @@ var (
 	installApplyArchive              = remote.ApplyArchive
 	installUsePrepareArchiveRollback = prepareInstallUseArchiveRollback
 	installUseRollbackArchive        = rollbackInstallUseArchive
+	installArchiveStateCheckout      = func(ctx context.Context, cache *remote.CheckoutCache, source remote.GitSource) (remote.Checkout, error) {
+		return cache.Checkout(ctx, source)
+	}
 )
 
 func newInstallState() installState {
@@ -1673,7 +1683,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 		return nil
 	}
 	m.install.Results = make([]installResultView, 0, len(msg.results))
-	var stateChecks []tea.Cmd
+	stateCheckResults := make([]remote.SearchResult, 0, len(msg.results))
 	for _, result := range msg.results {
 		auditKey := installAuditKey(result)
 		audit := m.install.Audit[auditKey]
@@ -1688,9 +1698,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 			AuditPill:    installAuditPill(audit, m.opts),
 		})
 		if state == remote.ArchiveStateArchived {
-			if cmd := m.installArchiveStateCheck(result, msg.token); cmd != nil {
-				stateChecks = append(stateChecks, cmd)
-			}
+			stateCheckResults = append(stateCheckResults, result)
 		}
 	}
 	count := len(msg.results)
@@ -1705,54 +1713,128 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 		m.status = fmt.Sprintf("found %d results for %q", count, msg.query)
 		m.install.Message = m.status
 	}
-	return tea.Batch(stateChecks...)
-}
-
-func (m *Model) installArchiveStateCheck(result remote.SearchResult, token int) tea.Cmd {
-	archivePath, err := repo.SkillPath(m.cfg, result.Name)
-	if err != nil {
+	if len(stateCheckResults) == 0 {
 		return nil
 	}
-	existing, ok, err := remote.ReadSourceMetadata(archivePath)
-	if err != nil || !ok || !existing.SameIdentity(m.installSourceMetadata(result)) {
-		return nil
-	}
-	source, err := m.gitSourceForInstall(result)
-	if err != nil {
-		return nil
-	}
-	checkouts := m.ensureInstallCheckoutCache()
-	if checkouts == nil {
-		return nil
-	}
-	cfg := m.cfg
-	identity := installArchiveIdentityFromResult(result)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
 		defer cancel()
-		checkout, err := checkouts.Checkout(ctx, source)
-		if err != nil {
-			return installArchiveStateMsg{token: token, identity: identity}
-		}
-		found, err := checkout.FindSkillContext(ctx, result.Name, result.Path)
-		if err != nil {
-			return installArchiveStateMsg{token: token, identity: identity}
-		}
-		plan, err := remote.PlanArchive(cfg, found.SkillDir, result.Name, found.Metadata)
-		if err != nil {
-			return installArchiveStateMsg{token: token, identity: identity}
-		}
-		return installArchiveStateMsg{token: token, identity: identity, state: plan.State}
+		return m.checkInstallArchiveStates(ctx, msg.token, stateCheckResults, 3)
 	}
 }
 
-func (m *Model) applyInstallArchiveStateResult(msg installArchiveStateMsg) {
-	if msg.token != m.install.searchToken || msg.state == "" {
+type installArchiveStateGroup struct {
+	source  remote.GitSource
+	indexes []int
+}
+
+func (m Model) checkInstallArchiveStates(
+	ctx context.Context,
+	token int,
+	results []remote.SearchResult,
+	limit int,
+) installArchiveStatesMsg {
+	msg := installArchiveStatesMsg{
+		token:   token,
+		results: make([]installArchiveStateResult, len(results)),
+	}
+	groups := map[string]*installArchiveStateGroup{}
+	groupOrder := []string{}
+	for i, result := range results {
+		msg.results[i].Identity = installArchiveIdentityFromResult(result)
+		source, err := m.gitSourceForInstall(result)
+		if err != nil {
+			msg.results[i].Err = err
+			continue
+		}
+		key := normalizedInstallSourceKey(source)
+		group, ok := groups[key]
+		if !ok {
+			group = &installArchiveStateGroup{source: source, indexes: []int{}}
+			groups[key] = group
+			groupOrder = append(groupOrder, key)
+		}
+		group.indexes = append(group.indexes, i)
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	checkouts := m.ensureInstallCheckoutCache()
+	if checkouts == nil {
+		for i := range msg.results {
+			if msg.results[i].Err == nil {
+				msg.results[i].Err = errors.New("archive state checkout cache is unavailable")
+			}
+		}
+		return msg
+	}
+
+	semaphore := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for _, key := range groupOrder {
+		group := groups[key]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				for _, i := range group.indexes {
+					msg.results[i].Err = ctx.Err()
+				}
+				return
+			}
+
+			checkout, err := installArchiveStateCheckout(ctx, checkouts, group.source)
+			if err != nil {
+				for _, i := range group.indexes {
+					msg.results[i].Err = err
+				}
+				return
+			}
+			for _, i := range group.indexes {
+				result := results[i]
+				found, err := checkout.FindSkillContext(ctx, result.Name, result.Path)
+				if err != nil {
+					msg.results[i].Err = err
+					continue
+				}
+				plan, err := remote.PlanArchive(m.cfg, found.SkillDir, result.Name, found.Metadata)
+				if err != nil {
+					msg.results[i].Err = err
+					continue
+				}
+				msg.results[i].State = plan.State
+			}
+		}()
+	}
+	wg.Wait()
+	return msg
+}
+
+func normalizedInstallSourceKey(source remote.GitSource) string {
+	cloneURL := strings.TrimSuffix(strings.TrimSpace(source.CloneURL), "/")
+	return cloneURL + "@" + strings.TrimSpace(source.Ref)
+}
+
+func (m *Model) applyInstallArchiveStateResults(msg installArchiveStatesMsg) {
+	if msg.token != m.install.searchToken {
 		return
 	}
-	for i := range m.install.Results {
-		if installArchiveIdentityFromResult(m.install.Results[i].Result) == msg.identity {
-			m.install.Results[i].ArchiveState = msg.state
+	for _, result := range msg.results {
+		for i := range m.install.Results {
+			if installArchiveIdentityFromResult(m.install.Results[i].Result) != result.Identity {
+				continue
+			}
+			if result.Err != nil {
+				m.install.Results[i].ArchiveCheckError = result.Err.Error()
+				continue
+			}
+			if result.State != "" {
+				m.install.Results[i].ArchiveState = result.State
+				m.install.Results[i].ArchiveCheckError = ""
+			}
 		}
 	}
 }

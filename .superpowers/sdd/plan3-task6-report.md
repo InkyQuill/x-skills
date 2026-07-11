@@ -40,3 +40,6 @@
 - Added selectable multi-conflict navigation. Each conflict can be revisited and edited independently.
 - Nested restore modals retain ownership of their plan while navigating backward; final preview cancellation and application quit close staging, while apply consumes the plan through the manifest engine.
 - Added regression tests for piped non-TTY conflict input, finalized destructive details, normalization-only confirmation, staging cleanup, back navigation, and multi-conflict selection.
+- Destructive TUI confirmation now reflects executable work: `RemovalsBlocked` explanatory normalizations/removals remain visible in the preview but do not trigger a confirmation for operations apply will skip.
+- CLI and TUI completion summaries classify `ChangeMigrate` and `ChangeRemove` by kind across both normalization and removal result slices, so full-restore preservation is reported as migration rather than removal.
+- Added focused regressions for blocked-normalization confirmation and mixed/full-restore result counting.

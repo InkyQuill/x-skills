@@ -120,6 +120,47 @@ func TestRestoreNormalizationOnlyRequiresDestructiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestRestoreBlockedNormalizationsDoNotRequireDestructiveConfirmation(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Unavailable: []manifest.UnavailableSkill{{Name: "missing", Reason: "unavailable"}},
+		Normalizations: []manifest.Change{{
+			Kind: manifest.ChangeRemove,
+			Name: "blocked",
+			Path: "/project/.agents/skills/blocked",
+		}},
+		RemovalsBlocked: true,
+	}
+	m.openRestorePlan(plan)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("safe restore apply command is nil")
+	}
+	if _, ok := m.modal.(restoreConfirmModal); ok {
+		t.Fatal("blocked normalization opened destructive confirmation")
+	}
+}
+
+func TestRestoreCompletionSummaryCountsChangesByKind(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.restoreToken = 1
+	result := manifest.RestoreResult{
+		Normalizations: []manifest.Change{
+			{Kind: manifest.ChangeMigrate},
+			{Kind: manifest.ChangeRemove},
+		},
+		Removals: []manifest.Change{
+			{Kind: manifest.ChangeMigrate},
+			{Kind: manifest.ChangeRemove},
+		},
+	}
+	m.applyRestoreResult(restoreApplyMsg{token: 1, result: result})
+	if m.status != "restored 0 links, 2 migrations, 2 removals" {
+		t.Fatalf("restore status = %q", m.status)
+	}
+}
+
 func TestRestoreDestructiveConfirmationShowsChosenArchiveName(t *testing.T) {
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	plan := manifest.RestorePlan{

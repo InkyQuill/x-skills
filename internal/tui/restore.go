@@ -368,11 +368,12 @@ func (m *Model) applyRestoreResult(msg restoreApplyMsg) tea.Cmd {
 		m.status = "restore failed: " + msg.err.Error()
 		return nil
 	}
+	migrations, removals := restoreResultChangeCounts(msg.result)
 	m.status = fmt.Sprintf(
 		"restored %d links, %d migrations, %d removals",
 		len(msg.result.Additions),
-		len(msg.result.Normalizations),
-		len(msg.result.Removals),
+		migrations,
+		removals,
 	)
 	if msg.reloadErr != nil {
 		m.status += "; refresh failed: " + msg.reloadErr.Error()
@@ -433,7 +434,24 @@ func restoreTUIChangeLine(change manifest.Change) string {
 }
 
 func restorePlanIsDestructive(plan manifest.RestorePlan) bool {
+	if plan.RemovalsBlocked {
+		return false
+	}
 	return len(plan.Normalizations) > 0 || len(plan.Removals) > 0
+}
+
+func restoreResultChangeCounts(result manifest.RestoreResult) (migrations, removals int) {
+	changes := append(append([]manifest.Change{}, result.Normalizations...), result.Removals...)
+	for _, change := range changes {
+		if change.Kind == manifest.ChangeMigrate {
+			migrations++
+			continue
+		}
+		if change.Kind == manifest.ChangeRemove {
+			removals++
+		}
+	}
+	return migrations, removals
 }
 
 func closeRestoreModalPlan(current modal) {

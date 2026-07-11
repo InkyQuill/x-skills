@@ -62,6 +62,26 @@ func TestRestoreFullPrintsPlanAndRequiresConfirmation(t *testing.T) {
 	}
 }
 
+func TestRestoreFullSummaryCountsMigratedExtraByKind(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "extra", "Extra.")
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "-y", "restore", "--full", "--at", ".Ag"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "restored: 0 links, 1 migrations, 0 removals") {
+		t.Fatalf("full restore summary = %q", out.String())
+	}
+}
+
 func TestRestoreConflictRequiresExplicitRenameEvenWithYes(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

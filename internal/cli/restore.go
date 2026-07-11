@@ -61,12 +61,13 @@ func newRestoreCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			migrations, removals := restoreResultChangeCounts(result)
 			_, err = fmt.Fprintf(
 				cmd.OutOrStdout(),
 				"restored: %d links, %d migrations, %d removals\n",
 				len(result.Additions),
-				len(result.Normalizations),
-				len(result.Removals),
+				migrations,
+				removals,
 			)
 			return err
 		},
@@ -74,6 +75,20 @@ func newRestoreCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringSliceVar(&selectors, "at", nil, "explicit project Skills Folder destination (repeatable)")
 	cmd.Flags().BoolVar(&full, "full", false, "exactly reconcile selected project Skills Folders")
 	return cmd
+}
+
+func restoreResultChangeCounts(result manifest.RestoreResult) (migrations, removals int) {
+	changes := append(append([]manifest.Change{}, result.Normalizations...), result.Removals...)
+	for _, change := range changes {
+		if change.Kind == manifest.ChangeMigrate {
+			migrations++
+			continue
+		}
+		if change.Kind == manifest.ChangeRemove {
+			removals++
+		}
+	}
+	return migrations, removals
 }
 
 func printRestorePlan(cmd *cobra.Command, plan manifest.RestorePlan) {

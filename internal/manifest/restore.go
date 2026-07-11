@@ -83,6 +83,7 @@ func (plan *RestorePlan) Discard() error { return plan.Close() }
 
 type RestoreResult struct {
 	Additions       []Change
+	Normalizations  []Change
 	Removals        []Change
 	Unavailable     []UnavailableSkill
 	RemovalsBlocked bool
@@ -190,13 +191,19 @@ func ApplyRestore(ctx context.Context, cfg config.Config, plan RestorePlan) (res
 		}
 		mutated = true
 	}
-	for _, change := range plan.Normalizations {
-		if err := applyRestoreRemoval(ctx, cfg, change); err != nil {
-			return result, err
+	if len(plan.Unavailable) == 0 {
+		for _, change := range plan.Normalizations {
+			if err := applyRestoreRemoval(ctx, cfg, change); err != nil {
+				return result, err
+			}
+			mutated = true
+			result.Normalizations = append(result.Normalizations, change)
 		}
-		mutated = true
 	}
 	for _, change := range plan.Additions {
+		if len(plan.Unavailable) > 0 && hasNormalizationAtPath(plan.Normalizations, change.Path) {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -223,6 +230,12 @@ func ApplyRestore(ctx context.Context, cfg config.Config, plan RestorePlan) (res
 		result.Removals = append(result.Removals, change)
 	}
 	return result, nil
+}
+
+func hasNormalizationAtPath(changes []Change, path string) bool {
+	return slices.ContainsFunc(changes, func(change Change) bool {
+		return filepath.Clean(change.Path) == filepath.Clean(path)
+	})
 }
 
 func validateRestorePlanForApply(cfg config.Config, plan RestorePlan) error {
@@ -379,27 +392,28 @@ func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, des
 			if filepath.Clean(skill.Root.Path) != filepath.Clean(destination.Path) {
 				continue
 			}
-			if _, keep := desired[skill.Name]; keep {
+			occurrenceName := filepath.Base(skill.Path)
+			if _, keep := desired[occurrenceName]; keep {
 				continue
 			}
 			kind := ChangeRemove
 			archiveName := ""
 			if skill.Status == actions.StatusUnmanaged {
-				kind, archiveName = ChangeMigrate, skill.Name
-				archive := filepath.Join(cfg.ArchiveSkillsRoot(), skill.Name)
+				kind, archiveName = ChangeMigrate, occurrenceName
+				archive := filepath.Join(cfg.ArchiveSkillsRoot(), occurrenceName)
 				if _, err := os.Lstat(archive); err == nil {
 					activeFP, activeErr := fingerprint.Directory(skill.Path)
 					archiveFP, archiveErr := fingerprint.Directory(archive)
 					if activeErr != nil || archiveErr != nil || activeFP != archiveFP {
 						archiveName = ""
-						suggested := availableRestoreArchiveName(cfg, skill.Name+"-preserved")
-						conflicts = append(conflicts, MigrationConflict{Name: skill.Name, Path: skill.Path, ExistingArchive: archive, SuggestedName: suggested})
+						suggested := availableRestoreArchiveName(cfg, occurrenceName+"-preserved")
+						conflicts = append(conflicts, MigrationConflict{Name: occurrenceName, Path: skill.Path, ExistingArchive: archive, SuggestedName: suggested})
 					}
 				} else if !errors.Is(err, os.ErrNotExist) {
 					return nil, nil, err
 				}
 			}
-			changes = append(changes, Change{Kind: kind, Name: skill.Name, Path: skill.Path, Destination: destination, ArchiveName: archiveName})
+			changes = append(changes, Change{Kind: kind, Name: occurrenceName, Path: skill.Path, Destination: destination, ArchiveName: archiveName})
 		}
 	}
 	return changes, conflicts, nil

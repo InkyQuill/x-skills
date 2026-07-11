@@ -261,6 +261,135 @@ func TestApplyRestoreRejectsChangedPlannedPath(t *testing.T) {
 	}
 }
 
+func TestApplyRestoreUnavailableBlocksDesiredNormalization(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "available"), "available")
+	if err := os.MkdirAll(root.Path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(root.Path, "available")
+	if err := os.Symlink(filepath.Join(project, "gone"), broken); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "available", Source: Source{Type: SourceArchive}}, {Name: "missing", Source: Source{Type: SourceArchive}}}}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ApplyRestore(context.Background(), cfg, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Normalizations) != 0 {
+		t.Fatalf("normalizations = %#v", result.Normalizations)
+	}
+	if _, err := os.Lstat(broken); err != nil {
+		t.Fatalf("broken desired occurrence was removed: %v", err)
+	}
+}
+
+func TestPlanRestoreUsesManagedOccurrenceNameInsteadOfFrontmatterName(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name"), "upstream-name")
+	if err := os.MkdirAll(root.Path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name"), filepath.Join(root.Path, "custom-name")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "custom-name", Source: Source{Type: SourceArchive}}}}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plan.Close()
+	if len(plan.Removals) != 0 || len(plan.Normalizations) != 0 {
+		t.Fatalf("plan = %#v", plan)
+	}
+}
+
+func TestPlanAndApplyRestoreUseUnmanagedOccurrenceName(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	makeRestoreSkill(t, filepath.Join(root.Path, "custom-name"), "upstream-name")
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Removals) != 1 || plan.Removals[0].Name != "custom-name" {
+		t.Fatalf("removals = %#v", plan.Removals)
+	}
+	if _, err := ApplyRestore(context.Background(), cfg, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlanAndApplyRestoreUseManagedExtraOccurrenceName(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name"), "upstream-name")
+	if err := os.MkdirAll(root.Path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(root.Path, "custom-name")
+	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name"), active); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Removals) != 1 || plan.Removals[0].Name != "custom-name" || plan.Removals[0].Kind != ChangeRemove {
+		t.Fatalf("removals = %#v", plan.Removals)
+	}
+	if _, err := ApplyRestore(context.Background(), cfg, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("active extra remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name", "SKILL.md")); err != nil {
+		t.Fatal("archive removed")
+	}
+}
+
+func TestApplyRestoreReportsSuccessfulNormalizationBeforeLaterFailure(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	agents := restoreRoot(t, cfg, config.TargetAgents)
+	codex := restoreRoot(t, cfg, config.TargetCodex)
+	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"), "wanted")
+	makeRestoreSkill(t, filepath.Join(agents.Path, "wanted"), "wanted")
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{agents, codex}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeRestoreSkill(t, filepath.Join(codex.Path, "wanted"), "wanted")
+	result, err := ApplyRestore(context.Background(), cfg, plan)
+	if err == nil {
+		t.Fatal("ApplyRestore error = nil")
+	}
+	if len(result.Normalizations) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestPlanRestoreBlocksFullRemovalsWhenDesiredSkillUnavailable(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

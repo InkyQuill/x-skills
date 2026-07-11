@@ -52,3 +52,18 @@
 - `staticcheck ./...` — pass.
 - `go test -race -count=1 ./...` — pass.
 - `git diff --check` — pass.
+
+## Final review remediation
+
+- Moved the unavailable-state gate ahead of every destructive desired-entry normalization. Additions whose destination depends on a skipped normalization are also withheld, while unrelated missing-link additions remain safe to apply.
+- Separated filesystem occurrence identity from `SKILL.md` frontmatter identity during full classification. Desired membership, archive naming, exact-path validation, migration conflicts, and unlink apply now consistently use the Skills Folder entry basename.
+- Added `RestoreResult.Normalizations`; every completed normalization is recorded immediately, so a later addition or cleanup failure returns an accurate partial result.
+- Added focused regressions for unavailable state with a broken desired occurrence, renamed managed desired and extra occurrences, renamed unmanaged extras, and successful normalization reporting before an injected later failure.
+
+### Final verification
+
+- `go test ./internal/manifest -count=1` — pass.
+- `go vet ./...` — pass.
+- `staticcheck ./...` — pass.
+- `go test -race -count=1 ./...` — pass.
+- `git diff --check` — pass.

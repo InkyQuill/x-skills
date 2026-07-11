@@ -137,6 +137,31 @@ func TestDiscoverRejectsBrokenDestinationSymlink(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsExistingNonDirectoryDestination(t *testing.T) {
+	t.Parallel()
+
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	filePath := filepath.Join(project, "destination-file")
+	if err := os.WriteFile(filePath, []byte("not a folder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(project, "destination-symlink")
+	if err := os.Symlink(filePath, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, destinationPath := range []string{filePath, symlinkPath} {
+		destinationPath := destinationPath
+		t.Run(filepath.Base(destinationPath), func(t *testing.T) {
+			_, err := Discover(cfg, []roots.ActiveRoot{{Path: destinationPath, Consumers: []string{"pi"}}})
+			if err == nil || !strings.Contains(err.Error(), "resolve destination Skills Folder") {
+				t.Fatalf("Discover() error = %v, want non-directory destination error", err)
+			}
+		})
+	}
+}
+
 func configuredTestConfig(t *testing.T, project, home string) config.Config {
 	t.Helper()
 	configDir := filepath.Join(home, ".x-skills")

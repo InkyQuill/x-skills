@@ -121,6 +121,13 @@ func canonicalPath(path string) (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err == nil {
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return "", err
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("resolved path %q is not a directory", resolved)
+		}
 		return filepath.Clean(resolved), nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {

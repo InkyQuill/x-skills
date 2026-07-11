@@ -36,3 +36,9 @@ Addressed the Task 1 review findings with failing regressions before production 
 - Added focused divergent-archive, invalid-consumer, and broken-destination tests.
 
 Fresh remediation verification passed: `gofmt -l .`, `go vet ./...`, `staticcheck ./...`, `go test -race -count=1 ./...`, and `git diff --check`.
+
+### Final Re-review Remediation
+
+Destination canonicalization now verifies that a fully resolved existing path is a directory. Existing regular files and symlinks resolving to regular files return a contextual destination Skills Folder error, while genuinely nonexistent destination directories remain supported. Both cases were captured in a focused failing regression before the implementation change.
+
+Fresh final verification passed: focused `internal/syncer` regression, `gofmt -l .`, `go vet ./...`, `staticcheck ./...`, `go test -race -count=1 ./...`, and `git diff --check`.

@@ -2,7 +2,6 @@
 
 ## Planned implementation slices
 
-- [Interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md): aggregate project candidates, compatibility-aware defaults, conflict preservation, CLI/TUI sync, and general archive rename.
 - [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md): shared footer/layout/text/pill helpers and color-independent statuses.
 
 ## TUI And Agent Roots
@@ -16,10 +15,6 @@
 - Add option to persist multi-selection across view switches. Context: parity design resets selections when changing tabs for safety, but if users find this workflow awkward, we can introduce configuration or state tracking to keep selections per-tab. Evidence: design discussion for Go TUI parity.
 - Add command palette (triggered by `:`). Context: direct shortcuts and a help modal are sufficient for parity, but a command palette can be introduced if the keymap grows too large to manage. Evidence: design discussion for Go TUI parity.
 - Add release/GitHub installer support for an `xs` shortcut when the command name is free. Context: user wants `x-skills` installation to create a short symlink/alias, and this belongs in release packaging rather than agent skill workflows. Evidence: `command -v xs` returned empty locally; install strategy is deferred to GitHub/release packaging.
-
-## Commands and tools
-
-- Implement interactive `sync` in CLI and TUI. `x-skills sync --at .Cl` aggregates skills from every non-destination project Skills Folder, preselects candidates according to compatibility, lets the user exclude skills and resolve divergent variants, migrates unmanaged skills, and preserves destination conflicts under editable archive names. Non-interactive use requires `--all` or repeated `--skill`; `-y` never resolves ambiguity. Plan: [interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md).
 
 ## TUI Visual Inspiration
 

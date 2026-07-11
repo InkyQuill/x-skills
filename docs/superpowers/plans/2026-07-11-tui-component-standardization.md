@@ -42,7 +42,7 @@
 **Interfaces:**
 - Produces: `ui.FooterLine(ascii bool, keyStyle, mutedStyle lipgloss.Style, shortcuts []ui.Shortcut) string`.
 
-- [ ] **Step 1: Write exact footer tests**
+- [x] **Step 1: Write exact footer tests**
 
 ```go
 func TestFooterLineRendersAndMutesToolHints(t *testing.T) {
@@ -53,7 +53,7 @@ func TestFooterLineRendersAndMutesToolHints(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Implement the helper**
+- [x] **Step 2: Implement the helper**
 
 ```go
 func FooterLine(ascii bool, keyStyle, mutedStyle lipgloss.Style, shortcuts []Shortcut) string {
@@ -61,11 +61,11 @@ func FooterLine(ascii bool, keyStyle, mutedStyle lipgloss.Style, shortcuts []Sho
 }
 ```
 
-- [ ] **Step 3: Replace every repeated footer expression**
+- [x] **Step 3: Replace every repeated footer expression**
 
 Use `rg -n 'mutedStyle\.Render\(renderCommandPalette' internal/tui` as the work list. After migration, remove `renderCommandPalette` if no caller remains.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 go test ./internal/tui/ui ./internal/tui -count=1
@@ -87,19 +87,19 @@ git commit -m "refactor(tui): standardize modal footers"
 **Interfaces:**
 - Produces: `ui.ClampIndex(index, count int) int`, `ui.ClampScroll(scroll, bodyHeight, viewportHeight int) int`, and `ui.VisibleLines(lines []string, scroll, height int) []string`.
 
-- [ ] **Step 1: Write boundary tests**
+- [x] **Step 1: Write boundary tests**
 
 Cover negative values, empty lists, exact fits, excessive scroll, and a huge repeated page-down count. Assert helpers return new values without mutating inputs.
 
-- [ ] **Step 2: Implement pure helpers**
+- [x] **Step 2: Implement pure helpers**
 
 Use integer comparisons only; no Bubble Tea or styles enter this package. `VisibleLines` clamps before slicing and returns an empty slice for non-positive height.
 
-- [ ] **Step 3: Migrate modal call sites**
+- [x] **Step 3: Migrate modal call sites**
 
 Replace `clampModalIndex`, `clampScroll`, and `visibleModalBody`; add a small `scrollState.Handle(msg tea.KeyMsg, bodyHeight, viewportHeight int) bool` in `modal.go` for Bubble Tea key translation. Clamp `conflictDiffModal` in Update as well as View.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 go test ./internal/tui/ui ./internal/tui -count=1 -run 'Clamp|Scroll|Modal'
@@ -119,15 +119,15 @@ git commit -m "refactor(tui): centralize modal viewport math"
 **Interfaces:**
 - Produces: `ui.TruncateANSI(value string, width int) string` and `ui.RenderWithBackground(style lipgloss.Style, background lipgloss.TerminalColor, value string) string`.
 
-- [ ] **Step 1: Move existing tests before implementation**
+- [x] **Step 1: Move existing tests before implementation**
 
 Copy current truncation assertions into `ui/text_test.go`, including ANSI sequences, wide runes, zero width, and exact width. Add optional-background tests with `lipgloss.NoColor{}`.
 
-- [ ] **Step 2: Move implementations without semantic changes**
+- [x] **Step 2: Move implementations without semantic changes**
 
 Rename call sites to `tuiui.TruncateANSI` and `tuiui.RenderWithBackground`. Do not retain wrapper functions in `tui`; compilation should identify every caller.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 go test ./internal/tui/ui ./internal/tui -count=1
@@ -145,15 +145,15 @@ git commit -m "refactor(tui): share ANSI text helpers"
 **Interfaces:**
 - Produces: `ui.JoinPills(pills []string, separator string) string`.
 
-- [ ] **Step 1: Write join tests**
+- [x] **Step 1: Write join tests**
 
 Assert empty, single, and multiple rendered pill strings; do not trim ANSI or pill contents.
 
-- [ ] **Step 2: Implement and migrate**
+- [x] **Step 2: Implement and migrate**
 
 Keep scope-to-color and `roots.ActiveRoot` decisions in `tui.renderRootChip`; move only joining rendered chips to `ui.JoinPills`.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 go test ./internal/tui/ui ./internal/tui -count=1 -run 'Pill|RootChip'
@@ -172,15 +172,15 @@ git commit -m "refactor(tui): share pill list rendering"
 **Interfaces:**
 - Managed, unmanaged, and broken statuses receive distinct ASCII and Unicode glyph/text pairs.
 
-- [ ] **Step 1: Add `NO_COLOR` render tests**
+- [x] **Step 1: Add `NO_COLOR` render tests**
 
 Render one row of each status with `NO_COLOR=1` and assert the plain output differs without relying on descriptions or paths.
 
-- [ ] **Step 2: Assign semantic symbols**
+- [x] **Step 2: Assign semantic symbols**
 
 Use `✓ managed`, `◇ unmanaged`, and `× broken` in Unicode; use `+ managed`, `? unmanaged`, and `x broken` in ASCII. Keep selection/cursor markers separate from status markers.
 
-- [ ] **Step 3: Verify snapshots and commit**
+- [x] **Step 3: Verify snapshots and commit**
 
 ```bash
 NO_COLOR=1 go test ./internal/tui -count=1 -run 'NoColor|Status'
@@ -198,7 +198,7 @@ git commit -m "fix(tui): distinguish statuses without color"
 **Interfaces:**
 - None; documentation and verification only.
 
-- [ ] **Step 1: Search for duplicated helpers**
+- [x] **Step 1: Search for duplicated helpers**
 
 Run:
 
@@ -208,7 +208,7 @@ rg -n 'renderCommandPalette|clampModalIndex|visibleModalBody|func truncate\(|ren
 
 Expected: no old helper definitions or call sites.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 ```bash
 gofmt -w internal/tui
@@ -220,11 +220,11 @@ staticcheck ./...
 
 Expected: PASS.
 
-- [ ] **Step 3: Record deferred enhancement seams**
+- [x] **Step 3: Record deferred enhancement seams**
 
 In `docs/backlog.md`, keep mouse support, fuzzy ranking, themes, command palette, and persistent per-page selection as separate future features. Note their new seams: semantic components in `ui`, pure filter ranking boundary, and centralized key/action descriptions. Do not mark those features implemented.
 
-- [ ] **Step 4: Update the review and commit**
+- [x] **Step 4: Update the review and commit**
 
 Mark the standardization section of `docs/tui-review.md` complete with the verification commands.
 

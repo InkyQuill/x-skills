@@ -665,7 +665,7 @@ func renderStatus(m Model, width int) string {
 		lines = append(lines, accentStyle.Render("/ filter: "+m.filter.Query+"_"))
 		lines = append(lines, tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{{ASCII: "enter", Unicode: "↵", Label: "accept"}, {ASCII: "esc", Unicode: "Esc", Label: "clear/exit"}}))
 	}
-	lines = append(lines, mutedStyle.Render(commandPalette(m)))
+	lines = append(lines, commandPalette(m))
 	for i, line := range lines {
 		lines[i] = tuiui.TruncateANSI(line, width)
 	}
@@ -675,7 +675,7 @@ func renderStatus(m Model, width int) string {
 func commandPalette(m Model) string {
 	switch m.view {
 	case ViewRepo:
-		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "details"},
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
@@ -689,7 +689,7 @@ func commandPalette(m Model) string {
 			{ASCII: "q", Label: "quit"},
 		})
 	case ViewDoctor:
-		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "details"},
 			{ASCII: "f", Label: "fix"},
 			{ASCII: "^R", Label: "refresh"},
@@ -697,7 +697,7 @@ func commandPalette(m Model) string {
 			{ASCII: "q", Label: "quit"},
 		})
 	case ViewInstall:
-		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "preview"},
 			{ASCII: "space", Label: "select"},
 			{ASCII: "/", Label: "search"},
@@ -710,7 +710,7 @@ func commandPalette(m Model) string {
 			{ASCII: "q", Label: "quit"},
 		})
 	default:
-		return renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "details"},
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
@@ -722,10 +722,6 @@ func commandPalette(m Model) string {
 			{ASCII: "q", Label: "quit"},
 		})
 	}
-}
-
-func renderCommandPalette(ascii bool, commands []tuiui.Shortcut) string {
-	return tuiui.ToolHints(ascii, kbdStyle, commands)
 }
 
 func normalizeViewHeight(view string, width, height int) string {

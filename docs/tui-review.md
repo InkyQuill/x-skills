@@ -31,8 +31,10 @@ this is release-ready. `go vet` and `staticcheck` are otherwise clean on the pac
 **Action:** fix `wrapInspectorText`/`blockInspectorValue` in `internal/tui/inspector.go`
 so wrapped lines don't carry trailing padding, then `git add` the new files.
 
-**Resolved:** `4a8d3b3` (`feat: complete Go skill management workflows`). Verified by
-`go test ./internal/tui/... -race -count=1`.
+**Resolved:** `a3677c3` (`fix(tui): stop padding inspector block lines`) — the earlier
+attribution to `4a8d3b3` was incorrect; that commit added the failing test but not the
+fix. `blockInspectorValue` now styles each wrapped line separately so Lip Gloss cannot
+pad the block to its longest line. Verified by `go test ./internal/tui/... -race -count=1`.
 
 ## High-severity findings (install.go — the Install/marketplace tab)
 
@@ -191,6 +193,26 @@ Two very minor observations, not worth separate fix tickets:
 ---
 
 ## Standardization opportunities (moving shared code into `internal/tui/ui`)
+
+**Status: complete (2026-07-11).** All six candidates below were implemented by the
+[TUI component standardization plan](superpowers/plans/2026-07-11-tui-component-standardization.md):
+footers use `ui.FooterLine` (1), scroll/index/visibility math lives in `ui/layout.go`
+with `scrollState.Handle` for key translation (2, 6), `ui.RenderWithBackground` and
+`ui.TruncateANSI` replaced `renderWithOptionalBackground`/`truncate` (3, 5), and
+chip joining moved to `ui.JoinPills` while scope→color stays in `tui` (4). The same
+pass gave managed/unmanaged/broken distinct glyphs in both symbol sets
+(`✓`/`◇`/`×` Unicode, `+`/`?`/`x` ASCII) so statuses survive `NO_COLOR`. Verified with:
+
+```bash
+rg -n 'renderCommandPalette|clampModalIndex|visibleModalBody|func truncate\(|renderWithOptionalBackground' internal/tui  # no matches
+NO_COLOR=1 go test ./internal/tui -count=1 -run 'NoColor|Status'
+go test ./... -count=1
+go test ./internal/tui/... -race -count=1
+go vet ./...
+staticcheck ./...
+```
+
+The original candidate list is retained below as the finding ledger.
 
 The package already started this (`ui/components.go` has `Pill` and `Shortcut`/
 `ToolHints`), but a lot of near-identical boilerplate remains duplicated across the

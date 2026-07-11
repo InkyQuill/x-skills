@@ -2,7 +2,6 @@
 
 ## Planned implementation slices
 
-- [Skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md): Skills Folder consumers, explicit and inferred Compatibility Profiles, and `x-` Built-In Skill naming are implemented, including `x-port-skill` and Doctor archive/global-link repair. Remaining work is tracked in the plan's later slices.
 - [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md): committed recommendations, local overlay, recommend/unrecommend, safe restore/full restore, automatic reconciliation, and Git hygiene Doctor checks.
 - [Interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md): aggregate project candidates, compatibility-aware defaults, conflict preservation, CLI/TUI sync, and general archive rename.
 - [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md): shared footer/layout/text/pill helpers and color-independent statuses.
@@ -22,7 +21,7 @@
 ## Commands and tools
 
 - Implement interactive `sync` in CLI and TUI. `x-skills sync --at .Cl` aggregates skills from every non-destination project Skills Folder, preselects candidates according to compatibility, lets the user exclude skills and resolve divergent variants, migrates unmanaged skills, and preserves destination conflicts under editable archive names. Non-interactive use requires `--all` or repeated `--skill`; `-y` never resolves ambiguity. Plan: [interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md).
-- Implement committed `.x-skills.yaml` recommendations plus gitignored `.x-skills.local.yaml` local state. `restore --at ...` is additive; `restore --full` reconciles only explicitly selected project Skills Folders, migrates unmanaged extras before removal, never deletes archives, and blocks all removal when any desired skill is unavailable. Plans: [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md) and [skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md).
+- Implement committed `.x-skills.yaml` recommendations plus gitignored `.x-skills.local.yaml` local state. `restore --at ...` is additive; `restore --full` reconciles only explicitly selected project Skills Folders, migrates unmanaged extras before removal, never deletes archives, and blocks all removal when any desired skill is unavailable. Plan: [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md).
 
 ## TUI Visual Inspiration
 

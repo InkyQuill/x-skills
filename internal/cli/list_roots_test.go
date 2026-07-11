@@ -43,13 +43,14 @@ func TestListRootsJSON(t *testing.T) {
 	}
 	var payload struct {
 		Roots []struct {
-			Location string `json:"location"`
-			Scope    string `json:"scope"`
-			Target   string `json:"target"`
-			Label    string `json:"label"`
-			Path     string `json:"path"`
-			Builtin  bool   `json:"builtin"`
-			Enabled  bool   `json:"enabled"`
+			Location  string   `json:"location"`
+			Scope     string   `json:"scope"`
+			Target    string   `json:"target"`
+			Label     string   `json:"label"`
+			Path      string   `json:"path"`
+			Consumers []string `json:"consumers"`
+			Builtin   bool     `json:"builtin"`
+			Enabled   bool     `json:"enabled"`
 		} `json:"roots"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
@@ -60,6 +61,9 @@ func TestListRootsJSON(t *testing.T) {
 	}
 	if payload.Roots[0].Location == "" || payload.Roots[0].Path == "" {
 		t.Fatalf("first root = %#v", payload.Roots[0])
+	}
+	if len(payload.Roots[0].Consumers) == 0 {
+		t.Fatalf("first root consumers = %#v, want configured consumer ids", payload.Roots[0].Consumers)
 	}
 }
 

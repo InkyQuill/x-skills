@@ -144,7 +144,7 @@ set is unknown.
 
 Use `x-skills list-roots` to inspect enabled managed roots and discover
 available `--at` selectors. Use `x-skills list-roots --json` for
-agent-readable root discovery.
+agent-readable root discovery, including each root's canonical `consumers` IDs.
 
 ## Prompts
 

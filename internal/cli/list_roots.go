@@ -14,12 +14,13 @@ type listRootsPayload struct {
 }
 
 type listRootEntry struct {
-	Location string `json:"location"`
-	Scope    string `json:"scope"`
-	Target   string `json:"target"`
-	Label    string `json:"label"`
-	Path     string `json:"path"`
-	Builtin  bool   `json:"builtin"`
+	Location  string   `json:"location"`
+	Scope     string   `json:"scope"`
+	Target    string   `json:"target"`
+	Label     string   `json:"label"`
+	Path      string   `json:"path"`
+	Consumers []string `json:"consumers,omitempty"`
+	Builtin   bool     `json:"builtin"`
 }
 
 func newListRootsCommand(rootOptions *options) *cobra.Command {
@@ -44,12 +45,13 @@ func writeListRoots(out io.Writer, roots []config.ManagedRoot, asJSON bool) erro
 			continue
 		}
 		payload.Roots = append(payload.Roots, listRootEntry{
-			Location: root.Location(),
-			Scope:    root.Scope,
-			Target:   root.Target,
-			Label:    root.Label,
-			Path:     root.Path,
-			Builtin:  root.Builtin,
+			Location:  root.Location(),
+			Scope:     root.Scope,
+			Target:    root.Target,
+			Label:     root.Label,
+			Path:      root.Path,
+			Consumers: root.Consumers,
+			Builtin:   root.Builtin,
 		})
 	}
 	if asJSON {

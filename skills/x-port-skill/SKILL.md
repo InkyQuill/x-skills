@@ -9,19 +9,21 @@ Port a skill by changing only its agent-specific contract. Preserve its triggers
 
 ## Workflow
 
-1. Identify the source skill, requested destination agents, and whether the user wants an in-place edit or a separate copy. Treat an unspecified overwrite as a proposal, never as permission.
-2. Inspect every file in the skill directory, including `SKILL.md`, `agents/`, scripts, references, assets, hidden metadata, and symlinks. Follow references from `SKILL.md` and search all text files for agent names, exclusive tools, environment variables, hooks, path conventions, prompt invocations, and metadata schemas.
-3. Classify each agent-specific dependency:
+1. Identify the source skill, requested destination Skills Folders, and whether the user ultimately wants an in-place edit or a separate copy. Treat either destination as proposed until the user approves the reviewed diff.
+2. Run `x-skills list-roots --json` and read the `consumers` for each requested destination. These lowercase values are Compatibility Profile IDs. Keep product/display names separate: for example, OpenAI is a product/vendor name while `codex` is a consumer ID. If a destination has no declared consumers, inspect its configured `consumers`; if they remain unknown, ask the user rather than deriving an ID from its name.
+3. Create a temporary directory and copy the complete source skill into it without changing the source. Inspect every file in the staged copy, including `SKILL.md`, `agents/`, scripts, references, assets, hidden metadata, and symlinks. Follow references from `SKILL.md` and search all text files for agent names, exclusive tools, environment variables, hooks, path conventions, prompt invocations, and metadata schemas.
+4. Classify each agent-specific dependency:
    - terminology only: rewrite it in agent-agnostic language;
    - equivalent capability: substitute the destination agent's documented equivalent;
    - optional integration: keep the common workflow generic and place the integration in agent-specific metadata such as `agents/openai.yaml`;
    - no equivalent: preserve the limitation explicitly or stop and ask the user. Never invent a tool or silently remove behavior.
-4. Draft the smallest semantic-preserving change. Keep frontmatter triggers accurate, resource paths valid, scripts executable, and required safety or approval gates intact.
-5. Verify the complete port: re-read every changed file, validate internal links and invocations, run bundled validators or representative scripts, and confirm the workflow remains usable by every claimed agent.
-6. Only after that verification, add or update the x-skills Compatibility Profile in `.x-skills.json`: use `{"agnostic": true}` only when no agent-exclusive dependency remains; otherwise list only agents actually verified. Preserve all existing source metadata and never claim compatibility from wording changes alone.
-7. Show the proposed diff and summarize substitutions, unresolved limitations, validation results, and the proposed Compatibility Profile.
-8. Obtain explicit approval before overwriting the source skill. If approval is absent, leave the source unchanged and provide the diff or create a separate copy only when that destination was already authorized.
+5. Make every rewrite and metadata change only in the staged copy. Draft the smallest semantic-preserving change. Keep frontmatter triggers accurate, resource paths valid, scripts executable, and required safety or approval gates intact.
+6. Verify the staged port: re-read every changed file, validate internal links and invocations, run bundled validators or representative scripts, and confirm the workflow remains usable by every claimed consumer ID.
+7. Only after that verification, update `.x-skills.json` in the staged copy. Preserve every existing source field and set schema version 2. Use `{"agnostic": true}` only when no agent-exclusive dependency remains; otherwise use `{"agents": [...]}` with sorted, unique IDs that match `^[a-z][a-z0-9-]*$` and are present in the requested destinations' configured consumer sets. Exactly one of `agnostic: true` or a non-empty `agents` list is allowed. Never substitute a product/vendor/display name for a consumer ID or claim compatibility from wording changes alone.
+8. Validate the staged metadata by parsing the complete JSON, checking the profile rules above and configured-ID membership, and running any repository or x-skills metadata validator available in the working environment. A JSON syntax check alone is insufficient.
+9. Diff the untouched source against the staged copy. Show the complete proposed diff and summarize substitutions, unresolved limitations, validation results, consumer ID evidence, and the proposed Compatibility Profile.
+10. Obtain explicit approval for that reviewed diff. Only then apply the staged changes to the approved source or separate destination and re-run validation on the applied result. If approval is withheld, leave every destination unchanged and delete the temporary copy unless the user explicitly asks to retain it for later review.
 
 ## Completion Contract
 
-A port is complete only when all skill files were inspected, semantics were preserved, compatibility claims were verified, the full diff was shown, and any overwrite was explicitly approved.
+A port is complete only when all skill files were inspected in a staged copy, semantics were preserved, compatibility IDs were verified against configured consumers, the full diff was approved, and the applied destination passed validation.

@@ -61,6 +61,9 @@ type Model struct {
 	restoreToken           uint64
 	restoreInFlight        bool
 	restoreCancel          context.CancelFunc
+	syncToken              uint64
+	syncInFlight           bool
+	syncCancel             context.CancelFunc
 }
 
 type reloadResultMsg struct {
@@ -180,6 +183,14 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, m.applyRestorePlanResult(msg)
 	case restoreApplyMsg:
 		return m, m.applyRestoreResult(msg)
+	case syncCandidatesMsg:
+		return m, m.applySyncCandidates(msg)
+	case syncPlanMsg:
+		return m, m.applySyncPlan(msg)
+	case syncProgressMsg:
+		return m, m.applySyncProgress(msg)
+	case syncResultMsg:
+		return m, m.applySyncResult(msg)
 	case reloadResultMsg:
 		if msg.token != m.reloadToken {
 			return m, nil
@@ -209,6 +220,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		closeRestoreModalPlan(m.modal)
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
+		m.cancelSyncWork()
 		return m, tea.Quit
 	}
 
@@ -220,6 +232,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingMutationCmd = nil
 		}
 		if modalClosed {
+			if _, ok := closedModal.(syncWorkbenchModal); ok {
+				m.cancelSyncWork()
+				m.syncToken++
+			}
 			m.clearPendingInstallUseOnModalClose(closedModal)
 			m.modal = nil
 		}
@@ -246,6 +262,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
+		m.cancelSyncWork()
 		return m, tea.Quit
 	case keyActive:
 		m.setView(ViewActive)
@@ -306,9 +323,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.view == ViewRepo {
 			return m, m.toggleRepoRecommendations()
 		}
-	case "s", "S":
+	case "s":
 		if !m.restoreInFlight {
 			m.modal = newRestoreWorkbenchModal(m.cfg)
+		}
+	case "S":
+		if !m.syncInFlight {
+			m.modal = newSyncWorkbenchModal(m.cfg)
 		}
 	case "m":
 		if m.view == ViewActive {

@@ -43,7 +43,8 @@ func (h helpModal) View(width, height int, m Model) string {
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "d", Label: "delete repo skill"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "m", Label: "migrate active skill"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "f", Label: "fix doctor issues"}),
-		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "s", Label: "restore project skills"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "s", Label: "restore project skills"}) + " · " +
+			helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "S", Label: "sync Skills Folders"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "^R", Label: "rescan filesystem"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "?", Label: "show this help screen"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "q", Label: "quit application"}),

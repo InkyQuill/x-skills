@@ -47,7 +47,8 @@ func renderHeader(m Model, width int) string {
 		tabLabel(m.view == ViewRepo, "R", "Repo"),
 		tabLabel(m.view == ViewDoctor, "D", "Doctor"),
 		tabLabel(m.view == ViewInstall, "I", "Install"),
-		tabLabel(false, "S", "Restore"),
+		tabLabel(false, "s", "Restore"),
+		tabLabel(false, "S", "Sync"),
 	}
 	title := titleStyle.Render(m.pulseDiamond()+" x-skills") + "  " + strings.Join(tabs, " ")
 	return truncate(title, width)

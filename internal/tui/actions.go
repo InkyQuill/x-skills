@@ -300,12 +300,12 @@ func (c migrateConfirmModal) View(width, height int, m Model) string {
 		Body:  body,
 		Footer: []string{
 			apply + "   " + cancel,
-			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 				{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
 				{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
 				{ASCII: "enter", Unicode: "↵", Label: "apply"},
 				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-			})),
+			}),
 		},
 		Scroll:    c.scroll,
 		UseScroll: true,
@@ -599,11 +599,11 @@ func (r repoLinkModal) View(width, height int, m Model) string {
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: "Link repo skill",
 		Body:  lines,
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "up/down", Unicode: "↑/↓", Label: "destination"},
 			{ASCII: "enter", Unicode: "↵", Label: "link"},
 			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-		}))},
+		})},
 		Focus: 3 + r.index,
 	})
 }
@@ -764,12 +764,12 @@ func (r repoUsageModal) View(width, height int, m Model) string {
 		Body:  body,
 		Footer: []string{
 			"[ Unlink selected ]   Cancel",
-			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 				{ASCII: "up/down", Unicode: "↑/↓", Label: "move"},
 				{ASCII: "space", Label: "toggle"},
 				{ASCII: "enter", Unicode: "↵", Label: "choose"},
 				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-			})),
+			}),
 		},
 		Focus: focus,
 	})

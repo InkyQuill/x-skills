@@ -674,7 +674,7 @@ func renderStatus(m Model, width int) string {
 	}
 	if m.filter.Active {
 		lines = append(lines, accentStyle.Render("/ filter: "+m.filter.Query+"_"))
-		lines = append(lines, mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{{ASCII: "enter", Unicode: "↵", Label: "accept"}, {ASCII: "esc", Unicode: "Esc", Label: "clear/exit"}})))
+		lines = append(lines, tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{{ASCII: "enter", Unicode: "↵", Label: "accept"}, {ASCII: "esc", Unicode: "Esc", Label: "clear/exit"}}))
 	}
 	lines = append(lines, mutedStyle.Render(commandPalette(m)))
 	for i, line := range lines {

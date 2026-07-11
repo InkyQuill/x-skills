@@ -63,13 +63,13 @@ func (r restoreWorkbenchModal) View(width, height int, m Model) string {
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: r.Title(),
 		Body:  body,
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "up/down", Unicode: "↑/↓", Label: "move"},
 			{ASCII: "space", Label: "toggle destination"},
 			{ASCII: "f", Label: "full"},
 			{ASCII: "enter", Unicode: "↵", Label: "plan"},
 			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-		}))},
+		})},
 		Focus: 1 + r.index,
 	})
 }
@@ -186,11 +186,11 @@ func (r restorePlanModal) View(width, height int, m Model) string {
 	}
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: r.Title(), Body: body,
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "e", Label: "edit rename"},
 			{ASCII: "enter", Unicode: "↵", Label: "apply"},
 			{ASCII: "esc", Unicode: "Esc", Label: "discard"},
-		}))},
+		})},
 	})
 }
 
@@ -259,10 +259,10 @@ func (r restoreRenameModal) View(width, height int, m Model) string {
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: r.Title(),
 		Body:  []string{"Archive name", r.input.View()},
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "save"},
 			{ASCII: "esc", Unicode: "Esc", Label: "back"},
-		}))},
+		})},
 	})
 }
 
@@ -305,11 +305,11 @@ func (r restoreConfirmModal) View(width, height int, m Model) string {
 		Body:  restorePlanLines(r.parent.plan),
 		Footer: []string{
 			apply + "   " + back,
-			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 				{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
 				{ASCII: "enter", Unicode: "↵", Label: "select"},
 				{ASCII: "esc", Unicode: "Esc", Label: "back"},
-			})),
+			}),
 		},
 	})
 }

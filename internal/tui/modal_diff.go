@@ -72,10 +72,10 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 			"Terminal too small to review this diff.",
 			fmt.Sprintf("Please resize to at least %dx%d.", minConflictDiffWidth, minConflictDiffHeight),
 			"",
-			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
 				{ASCII: "q", Label: "cancel"},
-			})),
+			}),
 		}
 		return modalStyle(width, height).Render(strings.Join(lines, "\n"))
 	}
@@ -100,13 +100,13 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 	if c.incomingLabel == "Incoming remote" {
 		acceptLabel = "use incoming"
 	}
-	footer := mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+	footer := tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 		{ASCII: "left/right", Unicode: "←/→", Label: "file"},
 		{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
 		{ASCII: "k", Label: "keep archive"},
 		{ASCII: "l", Label: acceptLabel},
 		{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-	}))
+	})
 	lines := []string{
 		accentStyle.Render("Archive conflict: " + c.name),
 		"Decision applies to the whole skill directory.",

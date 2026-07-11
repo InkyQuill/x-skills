@@ -110,7 +110,7 @@ func (w syncWorkbenchModal) View(width, height int, m Model) string {
 	}
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: w.Title(), Body: body, Focus: w.index + 1,
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, w.shortcuts()))},
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, w.shortcuts())},
 	})
 }
 

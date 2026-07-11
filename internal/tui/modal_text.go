@@ -35,10 +35,10 @@ func (t textModal) View(width, height int, m Model) string {
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: t.title,
 		Body:  lines,
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "enter", Unicode: "↵", Label: "apply"},
 			{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-		}))},
+		})},
 	})
 }
 

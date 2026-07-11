@@ -61,11 +61,11 @@ func (h helpModal) View(width, height int, m Model) string {
 	return renderConstrainedModal(width, height, constrainedModalOptions{
 		Title: "Help",
 		Body:  lines,
-		Footer: []string{mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
 			{ASCII: "esc", Unicode: "Esc", Label: "close"},
 			{ASCII: "q", Label: "close"},
-		}))},
+		})},
 		Scroll:    h.scroll,
 		UseScroll: true,
 	})

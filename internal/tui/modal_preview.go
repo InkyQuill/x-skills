@@ -77,12 +77,12 @@ func (p previewModal) View(width, height int, m Model) string {
 		strings.Repeat("-", bodyWidth),
 		p.viewport.View(),
 		"",
-		mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+		tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 			{ASCII: "up/down", Unicode: "↑/↓", Label: "scroll"},
 			{ASCII: "r", Label: "raw/rendered"},
 			{ASCII: "esc", Unicode: "Esc", Label: "close"},
 			{ASCII: "q", Label: "close"},
-		})),
+		}),
 	}
 	return modalStyle(width, height).Render(strings.Join(lines, "\n"))
 }

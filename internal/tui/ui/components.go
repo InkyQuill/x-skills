@@ -43,3 +43,7 @@ func ToolHints(ascii bool, keyStyle lipgloss.Style, commands []Shortcut) string 
 	}
 	return strings.Join(parts, "  ")
 }
+
+func FooterLine(ascii bool, keyStyle, mutedStyle lipgloss.Style, shortcuts []Shortcut) string {
+	return mutedStyle.Render(ToolHints(ascii, keyStyle, shortcuts))
+}

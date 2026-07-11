@@ -42,12 +42,12 @@ func (c confirmModal) View(width, height int, m Model) string {
 		Body:  c.lines,
 		Footer: []string{
 			apply + "   " + cancel,
-			mutedStyle.Render(renderCommandPalette(m.opts.ASCII, []tuiui.Shortcut{
+			tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
 				{ASCII: "left/right", Unicode: "←/→", Label: "choose"},
 				{ASCII: "enter", Unicode: "↵", Label: "apply"},
 				{ASCII: "y/n", Label: "select"},
 				{ASCII: "esc", Unicode: "Esc", Label: "cancel"},
-			})),
+			}),
 		},
 	})
 }

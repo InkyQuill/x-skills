@@ -8,7 +8,7 @@ and a targeted deep-dive on `install.go` (the largest, network/disk-touching fil
 
 The review below is retained as the original finding ledger. Findings 1–8 are resolved;
 finding 9 remains passed. Each finding records its resolving commit and verification.
-- Production-readiness findings were resolved by commits `1e3c961` through `12472bb`; remaining shared-component work is tracked in [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md).
+- Production-readiness findings were resolved by commits `1e3c961` through `12472bb`; the later shared-component audit is also complete, as recorded in the standardization ledger below.
 
 ## Blocking issues
 
@@ -194,14 +194,15 @@ Two very minor observations, not worth separate fix tickets:
 
 ## Standardization opportunities (moving shared code into `internal/tui/ui`)
 
-**Status: complete (2026-07-11).** All six candidates below were implemented by the
-[TUI component standardization plan](superpowers/plans/2026-07-11-tui-component-standardization.md):
-footers use `ui.FooterLine` (1), scroll/index/visibility math lives in `ui/layout.go`
-with `scrollState.Handle` for key translation (2, 6), `ui.RenderWithBackground` and
-`ui.TruncateANSI` replaced `renderWithOptionalBackground`/`truncate` (3, 5), and
-chip joining moved to `ui.JoinPills` while scope→color stays in `tui` (4). The same
-pass gave managed/unmanaged/broken distinct glyphs in both symbol sets
-(`✓`/`◇`/`×` Unicode, `+`/`?`/`x` ASCII) so statuses survive `NO_COLOR`. Verified with:
+**Status: complete (2026-07-11).** All six candidates below were implemented directly:
+footers use `ui.FooterLine` (`7dd99c2`, `741198a`) (1), scroll/index/visibility math
+lives in `ui/layout.go` with `scrollState.Handle` for key translation (`6f120ae`) (2,
+6), `ui.RenderWithBackground` and `ui.TruncateANSI` replaced
+`renderWithOptionalBackground`/`truncate` (`a1c9cae`) (3, 5), and chip joining moved
+to `ui.JoinPills` while scope→color stays in `tui` (`c654b84`) (4). Commits `63268ba`
+and `29d5722` also gave managed/unmanaged/broken distinct glyphs in both symbol sets
+(`✓`/`◇`/`×` Unicode, `+`/`?`/`x` ASCII) and locked their `NO_COLOR` behavior.
+The final audit is recorded by `8fbfece`. Verified with:
 
 ```bash
 rg -n 'renderCommandPalette|clampModalIndex|visibleModalBody|func truncate\(|renderWithOptionalBackground' internal/tui  # no matches

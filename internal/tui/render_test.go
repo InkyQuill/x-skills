@@ -64,6 +64,47 @@ func TestHelpModalRendersConfiguredRootLabels(t *testing.T) {
 	}
 }
 
+func TestStatusRowsDistinguishableWithoutColor(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	statuses := []string{actions.StatusManaged, actions.StatusUnmanaged, actions.StatusBroken}
+
+	for _, mode := range []struct {
+		name  string
+		ascii bool
+	}{
+		{name: "unicode", ascii: false},
+		{name: "ASCII", ascii: true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			rows := make(map[string]string, len(statuses))
+			for _, status := range statuses {
+				m := New(cfg, Options{ASCII: mode.ascii})
+				m.width = 120
+				m.height = 30
+				m.active = []ActiveGroup{{
+					ID:          "active:same-skill",
+					Name:        "same-skill",
+					Status:      status,
+					Description: "Same description.",
+					Chips:       []string{".Ag"},
+				}}
+				rendered := renderActiveRows(m, 80)
+				if len(rendered) != 1 {
+					t.Fatalf("renderActiveRows() returned %d rows, want 1", len(rendered))
+				}
+				rows[status] = plain(rendered[0])
+			}
+			for i, left := range statuses {
+				for _, right := range statuses[i+1:] {
+					if rows[left] == rows[right] {
+						t.Fatalf("%s and %s rows are identical without color:\n%q", left, right, rows[left])
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestActiveInspectorShowsBrokenReason(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)

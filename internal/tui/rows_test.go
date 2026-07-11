@@ -76,7 +76,7 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 
 	rows := renderActiveRows(m, 100)
 	got := strings.Join(rows, "\n")
-	for _, want := range []string{"› ◇ ● zen-of-go", ".Ag", "~Cl", "Go style."} {
+	for _, want := range []string{"› ◇ ◇ zen-of-go", ".Ag", "~Cl", "Go style."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("row missing %q:\n%s", want, got)
 		}
@@ -192,7 +192,7 @@ func TestDoctorRowsShowIssueReasonAndLocation(t *testing.T) {
 	}
 
 	got := strings.Join(renderDoctorRows(m, 100), "\n")
-	for _, want := range []string{"›", "●", "broken-symlink", "zen-of-go", ".Ag", "symlink target missing"} {
+	for _, want := range []string{"›", "×", "broken-symlink", "zen-of-go", ".Ag", "symlink target missing"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor row missing %q:\n%s", want, got)
 		}

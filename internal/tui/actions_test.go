@@ -270,7 +270,12 @@ func TestActiveMigrateConflictResolutionReloadsActiveList(t *testing.T) {
 		t.Fatal("expected conflict modal")
 	}
 
-	updated, _ = m.Update(keyRunes("l"))
+	updated, reloadCmd := m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if reloadCmd == nil {
+		t.Fatal("post-mutation reload command = nil, want asynchronous reload")
+	}
+	updated, _ = m.Update(reloadCmd())
 	m = mustModel(t, updated)
 
 	if len(m.active) != 1 {

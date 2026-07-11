@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/repo"
 )
 
 func makeSkill(t *testing.T, root, name, description string) string {
@@ -173,18 +175,68 @@ func TestLowercaseTabKeysDoNotSwitchViews(t *testing.T) {
 	}
 }
 
-func TestCtrlRRefreshesWithoutTakingRepoKey(t *testing.T) {
+func TestRefreshReturnsCommand(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)
 	m.status = "old status"
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "new-skill", "New skill.")
 
-	updated, _ := m.Update(keyCtrlR())
+	updated, cmd := m.Update(keyCtrlR())
 	m = mustModel(t, updated)
 	if m.view != ViewActive {
 		t.Fatalf("view = %q, want active after refresh", m.view)
 	}
+	if m.status != "refreshing..." {
+		t.Fatalf("status = %q, want refreshing", m.status)
+	}
+	if cmd == nil {
+		t.Fatal("refresh command = nil, want asynchronous reload")
+	}
+
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
 	if m.status != "refreshed" {
-		t.Fatalf("status = %q, want refreshed", m.status)
+		t.Fatalf("status = %q, want refreshed after result", m.status)
+	}
+	if !slices.ContainsFunc(m.repo, func(skill repo.Skill) bool { return skill.Name == "new-skill" }) {
+		t.Fatalf("repo = %#v, want refreshed snapshot to contain new-skill", m.repo)
+	}
+}
+
+func TestStaleReloadResultIgnored(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+
+	first := m.beginReload()
+	firstToken := m.reloadToken
+	second := m.beginReload()
+	secondToken := m.reloadToken
+	if first == nil || second == nil {
+		t.Fatal("reload command = nil, want asynchronous reloads")
+	}
+
+	updated, _ := m.Update(reloadResultMsg{
+		token: firstToken,
+		repo:  []repo.Skill{{Name: "stale"}},
+	})
+	m = mustModel(t, updated)
+	if len(m.repo) != 0 {
+		t.Fatalf("repo = %#v, want stale snapshot ignored", m.repo)
+	}
+	if !m.reloadInFlight {
+		t.Fatal("reloadInFlight = false, want newer reload still pending")
+	}
+
+	updated, _ = m.Update(reloadResultMsg{
+		token: secondToken,
+		repo:  []repo.Skill{{Name: "current"}},
+	})
+	m = mustModel(t, updated)
+	if len(m.repo) != 1 || m.repo[0].Name != "current" {
+		t.Fatalf("repo = %#v, want current snapshot applied", m.repo)
+	}
+	if m.reloadInFlight {
+		t.Fatal("reloadInFlight = true, want completed reload")
 	}
 }
 

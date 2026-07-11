@@ -43,6 +43,21 @@ type Model struct {
 	modal  modal
 	status string
 	err    error
+
+	reloadToken         int
+	reloadInFlight      bool
+	reloadPending       tea.Cmd
+	reloadReportsStatus bool
+	updating            bool
+}
+
+type reloadResultMsg struct {
+	token     int
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
+	err       error
 }
 
 func New(cfg config.Config, opts ...Options) Model {
@@ -64,7 +79,7 @@ func New(cfg config.Config, opts ...Options) Model {
 		filter:  newFilterState(),
 		install: newInstallState(),
 	}
-	m.reload()
+	m.reloadSynchronously()
 	return m
 }
 
@@ -75,7 +90,28 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
+	m.updating = true
+	defer func() {
+		current, ok := updated.(Model)
+		if !ok {
+			return
+		}
+		current.updating = false
+		if current.reloadPending == nil {
+			updated = current
+			return
+		}
+		if cmd != nil {
+			updated = current
+			return
+		}
+		reloadCmd := current.reloadPending
+		current.reloadPending = nil
+		updated = current
+		cmd = reloadCmd
+	}()
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -126,6 +162,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case installUseMsg:
 		return m, m.applyInstallUseResult(msg)
+	case reloadResultMsg:
+		if msg.token != m.reloadToken {
+			return m, nil
+		}
+		m.active = msg.active
+		m.repo = msg.repo
+		m.issues = msg.issues
+		m.repoUsage = msg.repoUsage
+		m.err = msg.err
+		m.reloadInFlight = false
+		m.clampCursor()
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		if m.reloadReportsStatus {
+			m.status = "refreshed"
+		}
+		return m, nil
 	default:
 		return m, nil
 	}
@@ -153,9 +208,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if isRefreshKey(msg) {
-		m.reload()
-		m.status = "refreshed"
-		return m, nil
+		return m, m.beginReload()
 	}
 
 	if m.filter.Active {
@@ -331,8 +384,41 @@ func loadTUIData(cfg config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue
 }
 
 func (m *Model) reload() {
+	if m.updating {
+		m.reloadPending = m.beginReload()
+		m.reloadReportsStatus = false
+		return
+	}
+	m.reloadSynchronously()
+}
+
+func (m *Model) reloadSynchronously() {
 	m.active, m.repo, m.issues, m.repoUsage, m.err = loadTUIData(m.cfg)
 	m.clampCursor()
+}
+
+func (m *Model) reloadCmd() tea.Cmd {
+	token := m.reloadToken
+	cfg := m.cfg
+	return func() tea.Msg {
+		active, repoSkills, issues, repoUsage, err := loadTUIData(cfg)
+		return reloadResultMsg{
+			token:     token,
+			active:    active,
+			repo:      repoSkills,
+			issues:    issues,
+			repoUsage: repoUsage,
+			err:       err,
+		}
+	}
+}
+
+func (m *Model) beginReload() tea.Cmd {
+	m.reloadToken++
+	m.reloadInFlight = true
+	m.reloadReportsStatus = true
+	m.status = "refreshing..."
+	return m.reloadCmd()
 }
 
 func (m *Model) setView(view ViewName) {

@@ -173,6 +173,46 @@ func TestAssessRequiresExecutableContextForHighConfidenceSignals(t *testing.T) {
 	}
 }
 
+func TestAssessSkipsUnfencedExampleSectionBodies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		content   string
+		wantState compatibility.State
+	}{
+		{
+			name:      "variable under singular example heading",
+			content:   "## Example\n\nRead the project from `$CLAUDE_PROJECT_DIR`.\n\n## Notes\nPortable workflow.",
+			wantState: compatibility.StateUnknown,
+		},
+		{
+			name:      "tool under plural examples with nested heading",
+			content:   "## Examples\n\n### Interactive\nYou must use AskUserQuestion.\n\n## Notes\nPortable workflow.",
+			wantState: compatibility.StateUnknown,
+		},
+		{
+			name:      "real mandate after same-level heading",
+			content:   "## Examples\n\nYou must use AskUserQuestion.\n\n## Instructions\nYou must use AskUserQuestion before editing.",
+			wantState: compatibility.StateIncompatible,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := writeSkill(t, tt.content)
+			got, err := compatibility.Assess(dir, nil, []string{"codex"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.State != tt.wantState {
+				t.Fatalf("assessment = %#v, want state %q", got, tt.wantState)
+			}
+		})
+	}
+}
+
 func TestAssessErrorBehavior(t *testing.T) {
 	t.Parallel()
 

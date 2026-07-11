@@ -118,13 +118,29 @@ func isClaudeHookMetadata(skillDir, path string) bool {
 func executableLines(content string) []string {
 	lines := make([]string, 0)
 	inFence := false
+	exampleSectionLevel := 0
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
 			continue
 		}
-		if inFence || trimmed == "" || strings.HasPrefix(trimmed, "#") ||
+		if inFence {
+			continue
+		}
+		if level, title, ok := markdownHeading(trimmed); ok {
+			if exampleSectionLevel > 0 && level <= exampleSectionLevel {
+				exampleSectionLevel = 0
+			}
+			if strings.EqualFold(title, "example") || strings.EqualFold(title, "examples") {
+				exampleSectionLevel = level
+			}
+			continue
+		}
+		if exampleSectionLevel > 0 {
+			continue
+		}
+		if trimmed == "" ||
 			strings.HasPrefix(trimmed, ">") || strings.HasPrefix(trimmed, "|") ||
 			strings.HasPrefix(trimmed, `"`) || strings.Contains(trimmed, "://") ||
 			nonExecutablePattern.MatchString(trimmed) || negationPattern.MatchString(trimmed) {
@@ -133,4 +149,16 @@ func executableLines(content string) []string {
 		lines = append(lines, quotedTextPattern.ReplaceAllString(trimmed, ""))
 	}
 	return lines
+}
+
+func markdownHeading(line string) (int, string, bool) {
+	level := 0
+	for level < len(line) && level < 6 && line[level] == '#' {
+		level++
+	}
+	if level == 0 || level == len(line) || line[level] != ' ' {
+		return 0, "", false
+	}
+	title := strings.TrimSpace(strings.TrimRight(line[level+1:], "#"))
+	return level, title, true
 }

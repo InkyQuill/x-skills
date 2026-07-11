@@ -88,7 +88,7 @@ func Preflight(
 	if err != nil {
 		return Plan{}, err
 	}
-	if err := validateSelectedCandidates(cfg, selected); err != nil {
+	if err := validateSelectedCandidates(cfg, selected, destinations); err != nil {
 		return Plan{}, err
 	}
 	resolutionByPath, err := indexResolutions(cfg, resolutions)
@@ -115,6 +115,17 @@ func Preflight(
 
 	var plan Plan
 	usedResolutions := make(map[string]struct{}, len(resolutions))
+	archiveStorageValidated := false
+	ensureArchiveStorage := func() error {
+		if archiveStorageValidated {
+			return nil
+		}
+		if err := validateWritableDirectoryShape(cfg.ArchiveSkillsRoot()); err != nil {
+			return fmt.Errorf("archive storage cannot publish skills: %w", err)
+		}
+		archiveStorageValidated = true
+		return nil
+	}
 	for _, candidate := range selected {
 		archivePath, err := canonicalEntryPath(filepath.Join(cfg.ArchiveSkillsRoot(), candidate.Name))
 		if err != nil {
@@ -153,6 +164,9 @@ func Preflight(
 				plan.Conflicts = append(plan.Conflicts, conflict)
 				continue
 			case ConflictReplace:
+				if err := ensureArchiveStorage(); err != nil {
+					return Plan{}, err
+				}
 				plan.Conflicts = append(plan.Conflicts, conflict)
 				archiveReplacement = true
 			default:
@@ -160,6 +174,9 @@ func Preflight(
 			}
 		}
 		if !archiveMatches {
+			if err := ensureArchiveStorage(); err != nil {
+				return Plan{}, err
+			}
 			source, ok := migrationSource(candidate)
 			if !ok {
 				return Plan{}, fmt.Errorf("selected candidate %q has no unmanaged source to migrate", candidate.ID)
@@ -197,6 +214,11 @@ func Preflight(
 				case ConflictKeep:
 					plan.Skipped = append(plan.Skipped, Skip{CandidateID: candidate.ID, Name: candidate.Name, DestinationPath: destinationPath, Reason: SkipKeptDestination})
 				case "", ConflictReplace:
+					if resolution.Action == ConflictReplace {
+						if err := ensureArchiveStorage(); err != nil {
+							return Plan{}, err
+						}
+					}
 					suggestion, err := suggestPreserveName(candidate.Name, destination.Target, reservedNames)
 					if err != nil {
 						return Plan{}, err
@@ -274,7 +296,7 @@ func selectedCandidates(groups []NameGroup, selection Selection) ([]Candidate, e
 	return selected, nil
 }
 
-func validateSelectedCandidates(cfg config.Config, candidates []Candidate) error {
+func validateSelectedCandidates(cfg config.Config, candidates []Candidate, destinations []roots.ActiveRoot) error {
 	configuredRoots := make(map[string]string)
 	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject}) {
 		canonical, err := canonicalPath(root.Path)
@@ -282,6 +304,10 @@ func validateSelectedCandidates(cfg config.Config, candidates []Candidate) error
 			return fmt.Errorf("validate configured source Skills Folder %q: %w", root.Path, err)
 		}
 		configuredRoots[root.Target] = canonical
+	}
+	destinationRoots := make(map[string]struct{}, len(destinations))
+	for _, destination := range destinations {
+		destinationRoots[destination.Path] = struct{}{}
 	}
 	for _, candidate := range candidates {
 		if len(candidate.Occurrences) == 0 {
@@ -320,6 +346,9 @@ func validateSelectedCandidates(cfg config.Config, candidates []Candidate) error
 			}
 			if occurrenceRoot != configuredRoot || occurrenceParent != configuredRoot {
 				return fmt.Errorf("occurrence %q is outside configured Skills Folder %q", occurrence.Path, configuredRoot)
+			}
+			if _, selectedDestination := destinationRoots[occurrenceRoot]; selectedDestination {
+				return fmt.Errorf("occurrence %q belongs to selected destination %q", occurrence.Path, occurrenceRoot)
 			}
 			switch occurrence.Status {
 			case actions.StatusManaged:

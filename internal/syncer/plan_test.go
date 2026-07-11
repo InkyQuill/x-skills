@@ -428,6 +428,128 @@ func TestPreflightValidatesVariantByNameStructure(t *testing.T) {
 	}
 }
 
+func TestPreflightRejectsSelectedDestinationAsCandidateSourceIncludingAlias(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		alias bool
+	}{
+		{name: "direct destination root"},
+		{name: "aliased destination root", alias: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, _, destinations := planFixture(t, "review")
+			source := makePlanSkill(t, destinations[0].Path, "review", "selected")
+			sourceRoot := destinations[0]
+			if tt.alias {
+				alias := filepath.Join(filepath.Dir(cfg.ProjectRoot), "agents-source-alias")
+				if err := os.Symlink(destinations[0].Path, alias); err != nil {
+					t.Fatal(err)
+				}
+				sourceRoot.Path = alias
+				source = filepath.Join(alias, "review")
+			}
+			candidate := Candidate{Name: "review", Occurrences: []actions.ActiveSkill{{
+				Name: "review", Root: sourceRoot, Path: source, Status: actions.StatusUnmanaged,
+			}}}
+			candidate.Fingerprint = mustPlanFingerprint(t, source)
+			bindPlanCandidate(&candidate)
+			before := snapshotPlanTree(t, cfg.ProjectRoot, cfg.ArchiveRoot)
+
+			plan, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil)
+			if err == nil {
+				t.Fatalf("Preflight accepted selected destination as source: %#v", plan)
+			}
+			assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
+		})
+	}
+}
+
+func TestPreflightRejectsArchiveStorageThatCannotPublishMigration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, cfg config.Config)
+	}{
+		{name: "archive Skills Folder is file", setup: func(t *testing.T, cfg config.Config) {
+			if err := os.MkdirAll(cfg.ArchiveRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cfg.ArchiveSkillsRoot(), []byte("file"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "archive Skills Folder is unwritable", setup: func(t *testing.T, cfg config.Config) {
+			if err := os.MkdirAll(cfg.ArchiveSkillsRoot(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(cfg.ArchiveSkillsRoot(), 0o555); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "nearest archive ancestor is unwritable", setup: func(t *testing.T, cfg config.Config) {
+			if err := os.MkdirAll(cfg.ArchiveRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(cfg.ArchiveRoot, 0o555); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, candidate, destinations := planFixture(t, "review")
+			source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+			candidate.Occurrences[0].Path = source
+			candidate.Fingerprint = mustPlanFingerprint(t, source)
+			bindPlanCandidate(&candidate)
+			tt.setup(t, cfg)
+			before := snapshotPlanTree(t, cfg.ProjectRoot, cfg.ArchiveRoot)
+
+			plan, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, nil)
+			if err == nil {
+				t.Fatalf("Preflight emitted plan for unusable archive storage: %#v", plan)
+			}
+			assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
+		})
+	}
+}
+
+func TestPreflightRejectsUnwritableArchiveStorageForPreservation(t *testing.T) {
+	t.Parallel()
+
+	cfg, candidate, destinations := planFixture(t, "review")
+	source := makePlanSkill(t, filepath.Dir(candidate.Occurrences[0].Path), "review", "selected")
+	candidate.Occurrences[0].Path = source
+	candidate.Fingerprint = mustPlanFingerprint(t, source)
+	bindPlanCandidate(&candidate)
+	makePlanSkill(t, cfg.ArchiveSkillsRoot(), "review", "selected")
+	makePlanSkill(t, destinations[0].Path, "review", "destination conflict")
+	if err := os.Chmod(cfg.ArchiveSkillsRoot(), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(cfg.ArchiveSkillsRoot(), 0o755)
+	})
+	before := snapshotPlanTree(t, cfg.ProjectRoot, cfg.ArchiveRoot)
+	resolution := []ConflictResolution{{
+		DestinationPath: filepath.Join(destinations[0].Path, "review"),
+		Action:          ConflictReplace,
+		PreserveAs:      "review-from-agents",
+	}}
+
+	plan, err := Preflight(cfg, []NameGroup{{Name: "review", Variants: []Candidate{candidate}}}, destinations[:1], Selection{CandidateIDs: []string{candidate.ID}}, resolution)
+	if err == nil {
+		t.Fatalf("Preflight emitted preservation plan for unwritable archive storage: %#v", plan)
+	}
+	assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
+}
+
 func planFixture(t *testing.T, name string) (config.Config, Candidate, []roots.ActiveRoot) {
 	t.Helper()
 	base := t.TempDir()

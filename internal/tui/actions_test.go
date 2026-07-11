@@ -1499,3 +1499,63 @@ func TestDoctorFixIgnoresSecondFixWhileCommandIsInFlight(t *testing.T) {
 		t.Fatalf("in-flight state changed: modal=%T status=%q", m.modal, m.status)
 	}
 }
+
+func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
+	seen := map[string]bool{}
+	for action, key := range repoActionKeys() {
+		if seen[key] {
+			t.Fatalf("duplicate Repo key %q at %s", key, action)
+		}
+		seen[key] = true
+	}
+
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "old", "Old.")
+	activeRoot := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(activeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archive, filepath.Join(activeRoot, "old")); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewRepo)
+
+	updated, cmd := m.Update(keyRunes(keyRepoRename))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("opening rename modal started filesystem work")
+	}
+	rename, ok := m.modal.(textModal)
+	if !ok {
+		t.Fatalf("modal = %T, want textModal", m.modal)
+	}
+	view := plain(rename.View(180, 30, m))
+	if !strings.Contains(view, filepath.Join(activeRoot, "old")) || !strings.Contains(strings.ToLower(view), "other projects") {
+		t.Fatalf("rename modal omitted usage/warning:\n%s", view)
+	}
+	rename.input.SetValue("new")
+	m.modal = rename
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil || !m.renameInFlight {
+		t.Fatalf("rename did not start asynchronously: cmd=%v inFlight=%v", cmd, m.renameInFlight)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "old")); err != nil {
+		t.Fatalf("archive changed before command ran: %v", err)
+	}
+	msg, ok := cmd().(renameArchiveResultMsg)
+	if !ok {
+		t.Fatalf("command message = %T", cmd())
+	}
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.renameInFlight || !strings.Contains(m.status, "Renamed old to new") {
+		t.Fatalf("rename completion state: inFlight=%v status=%q", m.renameInFlight, m.status)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(activeRoot, "new"))
+	if err != nil || resolved != filepath.Join(cfg.ArchiveSkillsRoot(), "new") {
+		t.Fatalf("active link = %q, %v", resolved, err)
+	}
+}

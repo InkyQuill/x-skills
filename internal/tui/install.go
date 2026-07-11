@@ -785,7 +785,7 @@ func (m *Model) archiveInstallRowWithConflictPreparing(
 	}
 }
 
-func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath, newPath string) installArchiveRowOperation {
+func (m *Model) archiveInstallRowRenamingExisting(row installResultView, newName string) installArchiveRowOperation {
 	m.install.previewToken++
 	m.install.archiveToken++
 	token := m.install.archiveToken
@@ -812,12 +812,7 @@ func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath
 		if err != nil {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
-		if _, err := os.Lstat(newPath); err == nil {
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: fmt.Errorf("archive name already exists: %s", filepath.Base(newPath))}
-		} else if !os.IsNotExist(err) {
-			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: fmt.Errorf("inspect archive destination %q: %w", newPath, err)}
-		}
-		if err := os.Rename(oldPath, newPath); err != nil {
+		if _, err := actions.RenameArchive(cfg, row.Result.Name, newName); err != nil {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: err}
 		}
 		_, err = installApplyArchive(remote.AddRequest{
@@ -828,25 +823,13 @@ func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath
 			Conflict:    remote.ConflictReplaceArchive,
 		})
 		if err != nil {
-			if rollbackErr := rollbackExistingArchiveRename(oldPath, newPath); rollbackErr != nil {
+			if _, rollbackErr := actions.RenameArchive(cfg, newName, row.Result.Name); rollbackErr != nil {
 				err = fmt.Errorf("apply incoming archive after renaming existing archive: %w; rollback rename: %w", err, rollbackErr)
 			}
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: err}
 		}
 		return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateArchived}
 	}
-}
-
-func rollbackExistingArchiveRename(oldPath, newPath string) error {
-	if _, err := os.Lstat(oldPath); err == nil {
-		return fmt.Errorf("original archive path already exists: %s", oldPath)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect original archive path %q: %w", oldPath, err)
-	}
-	if err := os.Rename(newPath, oldPath); err != nil {
-		return fmt.Errorf("restore original archive: %w", err)
-	}
-	return nil
 }
 
 func (m *Model) openInstallNameConflictModal(row installResultView) {
@@ -915,19 +898,7 @@ func newInstallRenameModal(row installResultView, renameExisting bool) modal {
 }
 
 func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName string) tea.Cmd {
-	if len(m.repoUsage[row.Result.Name]) > 0 {
-		m.status = "cannot rename archive while active links exist; unlink them first"
-		m.install.Message = m.status
-		return nil
-	}
-	oldPath, err := repo.SkillPath(m.cfg, row.Result.Name)
-	if err != nil {
-		m.status = err.Error()
-		m.install.Message = m.status
-		return nil
-	}
-	newPath, err := repo.SkillPath(m.cfg, newName)
-	if err != nil {
+	if err := repo.ValidateName(newName); err != nil {
 		m.status = err.Error()
 		m.install.Message = m.status
 		return nil
@@ -937,7 +908,7 @@ func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName 
 		m.install.Message = m.status
 		return nil
 	}
-	operation := m.archiveInstallRowRenamingExisting(row, oldPath, newPath)
+	operation := m.archiveInstallRowRenamingExisting(row, newName)
 	if operation == nil {
 		return nil
 	}

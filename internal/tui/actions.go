@@ -40,6 +40,97 @@ type recommendationResultMsg struct {
 	reloadErr error
 }
 
+type renameArchiveResultMsg struct {
+	token     uint64
+	oldName   string
+	newName   string
+	result    actions.RenameResult
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
+	err       error
+	reloadErr error
+}
+
+func (m *Model) openRepoRenameModal() {
+	names := m.selectedRepoSkillNames()
+	if len(names) != 1 {
+		m.status = "select exactly one archived skill to rename"
+		return
+	}
+	oldName := names[0]
+	lines := []string{"New archive name", "", "Visible managed usages that will be renamed:"}
+	usagePaths := m.visibleManagedUsagePaths(oldName)
+	if len(usagePaths) == 0 {
+		lines = append(lines, "  none")
+	} else {
+		for _, path := range usagePaths {
+			lines = append(lines, "  "+path)
+		}
+	}
+	lines = append(lines, "", "Other projects are not indexed and may still link to the old archive path.")
+	m.modal = newTextModal("Rename archive: "+oldName, strings.Join(lines, "\n"), oldName, func(current *Model, newName string) tea.Cmd {
+		return current.beginRepoRename(oldName, newName)
+	})
+}
+
+func (m Model) visibleManagedUsagePaths(name string) []string {
+	paths := []string{}
+	for _, group := range m.active {
+		for _, occurrence := range group.Members {
+			if occurrence.Status == actions.StatusManaged && filepath.Base(occurrence.Path) == name {
+				paths = append(paths, occurrence.Path)
+			}
+		}
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+func (m *Model) beginRepoRename(oldName, newName string) tea.Cmd {
+	if m.renameInFlight {
+		return nil
+	}
+	if err := repo.ValidateName(newName); err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	m.renameToken++
+	token := m.renameToken
+	m.renameInFlight = true
+	m.modal = nil
+	m.status = "renaming " + oldName + "..."
+	cfg := m.cfg
+	return func() tea.Msg {
+		msg := renameArchiveResultMsg{token: token, oldName: oldName, newName: newName}
+		msg.result, msg.err = actions.RenameArchive(cfg, oldName, newName)
+		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
+		return msg
+	}
+}
+
+func (m *Model) applyRenameArchiveResult(msg renameArchiveResultMsg) tea.Cmd {
+	if msg.token != m.renameToken {
+		return nil
+	}
+	m.renameInFlight = false
+	if msg.err != nil {
+		m.status = "archive rename failed: " + msg.err.Error()
+		return nil
+	}
+	if msg.reloadErr == nil {
+		m.active, m.repo, m.issues, m.repoUsage = msg.active, msg.repo, msg.issues, msg.repoUsage
+		m.selected[ViewRepo] = map[string]bool{"repo:" + msg.newName: true}
+		m.clampCursor()
+	}
+	m.status = "Renamed " + msg.oldName + " to " + msg.newName
+	if msg.reloadErr != nil {
+		m.status += ", but refreshing the TUI failed: " + msg.reloadErr.Error()
+	}
+	return nil
+}
+
 func (m *Model) queueProjectReconciliation() bool {
 	if !m.mutationProjectTouched {
 		return false

@@ -58,6 +58,8 @@ type Model struct {
 	pendingMutationCmd     tea.Cmd
 	recommendationToken    uint64
 	recommendationInFlight bool
+	renameToken            uint64
+	renameInFlight         bool
 	restoreToken           uint64
 	restoreInFlight        bool
 	restoreCancel          context.CancelFunc
@@ -179,6 +181,8 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, m.applyMutationReconcileResult(msg)
 	case recommendationResultMsg:
 		return m, m.applyRecommendationResult(msg)
+	case renameArchiveResultMsg:
+		return m, m.applyRenameArchiveResult(msg)
 	case restorePlanMsg:
 		return m, m.applyRestorePlanResult(msg)
 	case restoreApplyMsg:
@@ -318,6 +322,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if m.view == ViewRepo {
 			return m, m.toggleRepoRecommendations()
+		}
+	case keyRepoRename:
+		if m.view == ViewRepo && !m.renameInFlight {
+			m.openRepoRenameModal()
 		}
 	case "s":
 		if !m.restoreInFlight {

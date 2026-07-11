@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +31,13 @@ type NameGroup struct {
 }
 
 func Discover(cfg config.Config, destinations []roots.ActiveRoot) ([]NameGroup, error) {
+	return DiscoverContext(context.Background(), cfg, destinations)
+}
+
+func DiscoverContext(ctx context.Context, cfg config.Config, destinations []roots.ActiveRoot) ([]NameGroup, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	destinationPaths, err := canonicalPaths(destinations)
 	if err != nil {
 		return nil, err
@@ -46,6 +54,9 @@ func Discover(cfg config.Config, destinations []roots.ActiveRoot) ([]NameGroup, 
 	grouped := make(map[string]map[string]*Candidate)
 	assessmentPaths := make(map[string]string)
 	for _, occurrence := range active {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		rootPath, err := canonicalPath(occurrence.Root.Path)
 		if err != nil {
 			return nil, fmt.Errorf("resolve Skills Folder %q: %w", occurrence.Root.Path, err)
@@ -79,6 +90,9 @@ func Discover(cfg config.Config, destinations []roots.ActiveRoot) ([]NameGroup, 
 
 	groups := make([]NameGroup, 0, len(grouped))
 	for name, variants := range grouped {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		group := NameGroup{Name: name, Variants: make([]Candidate, 0, len(variants))}
 		for _, candidate := range variants {
 			profile, err := archiveCompatibility(cfg, name, candidate.Fingerprint)

@@ -46,7 +46,7 @@ func (m *Model) beginSyncCandidates(workbench syncWorkbenchModal) tea.Cmd {
 	m.syncToken++
 	workbench.token = m.syncToken
 	m.modal = workbench
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	m.syncCancel = cancel
 	m.syncInFlight = true
 	m.status = "scanning project Skills Folders..."
@@ -54,7 +54,7 @@ func (m *Model) beginSyncCandidates(workbench syncWorkbenchModal) tea.Cmd {
 	m.modal = workbench
 	cfg, destinations, token := m.cfg, workbench.selectedRoots(), m.syncToken
 	return func() tea.Msg {
-		groups, err := syncer.Discover(cfg, destinations)
+		groups, err := syncer.DiscoverContext(ctx, cfg, destinations)
 		return syncCandidatesMsg{token: token, groups: groups, err: err}
 	}
 }
@@ -63,12 +63,14 @@ func (m *Model) applySyncCandidates(msg syncCandidatesMsg) tea.Cmd {
 	if msg.token != m.syncToken {
 		return nil
 	}
+	m.cancelSyncWork()
 	w, ok := m.modal.(syncWorkbenchModal)
 	if !ok || w.token != msg.token {
 		return nil
 	}
-	m.syncInFlight = false
 	if msg.err != nil {
+		w.isLoading = false
+		m.modal = w
 		m.status = "sync scan failed: " + msg.err.Error()
 		return nil
 	}
@@ -100,7 +102,7 @@ func (m *Model) beginSyncPlan(workbench syncWorkbenchModal) tea.Cmd {
 			return syncPlanMsg{token: token, err: ctx.Err()}
 		default:
 		}
-		plan, err := syncer.Preflight(cfg, groups, destinations, selection, resolutions)
+		plan, err := syncer.PreflightContext(ctx, cfg, groups, destinations, selection, resolutions)
 		return syncPlanMsg{token: token, plan: plan, err: err}
 	}
 }
@@ -109,18 +111,20 @@ func (m *Model) applySyncPlan(msg syncPlanMsg) tea.Cmd {
 	if msg.token != m.syncToken {
 		return nil
 	}
+	m.cancelSyncWork()
 	w, ok := m.modal.(syncWorkbenchModal)
 	if !ok || w.token != msg.token {
 		return nil
 	}
-	m.syncInFlight = false
 	if msg.err != nil {
+		w.isLoading = false
+		m.modal = w
 		m.status = "sync planning failed: " + msg.err.Error()
 		return nil
 	}
 	w.plan = msg.plan
 	w.isLoading = false
-	if len(msg.plan.Conflicts) > 0 && len(w.conflictNames) == 0 {
+	if syncPlanHasUnresolvedConflicts(msg.plan) {
 		w.conflictNames = make(map[string]string, len(msg.plan.Conflicts))
 		for _, conflict := range msg.plan.Conflicts {
 			w.conflictNames[conflict.DestinationPath] = conflict.SuggestedPreserveAs
@@ -132,6 +136,15 @@ func (m *Model) applySyncPlan(msg syncPlanMsg) tea.Cmd {
 	m.modal = w
 	m.status = ""
 	return nil
+}
+
+func syncPlanHasUnresolvedConflicts(plan syncer.Plan) bool {
+	for _, conflict := range plan.Conflicts {
+		if conflict.Resolution.Action == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) beginSyncApply(workbench syncWorkbenchModal) tea.Cmd {
@@ -190,6 +203,10 @@ func (m *Model) applySyncResult(msg syncResultMsg) tea.Cmd {
 	m.modal = nil
 	if msg.result.PlanError != nil {
 		m.status = "sync failed: " + msg.result.PlanError.Error()
+		return nil
+	}
+	if msg.result.ManifestError != nil {
+		m.status = "sync failed: " + msg.result.ManifestError.Error()
 		return nil
 	}
 	m.status = fmt.Sprintf("synced %d skills; %d failed", len(msg.result.Succeeded), len(msg.result.Failed))

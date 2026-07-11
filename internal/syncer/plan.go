@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -82,6 +83,20 @@ func Preflight(
 	selection Selection,
 	resolutions []ConflictResolution,
 ) (Plan, error) {
+	return PreflightContext(context.Background(), cfg, groups, destinations, selection, resolutions)
+}
+
+func PreflightContext(
+	ctx context.Context,
+	cfg config.Config,
+	groups []NameGroup,
+	destinations []roots.ActiveRoot,
+	selection Selection,
+	resolutions []ConflictResolution,
+) (Plan, error) {
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
+	}
 	destinations, err := validateDestinations(cfg, destinations)
 	if err != nil {
 		return Plan{}, err
@@ -103,6 +118,9 @@ func Preflight(
 		return Plan{}, err
 	}
 	for _, candidate := range selected {
+		if err := ctx.Err(); err != nil {
+			return Plan{}, err
+		}
 		reservedNames[candidate.Name] = struct{}{}
 	}
 	for _, resolution := range resolutions {

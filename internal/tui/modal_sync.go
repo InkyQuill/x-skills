@@ -75,7 +75,7 @@ func (w syncWorkbenchModal) View(width, height int, m Model) string {
 		}
 	case syncStageCandidates:
 		for i, group := range w.groups {
-			candidate := group.Variants[0]
+			candidate := w.chosenCandidate(group)
 			body = append(body, w.checkLine(i, w.groupSelected(group), group.Name+"  ["+string(candidate.Compatibility.State)+"]", m))
 		}
 	case syncStageVariants:
@@ -90,7 +90,7 @@ func (w syncWorkbenchModal) View(width, height int, m Model) string {
 				if w.variants[group.Name] == candidate.ID {
 					mark = "*"
 				}
-				body = append(body, fmt.Sprintf("  (%s) %s  %s", mark, shortFingerprint(candidate.Fingerprint), candidateSourceLabels(candidate)))
+				body = append(body, fmt.Sprintf("  (%s) %s  [%s]  %s", mark, shortFingerprint(candidate.Fingerprint), candidate.Compatibility.State, candidateSourceLabels(candidate)))
 			}
 		}
 	case syncStageConflicts:
@@ -103,6 +103,7 @@ func (w syncWorkbenchModal) View(width, height int, m Model) string {
 		}
 	case syncStageConfirmation:
 		body = append(body, syncPlanLines(w.plan)...)
+		body = append(body, w.compatibilityWarningLines()...)
 		if w.isApplying {
 			body = append(body, "", "Applying…")
 		}
@@ -115,6 +116,11 @@ func (w syncWorkbenchModal) View(width, height int, m Model) string {
 
 func (w syncWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if w.isApplying {
+		if msg.String() == "esc" || msg.String() == "q" {
+			m.cancelSyncWork()
+			m.syncToken++
+			return true, nil
+		}
 		return false, nil
 	}
 	if w.isLoading {
@@ -134,10 +140,7 @@ func (w syncWorkbenchModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 			m.syncToken++
 			return true, nil
 		}
-		w.stage--
-		if w.stage == syncStageConflicts && len(w.plan.Conflicts) == 0 {
-			w.stage--
-		}
+		w.back()
 		w.index = 0
 		m.modal = w
 		return false, nil
@@ -247,6 +250,10 @@ func (w *syncWorkbenchModal) toggle(m *Model) {
 	case syncStageDestinations:
 		if len(w.destinations) > 0 {
 			w.destinations[w.index].checked = !w.destinations[w.index].checked
+			w.groups = nil
+			w.selected = map[string]bool{}
+			w.variants = map[string]string{}
+			w.invalidatePlan()
 		}
 	case syncStageCandidates:
 		if len(w.groups) == 0 {
@@ -257,10 +264,12 @@ func (w *syncWorkbenchModal) toggle(m *Model) {
 			for _, c := range group.Variants {
 				w.selected[c.ID] = false
 			}
+			w.invalidatePlan()
 			return
 		}
-		candidate := group.Variants[0]
+		candidate := defaultSyncCandidate(group)
 		w.selected[candidate.ID], w.variants[group.Name] = true, candidate.ID
+		w.invalidatePlan()
 	case syncStageVariants:
 		groups := w.divergentGroups()
 		if len(groups) == 0 {
@@ -272,6 +281,10 @@ func (w *syncWorkbenchModal) toggle(m *Model) {
 			if c.ID == current {
 				next := group.Variants[(i+1)%len(group.Variants)]
 				w.variants[group.Name] = next.ID
+				for _, variant := range group.Variants {
+					w.selected[variant.ID] = variant.ID == next.ID
+				}
+				w.invalidatePlan()
 				return
 			}
 		}
@@ -303,6 +316,47 @@ func (w syncWorkbenchModal) groupSelected(group syncer.NameGroup) bool {
 	}
 	return false
 }
+
+func defaultSyncCandidate(group syncer.NameGroup) syncer.Candidate {
+	for _, candidate := range group.Variants {
+		if candidate.Compatibility.State != compatibility.StateIncompatible {
+			return candidate
+		}
+	}
+	return group.Variants[0]
+}
+
+func (w syncWorkbenchModal) chosenCandidate(group syncer.NameGroup) syncer.Candidate {
+	id := w.variants[group.Name]
+	for _, candidate := range group.Variants {
+		if candidate.ID == id {
+			return candidate
+		}
+	}
+	return defaultSyncCandidate(group)
+}
+
+func (w *syncWorkbenchModal) invalidatePlan() {
+	w.plan = syncer.Plan{}
+	w.conflictNames = nil
+}
+
+func (w *syncWorkbenchModal) back() {
+	switch w.stage {
+	case syncStageCandidates:
+		w.stage = syncStageDestinations
+	case syncStageVariants:
+		w.stage = syncStageCandidates
+	case syncStageConflicts:
+		w.stage = syncStageVariants
+	case syncStageConfirmation:
+		if len(w.plan.Conflicts) > 0 {
+			w.stage = syncStageConflicts
+		} else {
+			w.stage = syncStageVariants
+		}
+	}
+}
 func (w syncWorkbenchModal) divergentGroups() []syncer.NameGroup {
 	result := []syncer.NameGroup{}
 	for _, g := range w.groups {
@@ -311,6 +365,24 @@ func (w syncWorkbenchModal) divergentGroups() []syncer.NameGroup {
 		}
 	}
 	return result
+}
+
+func (w syncWorkbenchModal) compatibilityWarningLines() []string {
+	lines := []string{}
+	for _, group := range w.groups {
+		if !w.groupSelected(group) {
+			continue
+		}
+		candidate := w.chosenCandidate(group)
+		if candidate.Compatibility.State == compatibility.StateCompatible {
+			continue
+		}
+		lines = append(lines, "Compatibility warning: "+group.Name+" is "+string(candidate.Compatibility.State))
+		for _, reason := range candidate.Compatibility.Reasons {
+			lines = append(lines, "  "+reason)
+		}
+	}
+	return lines
 }
 func (w syncWorkbenchModal) checkLine(i int, checked bool, label string, m Model) string {
 	check := m.symbols.Unchecked
@@ -379,5 +451,21 @@ func candidateSourceLabels(candidate syncer.Candidate) string {
 	return strings.Join(labels, ", ")
 }
 func syncPlanLines(plan syncer.Plan) []string {
-	return []string{fmt.Sprintf("Migrations  %d", len(plan.Migrations)), fmt.Sprintf("Links       %d", len(plan.Links)), fmt.Sprintf("Preserved   %d", len(plan.Conflicts)), fmt.Sprintf("Skips       %d", len(plan.Skipped))}
+	lines := []string{fmt.Sprintf("Migrations (%d)", len(plan.Migrations))}
+	for _, change := range plan.Migrations {
+		lines = append(lines, "  "+change.Name+"  "+change.SourcePath+" → "+change.ArchivePath)
+	}
+	lines = append(lines, fmt.Sprintf("Links (%d)", len(plan.Links)))
+	for _, change := range plan.Links {
+		lines = append(lines, "  "+change.Name+"  "+change.Action+"  "+change.DestinationPath)
+	}
+	lines = append(lines, fmt.Sprintf("Preserved conflicts (%d)", len(plan.Conflicts)))
+	for _, conflict := range plan.Conflicts {
+		lines = append(lines, "  "+conflict.Name+"  "+conflict.DestinationPath+" → "+conflict.Resolution.PreserveAs)
+	}
+	lines = append(lines, fmt.Sprintf("Skips (%d)", len(plan.Skipped)))
+	for _, skip := range plan.Skipped {
+		lines = append(lines, "  "+skip.Name+"  "+skip.Reason+"  "+skip.DestinationPath)
+	}
+	return lines
 }

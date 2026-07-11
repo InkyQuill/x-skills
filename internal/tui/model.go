@@ -232,10 +232,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingMutationCmd = nil
 		}
 		if modalClosed {
-			if _, ok := closedModal.(syncWorkbenchModal); ok {
-				m.cancelSyncWork()
-				m.syncToken++
-			}
 			m.clearPendingInstallUseOnModalClose(closedModal)
 			m.modal = nil
 		}

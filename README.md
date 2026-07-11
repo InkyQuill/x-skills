@@ -8,9 +8,7 @@ plus global skill roots. To inspect another project, `cd` there first.
 
 ## Go Implementation
 
-The Go CLI and TUI are the authoritative implementation of `x-skills`. The
-earlier Python/Textual source remains in `src/x_skills` only as a historical
-reference; it is not supported or distributed.
+The Go CLI and TUI are the authoritative implementation of `x-skills`.
 
 Build or run the Go implementation from a source checkout:
 

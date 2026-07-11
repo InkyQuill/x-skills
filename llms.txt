@@ -39,7 +39,6 @@ docs/backlog.md   planned work
 docs/superpowers/ plans and specs
 .agents/skills/   active project skill symlinks
 skills/           project-owned x-skills workflow skills
-src/x_skills/     historical, non-distributed Python prototype (reference only)
 CONTEXT.md        project terminology glossary
 ```
 

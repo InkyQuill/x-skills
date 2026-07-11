@@ -28,7 +28,6 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 		"go build -o ~/bin/x-skills ./cmd/x-skills",
 		"go run ./cmd/x-skills list",
 		"x-skills add owner/repo@skill",
-		"src/x_skills",
 	} {
 		if !strings.Contains(readme, required) {
 			t.Errorf("README.md must contain %q", required)
@@ -53,6 +52,7 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 		filepath.Join("tests", "test_cli.py"),
 		filepath.Join("tests", "test_interactive.py"),
 		filepath.Join("tests", "test_install_docs.py"),
+		filepath.Join("src", "x_skills"),
 	} {
 		if _, err := os.Stat(filepath.Join(repoRoot, name)); !os.IsNotExist(err) {
 			t.Errorf("retired distribution artifact %s still exists", name)
@@ -71,6 +71,9 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 			"add-url",
 			"repo add-github",
 			"repo add-url",
+			"Python/Textual source remains",
+			"historical, non-distributed Python prototype",
+			"uv tool install",
 		} {
 			if strings.Contains(content, retired) {
 				t.Errorf("%s contains retired distribution token %q", name, retired)

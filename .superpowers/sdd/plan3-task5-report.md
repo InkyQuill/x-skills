@@ -67,3 +67,17 @@
 - `staticcheck ./...` — pass.
 - `go test -race -count=1 ./...` — pass.
 - `git diff --check` — pass.
+
+## Unavailable-state preflight remediation
+
+- Apply preflight now validates only work eligible to execute. With unavailable desired skills, staged archive candidates and unrelated safe additions are validated, while withheld normalization/removal conflicts are deliberately excluded.
+- `RemovalsBlocked` now covers withheld destructive desired-entry normalizations as well as withheld full-extra cleanup.
+- Added the combined acceptance regression: one unavailable desired skill, one unresolved divergent normalization, and one unrelated missing-link addition. Apply preserves the divergent active copy, creates the unrelated managed link, succeeds partially, and reports the blocked destructive phase.
+
+### Verification
+
+- `go test ./internal/manifest -count=1` — pass.
+- `go vet ./...` — pass.
+- `staticcheck ./...` — pass.
+- `go test -race -count=1 ./...` — pass.
+- `git diff --check` — pass.

@@ -292,6 +292,48 @@ func TestApplyRestoreUnavailableBlocksDesiredNormalization(t *testing.T) {
 	}
 }
 
+func TestApplyRestoreUnavailableIgnoresBlockedConflictAndAppliesUnrelatedAddition(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "divergent"), "divergent")
+	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "safe"), "safe")
+	makeRestoreSkill(t, filepath.Join(root.Path, "divergent"), "divergent")
+	if err := os.WriteFile(filepath.Join(root.Path, "divergent", "local"), []byte("preserve"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{
+		{Name: "divergent", Source: Source{Type: SourceArchive}},
+		{Name: "missing", Source: Source{Type: SourceArchive}},
+		{Name: "safe", Source: Source{Type: SourceArchive}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Conflicts) != 1 || len(plan.Normalizations) != 1 || plan.Normalizations[0].ArchiveName != "" {
+		t.Fatalf("plan = %#v", plan)
+	}
+	if !plan.RemovalsBlocked {
+		t.Fatal("RemovalsBlocked = false")
+	}
+	result, err := ApplyRestore(context.Background(), cfg, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RemovalsBlocked || len(result.Additions) != 1 || result.Additions[0].Name != "safe" {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root.Path, "divergent", "local")); err != nil {
+		t.Fatal("divergent active copy was mutated")
+	}
+	if target, err := filepath.EvalSymlinks(filepath.Join(root.Path, "safe")); err != nil || target != filepath.Join(cfg.ArchiveSkillsRoot(), "safe") {
+		t.Fatalf("safe link = %q, %v", target, err)
+	}
+}
+
 func TestPlanRestoreUsesManagedOccurrenceNameInsteadOfFrontmatterName(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

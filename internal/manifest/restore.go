@@ -154,10 +154,13 @@ func PlanRestore(ctx context.Context, cfg config.Config, request RestoreRequest)
 		}
 		plan.Conflicts = append(plan.Conflicts, conflicts...)
 		if len(plan.Unavailable) > 0 {
-			plan.RemovalsBlocked = len(removals) > 0
+			plan.RemovalsBlocked = len(removals) > 0 || len(plan.Normalizations) > 0
 		} else {
 			plan.Removals = removals
 		}
+	}
+	if len(plan.Unavailable) > 0 && len(plan.Normalizations) > 0 {
+		plan.RemovalsBlocked = true
 	}
 	sortRestorePlan(&plan)
 	return plan, nil
@@ -247,7 +250,17 @@ func validateRestorePlanForApply(cfg config.Config, plan RestorePlan) error {
 			return fmt.Errorf("staged skill %q is unavailable; discard and re-plan", skill.Name)
 		}
 	}
-	for _, changes := range [][]Change{plan.Normalizations, plan.Additions, plan.Removals} {
+	changeSets := [][]Change{plan.Normalizations, plan.Additions, plan.Removals}
+	if len(plan.Unavailable) > 0 {
+		eligibleAdditions := make([]Change, 0, len(plan.Additions))
+		for _, change := range plan.Additions {
+			if !hasNormalizationAtPath(plan.Normalizations, change.Path) {
+				eligibleAdditions = append(eligibleAdditions, change)
+			}
+		}
+		changeSets = [][]Change{eligibleAdditions}
+	}
+	for _, changes := range changeSets {
 		for _, change := range changes {
 			if err := validatePlannedChange(cfg, change); err != nil {
 				return err

@@ -20,6 +20,8 @@ type syncChecklistOption struct {
 	Value string
 }
 
+var errSyncCancelled = errors.New("sync cancelled")
+
 var syncInputIsTerminal = func(input io.Reader) bool {
 	file, ok := input.(interface{ Fd() uintptr })
 	return ok && term.IsTerminal(int(file.Fd()))
@@ -43,6 +45,10 @@ var runSyncChecklist = func(input io.Reader, output io.Writer, options []syncChe
 	}
 	return selected, nil
 }
+
+var runSyncCompatibilityPrompt = defaultSyncCompatibilityPrompt
+
+var runSyncConflictPrompt = defaultSyncConflictPrompt
 
 func newSyncCommand(opts *options) *cobra.Command {
 	var selectors []string
@@ -76,7 +82,19 @@ func newSyncCommand(opts *options) *cobra.Command {
 			}
 			selection, err := chooseSyncSelection(cmd, groups, all, names)
 			if err != nil {
+				if errors.Is(err, errSyncCancelled) || errors.Is(err, huh.ErrUserAborted) {
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "sync cancelled")
+					return nil
+				}
 				return err
+			}
+			acknowledged, err := acknowledgeIncompatibleSelection(cmd, groups, selection, interactive)
+			if err != nil {
+				return err
+			}
+			if !acknowledged {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "sync cancelled")
+				return nil
 			}
 			plan, err := syncer.Preflight(cfg, groups, destinations, selection, nil)
 			if err != nil {
@@ -94,6 +112,10 @@ func newSyncCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
+			}
+			if plan.Cancelled {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "sync cancelled")
+				return nil
 			}
 			printSyncPlan(cmd, plan)
 			if !interactive && !opts.yes && !opts.no {
@@ -196,17 +218,40 @@ func syncChecklistOptions(groups []syncer.NameGroup) ([]syncChecklistOption, []s
 	var defaults []string
 	for _, group := range groups {
 		value := groupSelectionValue(group)
-		state := compatibility.StateUnknown
-		if len(group.Variants) == 1 {
-			state = group.Variants[0].Compatibility.State
-		}
+		state, eligible := syncGroupCompatibility(group)
 		label := fmt.Sprintf("%s  [%s]  %s", group.Name, strings.Join(syncVariantSources(group), ", "), state)
 		options = append(options, syncChecklistOption{Label: label, Value: value})
-		if state != compatibility.StateIncompatible {
+		if eligible {
 			defaults = append(defaults, value)
 		}
 	}
 	return options, defaults
+}
+
+func syncGroupCompatibility(group syncer.NameGroup) (string, bool) {
+	if len(group.Variants) == 1 {
+		state := group.Variants[0].Compatibility.State
+		return string(state), state != compatibility.StateIncompatible
+	}
+	states := make(map[compatibility.State]struct{})
+	eligible := false
+	for _, candidate := range group.Variants {
+		state := candidate.Compatibility.State
+		states[state] = struct{}{}
+		if state != compatibility.StateIncompatible {
+			eligible = true
+		}
+	}
+	if !eligible {
+		return "all incompatible", false
+	}
+	if len(states) > 1 {
+		return "mixed compatibility", true
+	}
+	for state := range states {
+		return "all " + string(state), true
+	}
+	return string(compatibility.StateUnknown), true
 }
 
 func groupSelectionValue(group syncer.NameGroup) string {
@@ -241,7 +286,14 @@ func promptSyncVariant(cmd *cobra.Command, group syncer.NameGroup) (syncer.Candi
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %d. %s  %s\n", index+1, strings.Join(candidateSourceLabels(candidate), ", "), candidate.Compatibility.State)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Select variant [1-%d]: ", len(group.Variants))
-	index, err := readSelection(cmd.InOrStdin(), len(group.Variants))
+	answer, err := readPromptLine(cmd.InOrStdin())
+	if err != nil {
+		return syncer.Candidate{}, err
+	}
+	if strings.TrimSpace(answer) == "" {
+		return syncer.Candidate{}, errSyncCancelled
+	}
+	index, err := readSelection(strings.NewReader(answer), len(group.Variants))
 	if err != nil {
 		return syncer.Candidate{}, err
 	}
@@ -252,21 +304,93 @@ func candidateSourceLabels(candidate syncer.Candidate) []string {
 	return syncVariantSources(syncer.NameGroup{Variants: []syncer.Candidate{candidate}})
 }
 
+func acknowledgeIncompatibleSelection(cmd *cobra.Command, groups []syncer.NameGroup, selection syncer.Selection, interactive bool) (bool, error) {
+	selected := make(map[string]bool, len(selection.CandidateIDs)+len(selection.VariantByName))
+	for _, id := range selection.CandidateIDs {
+		selected[id] = true
+	}
+	for _, id := range selection.VariantByName {
+		selected[id] = true
+	}
+	for _, group := range groups {
+		for _, candidate := range group.Variants {
+			if !selected[candidate.ID] || candidate.Compatibility.State != compatibility.StateIncompatible {
+				continue
+			}
+			printCompatibilityWarning(cmd.OutOrStdout(), candidate)
+			if !interactive {
+				return false, fmt.Errorf("skill %q is incompatible with the selected destinations; choose it from an interactive terminal after reviewing the warning", candidate.Name)
+			}
+			confirmed, err := runSyncCompatibilityPrompt(cmd.InOrStdin(), cmd.OutOrStdout(), candidate)
+			if err != nil {
+				return false, err
+			}
+			if !confirmed {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
+func printCompatibilityWarning(output io.Writer, candidate syncer.Candidate) {
+	_, _ = fmt.Fprintf(output, "warning: %s is incompatible with the selected destinations\n", candidate.Name)
+	for _, reason := range candidate.Compatibility.Reasons {
+		_, _ = fmt.Fprintf(output, "  %s\n", reason)
+	}
+}
+
+func defaultSyncCompatibilityPrompt(input io.Reader, output io.Writer, candidate syncer.Candidate) (bool, error) {
+	_, _ = fmt.Fprintf(output, "Sync incompatible skill %s anyway? [y/N] ", candidate.Name)
+	answer, err := readPromptLine(input)
+	if err != nil {
+		return false, err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes", nil
+}
+
 func promptSyncConflicts(cmd *cobra.Command, conflicts []syncer.Conflict) ([]syncer.ConflictResolution, error) {
 	resolutions := make([]syncer.ConflictResolution, 0, len(conflicts))
 	for _, conflict := range conflicts {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Preserve conflicting skill at %s as [%s]: ", conflict.DestinationPath, conflict.SuggestedPreserveAs)
-		name, err := readPromptLine(cmd.InOrStdin())
+		action, name, err := runSyncConflictPrompt(cmd.InOrStdin(), cmd.OutOrStdout(), conflict)
 		if err != nil {
 			return nil, err
+		}
+		resolutions = append(resolutions, syncer.ConflictResolution{DestinationPath: conflict.DestinationPath, PreserveAs: name, Action: action})
+	}
+	return resolutions, nil
+}
+
+func defaultSyncConflictPrompt(input io.Reader, output io.Writer, conflict syncer.Conflict) (string, string, error) {
+	_, _ = fmt.Fprintf(output, "Conflict at %s:\n", conflict.DestinationPath)
+	_, _ = fmt.Fprintln(output, "  1. replace destination and preserve its content")
+	_, _ = fmt.Fprintln(output, "  2. keep destination and skip this link")
+	_, _ = fmt.Fprintln(output, "  3. cancel sync")
+	_, _ = fmt.Fprint(output, "Choose conflict action [1-3]: ")
+	answer, err := readPromptLine(input)
+	if err != nil {
+		return "", "", err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "1", "r", "replace":
+		_, _ = fmt.Fprintf(output, "Preserve conflicting skill as [%s]: ", conflict.SuggestedPreserveAs)
+		name, err := readPromptLine(input)
+		if err != nil {
+			return "", "", err
 		}
 		name = strings.TrimSpace(name)
 		if name == "" {
 			name = conflict.SuggestedPreserveAs
 		}
-		resolutions = append(resolutions, syncer.ConflictResolution{DestinationPath: conflict.DestinationPath, PreserveAs: name, Action: syncer.ConflictReplace})
+		return syncer.ConflictReplace, name, nil
+	case "2", "k", "keep":
+		return syncer.ConflictKeep, "", nil
+	case "", "3", "c", "cancel":
+		return syncer.ConflictCancel, "", nil
+	default:
+		return "", "", fmt.Errorf("invalid conflict action %q", answer)
 	}
-	return resolutions, nil
 }
 
 func printSyncPlan(cmd *cobra.Command, plan syncer.Plan) {

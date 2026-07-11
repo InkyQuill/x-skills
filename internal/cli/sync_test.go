@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/syncer"
+	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
 )
 
 func TestSyncRequiresExplicitProjectDestination(t *testing.T) {
@@ -108,6 +111,55 @@ func TestSyncInteractiveDefaultsAndLabels(t *testing.T) {
 	}
 }
 
+func TestSyncDivergentChecklistDefaultsReflectVariantCompatibility(t *testing.T) {
+	groups := []syncer.NameGroup{
+		{Name: "blocked", Variants: []syncer.Candidate{
+			{ID: "blocked:a", Name: "blocked", Compatibility: compatibility.Assessment{State: compatibility.StateIncompatible}},
+			{ID: "blocked:b", Name: "blocked", Compatibility: compatibility.Assessment{State: compatibility.StateIncompatible}},
+		}},
+		{Name: "mixed", Variants: []syncer.Candidate{
+			{ID: "mixed:a", Name: "mixed", Compatibility: compatibility.Assessment{State: compatibility.StateIncompatible}},
+			{ID: "mixed:b", Name: "mixed", Compatibility: compatibility.Assessment{State: compatibility.StatePartial}},
+		}},
+	}
+	options, defaults := syncChecklistOptions(groups)
+	if len(defaults) != 1 || defaults[0] != "mixed" {
+		t.Fatalf("defaults = %#v", defaults)
+	}
+	if !strings.Contains(options[0].Label, "all incompatible") || !strings.Contains(options[1].Label, "mixed") {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestSyncExplicitIncompatibleSkillRequiresInteractiveAcknowledgement(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only", "Must use $CLAUDE_PROJECT_DIR.")
+
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "incompatible") || !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("non-TTY incompatible error = %v", err)
+	}
+
+	previousTTY := syncInputIsTerminal
+	syncInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { syncInputIsTerminal = previousTTY })
+	previousPrompt := runSyncCompatibilityPrompt
+	runSyncCompatibilityPrompt = func(io.Reader, io.Writer, syncer.Candidate) (bool, error) { return false, nil }
+	t.Cleanup(func() { runSyncCompatibilityPrompt = previousPrompt })
+	var out bytes.Buffer
+	err = Execute([]string{"--home", home, "--project-root", project, "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "incompatible") || !strings.Contains(out.String(), "$CLAUDE_PROJECT_DIR") {
+		t.Fatalf("warning output = %q", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "claude-only")); !os.IsNotExist(err) {
+		t.Fatalf("declined incompatible skill was archived: %v", err)
+	}
+}
+
 func TestSyncYesDoesNotResolveVariantOrDestinationConflict(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
@@ -162,7 +214,7 @@ func TestSyncInteractiveConflictPromptsForPreserveNameAndConfirmation(t *testing
 	t.Cleanup(func() { runSyncChecklist = previousChecklist })
 
 	var out bytes.Buffer
-	err := Execute([]string{"--home", home, "--project-root", project, "sync", "--at", ".Ag"}, strings.NewReader("one-local\ny\n"), &out, &bytes.Buffer{})
+	err := Execute([]string{"--home", home, "--project-root", project, "sync", "--at", ".Ag"}, strings.NewReader("1\none-local\ny\n"), &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,5 +222,101 @@ func TestSyncInteractiveConflictPromptsForPreserveNameAndConfirmation(t *testing
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestSyncConflictChoicesReplaceKeepAndCancel(t *testing.T) {
+	tests := []struct {
+		name       string
+		action     string
+		preserveAs string
+		wantOutput string
+		wantLink   bool
+	}{
+		{name: "replace", action: syncer.ConflictReplace, preserveAs: "one-local", wantOutput: "one-local", wantLink: true},
+		{name: "keep", action: syncer.ConflictKeep, wantOutput: "skipped: 1"},
+		{name: "cancel", action: syncer.ConflictCancel, wantOutput: "sync cancelled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home, project := t.TempDir(), t.TempDir()
+			cfg := config.Default(project, home)
+			makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "one", "Source.")
+			destination := makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "one", "Destination.")
+
+			previousTTY := syncInputIsTerminal
+			syncInputIsTerminal = func(io.Reader) bool { return true }
+			t.Cleanup(func() { syncInputIsTerminal = previousTTY })
+			previousConflict := runSyncConflictPrompt
+			runSyncConflictPrompt = func(io.Reader, io.Writer, syncer.Conflict) (string, string, error) {
+				return tt.action, tt.preserveAs, nil
+			}
+			t.Cleanup(func() { runSyncConflictPrompt = previousConflict })
+
+			var out bytes.Buffer
+			err := Execute([]string{"--home", home, "--project-root", project, "-y", "sync", "--at", ".Ag", "--skill", "one"}, strings.NewReader(""), &out, &bytes.Buffer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), tt.wantOutput) {
+				t.Fatalf("output missing %q: %s", tt.wantOutput, out.String())
+			}
+			info, err := os.Lstat(destination)
+			if tt.wantLink && (err != nil || info.Mode()&os.ModeSymlink == 0) {
+				t.Fatalf("replace destination not linked: info=%v err=%v", info, err)
+			}
+			if !tt.wantLink && (err != nil || info.Mode()&os.ModeSymlink != 0) {
+				t.Fatalf("kept/cancelled destination changed: info=%v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func TestSyncConflictEOFAndPromptErrorsCancelWithoutReplacement(t *testing.T) {
+	conflict := syncer.Conflict{DestinationPath: "/tmp/one", SuggestedPreserveAs: "one-local"}
+	action, name, err := defaultSyncConflictPrompt(strings.NewReader(""), io.Discard, conflict)
+	if err != nil || action != syncer.ConflictCancel || name != "" {
+		t.Fatalf("EOF result = action %q name %q err %v", action, name, err)
+	}
+	wantErr := errors.New("form cancelled")
+	previous := runSyncConflictPrompt
+	runSyncConflictPrompt = func(io.Reader, io.Writer, syncer.Conflict) (string, string, error) { return "", "", wantErr }
+	t.Cleanup(func() { runSyncConflictPrompt = previous })
+	_, err = promptSyncConflicts(&cobra.Command{}, []syncer.Conflict{conflict})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("prompt error = %v", err)
+	}
+}
+
+func TestSyncChecklistAndVariantCancellationAreClean(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "one", "One.")
+	previousTTY := syncInputIsTerminal
+	syncInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { syncInputIsTerminal = previousTTY })
+	previousChecklist := runSyncChecklist
+	runSyncChecklist = func(io.Reader, io.Writer, []syncChecklistOption, []string) ([]string, error) {
+		return nil, huh.ErrUserAborted
+	}
+	t.Cleanup(func() { runSyncChecklist = previousChecklist })
+	var out bytes.Buffer
+	if err := Execute([]string{"--home", home, "--project-root", project, "sync", "--at", ".Ag"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "sync cancelled") {
+		t.Fatalf("checklist cancellation output = %q", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "one")); !os.IsNotExist(err) {
+		t.Fatalf("cancelled checklist mutated archive: %v", err)
+	}
+
+	group := syncer.NameGroup{Name: "one", Variants: []syncer.Candidate{{ID: "one:a"}, {ID: "one:b"}}}
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(io.Discard)
+	_, err := promptSyncVariant(cmd, group)
+	if !errors.Is(err, errSyncCancelled) {
+		t.Fatalf("variant EOF error = %v", err)
 	}
 }

@@ -53,6 +53,11 @@ x-skills add <source>            archive a remote skill and optionally link it
 x-skills link <name>             link archived skill into active root
 x-skills unlink <name>           remove active skill symlink
 x-skills migrate <name>          archive an unmanaged active skill
+x-skills recommend <name>        add an archived skill to .x-skills.yaml
+x-skills unrecommend <name>      remove a recommendation
+x-skills restore --at .Ag        apply project manifests, preserving extras
+x-skills restore --full --at .Ag exactly reconcile selected project folders
+x-skills sync                     interactively aggregate project skills
 x-skills doctor                  audit and fix common issues
 x-skills doctor --fix -y         auto-fix without prompts
 x-skills tui                     open the Bubble Tea manager
@@ -66,3 +71,8 @@ Destinations are selected with repeatable `--at` selectors, such as
 
 - Repository: https://github.com/InkyQuill/x-skills
 - Issues: https://github.com/InkyQuill/x-skills/issues
+- Domain vocabulary: CONTEXT.md
+- CLI guide: docs/cli.md
+- TUI guide: docs/tui.md
+- Remote skills guide: docs/remote-skills.md
+- Thematic ADRs: docs/adr/

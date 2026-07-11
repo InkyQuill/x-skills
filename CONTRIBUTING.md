@@ -47,6 +47,8 @@ Significant design decisions are recorded as ADRs in `docs/adr/`. When a choice
 involves trade-offs worth weighing, write or update an ADR rather than only
 changing code or docs.
 
+Current behavior is maintained in the [CLI guide](./docs/cli.md), [TUI guide](./docs/tui.md), and [remote skills guide](./docs/remote-skills.md). Update the relevant guide and its documentation assertions when behavior changes; plans and specs are historical implementation inputs, not user documentation.
+
 ### Terminology
 
 Project-specific terms are defined in [CONTEXT.md](./CONTEXT.md). Use that

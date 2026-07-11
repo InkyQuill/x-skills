@@ -34,6 +34,42 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 		}
 	}
 
+	maintainedDocs := map[string]string{
+		"CONTEXT.md":            readFile(t, "CONTEXT.md"),
+		"docs/cli.md":           readFile(t, "docs/cli.md"),
+		"docs/tui.md":           readFile(t, "docs/tui.md"),
+		"docs/remote-skills.md": readFile(t, "docs/remote-skills.md"),
+	}
+	for _, link := range []string{
+		"[CLI guide](docs/cli.md)",
+		"[TUI guide](docs/tui.md)",
+		"[Remote skills guide](docs/remote-skills.md)",
+	} {
+		if !strings.Contains(readme, link) {
+			t.Errorf("README.md must link to %q", link)
+		}
+	}
+	allMaintainedDocs := strings.Join([]string{
+		maintainedDocs["CONTEXT.md"],
+		maintainedDocs["docs/cli.md"],
+		maintainedDocs["docs/tui.md"],
+		maintainedDocs["docs/remote-skills.md"],
+	}, "\n")
+	for _, concept := range []string{
+		"managed skill",
+		"skills folder",
+		".x-skills.yaml",
+		".x-skills.local.yaml",
+		"--at",
+		"current-page selection",
+		"source identity",
+		"archive state",
+	} {
+		if !strings.Contains(strings.ToLower(allMaintainedDocs), strings.ToLower(concept)) {
+			t.Errorf("maintained documentation must describe %q", concept)
+		}
+	}
+
 	llms := readFile(t, "llms.txt")
 	for _, required := range []string{
 		"mkdir -p bin",

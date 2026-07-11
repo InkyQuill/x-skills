@@ -23,18 +23,19 @@ go run ./cmd/x-skills doctor --fix -y --at global:agents
 go run ./cmd/x-skills tui
 ```
 
-Shipped: cwd-based active scanning, local repo listing, `add` (remote
-`skills.sh` search and install with archive-and-link), `link`, `migrate`,
-`unlink`, `doctor` (with `--fix`), and the `x-skills tui` Bubble Tea guided
-manager (Active, Repo, Doctor, and Install pages). Active rows are merged by
+Shipped: cwd-based active scanning, local archive listing, remote search/add,
+link/migrate/unlink, recommend/unrecommend, manifest restore, interactive sync,
+Doctor repair, and the `x-skills tui` Bubble Tea guided manager (Active, Repo,
+Doctor, Install, and Sync workflows). Active rows are merged by
 directory SHA fingerprint so identical linked copies appear as one item while
 changed copies remain separate; the fingerprint is internal and not shown in
 the UI.
 
-Not yet implemented (designed, tracked in `docs/adr/` and
-`docs/superpowers/specs/2026-07-06-go-tui-install-and-repo-updates-design.md`):
-`repo check`/`repo update`/`repo update-all`, and `repo remove`. See that
-design doc and the backlog for current status before relying on any of it.
+Repo update checks, updates, removal, and archive rename are available from the
+Repo TUI page; they are not separate CLI subcommands.
+
+Maintained behavior references: [CLI guide](docs/cli.md), [TUI guide](docs/tui.md),
+[Remote skills guide](docs/remote-skills.md), and [domain vocabulary](CONTEXT.md).
 
 ## Usage
 
@@ -189,7 +190,8 @@ to the repo.
 ## TUI Mode
 
 `x-skills tui` opens the Bubble Tea maintenance manager for longer maintenance
-sessions. The TUI has Active, Repo, Doctor, and Install pages: press `A` for
+sessions. The TUI has Active, Repo, Doctor, and Install pages plus the Sync
+workflow: press `A` for
 Active, `R` for Repo, `D` for Doctor, and `I` for Install. Refresh is `ctrl+r`.
 
 Use Install to search `skills.sh`, preview remote `SKILL.md`, archive a skill,

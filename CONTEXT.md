@@ -159,3 +159,13 @@ _Avoid_: Deleted skill, broken repo
 **Replace**:
 Discarding an existing archived skill and storing incoming content at the same archive name.
 _Avoid_: Update
+
+## Domain invariants
+
+Skills Folders are discovered from the built-in roots and `~/.x-skills/config.yaml`. Each enabled root has a scope, target, path, label, and optional consumer metadata. Consumer IDs describe which agents read the folder; an omitted list means unknown, not agent-agnostic. A skill's compatibility profile is independent metadata: it either declares the skill agent-agnostic or names supported consumers. Inferred compatibility and audit results are warnings, not enforcement or security guarantees.
+
+Archive identity is the archive directory name. Reproducible source identity comes from `.x-skills.json`: source type plus repository/clone URL and skill path, with an optional source ref and installed commit. Equal names without matching source identity are name conflicts, not updates. Archive state is one of not archived, archived, update available, or name conflict.
+
+The effective Project Skill Manifest is the union of committed recommendations in `.x-skills.yaml` and the machine-local `.x-skills.local.yaml` overlay. Restore preserves extra skills by default. It also preserves unavailable archive-only manifest entries while reconciling local state, so one consumer cannot erase another consumer's desired skill. `restore --full` is the explicit exact-reconciliation boundary and affects only selected project Skills Folders.
+
+Filesystem mutations validate their inputs immediately before changing them. Multi-path operations that define one logical change, including archive rename and sync/restore application, stage changes and roll back on failure. Ordinary multi-name CLI batches remain ordered batches: an earlier successful item is not rolled back merely because a later independent item fails. No mutation silently resolves an ambiguous Skills Folder or overwrites a divergent archive.

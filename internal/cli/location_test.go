@@ -25,14 +25,14 @@ func TestResolveLocationsSupportsCanonicalAndLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	locations, err := resolveLocations(cfg, []string{"project:opencode", ".Ag", ".Oc"})
+	locations, err := resolveLocations(cfg, []string{"PROJECT:opencode", "AGENTS", "project:CODEX", "g:Cl", ".Oc"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(locations); got != 3 {
-		t.Fatalf("len(locations) = %d, want 3", got)
+	if got := len(locations); got != 5 {
+		t.Fatalf("len(locations) = %d, want 5", got)
 	}
-	if locations[0].Target != "opencode" || locations[1].Target != "agents" || locations[2].Target != "opencode" {
+	if locations[0].Target != "opencode" || locations[1].Target != "agents" || locations[2].Target != "codex" || locations[3].Target != "claude" || locations[4].Target != "opencode" {
 		t.Fatalf("locations = %#v", locations)
 	}
 }

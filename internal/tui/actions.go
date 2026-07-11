@@ -287,10 +287,9 @@ func (m *Model) applyActiveUsageUnlink(r repoUsageModal) {
 }
 
 type repoLinkModal struct {
-	names       []string
-	locations   []roots.ActiveRoot
-	index       int
-	destination string
+	names     []string
+	locations []roots.ActiveRoot
+	index     int
 }
 
 func (m Model) selectedRepoSkillNames() []string {
@@ -326,23 +325,11 @@ func (m *Model) openRepoLinkModal() {
 		return
 	}
 	linkModal := repoLinkModal{names: names, locations: roots.ActiveRoots(m.cfg, roots.Filter{})}
-	linkModal.destination = linkModal.destinationPath(m)
 	m.modal = linkModal
 }
 
 func (r repoLinkModal) Title() string {
 	return "Link repo skill"
-}
-
-func (r repoLinkModal) destinationPath(m *Model) string {
-	if len(r.names) != 1 {
-		return ""
-	}
-	location, ok := r.selectedLocation()
-	if !ok {
-		return "no active roots configured"
-	}
-	return filepath.Join(location.Path, r.names[0])
 }
 
 func (r repoLinkModal) View(width, height int, m Model) string {
@@ -407,7 +394,6 @@ func linkChoice(selected bool, label string) string {
 func (r repoLinkModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if delta := modalMoveDelta(msg); delta != 0 {
 		r.index = clampModalIndex(r.index+delta, len(r.locations))
-		r.destination = r.destinationPath(m)
 		m.modal = r
 		return false, nil
 	}

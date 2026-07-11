@@ -262,7 +262,7 @@ type activeRootYAML struct {
 var targetPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 func LoadGlobal(cfg Config) (Config, error) {
-	path := filepath.Join(cfg.ArchiveRoot, "config.yaml")
+	path := filepath.Join(cfg.HomeDir, ".x-skills", "config.yaml")
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		cfg.managedRoots = cfg.defaultManagedRoots()
@@ -721,7 +721,6 @@ Expected: PASS.
 
 Add under roots documentation:
 
-```markdown
 Custom managed roots live in `~/.x-skills/config.yaml`:
 
 ```yaml
@@ -737,7 +736,6 @@ active_roots:
 ```
 
 Use `x-skills list-roots --json` for agent-readable root discovery.
-```
 
 - [ ] **Step 2: Update backlog**
 

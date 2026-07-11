@@ -292,7 +292,7 @@ func installArchiveTemp(req AddRequest, tempPath, archivePath string, existed bo
 	if err := renamePath(tempPath, archivePath); err != nil {
 		if restoreErr := renamePath(backupPath, archivePath); restoreErr != nil {
 			backupActive = false
-			return fmt.Errorf("install archive: %w; restore backup: %v", err, restoreErr)
+			return fmt.Errorf("install archive: %w; restore backup: %w", err, restoreErr)
 		}
 		backupActive = false
 		return fmt.Errorf("install archive: %w", err)

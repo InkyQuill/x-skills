@@ -28,7 +28,7 @@ func newLinkCommand(rootOptions *options) *cobra.Command {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "linked: %s\n", results[0].Name)
 				return nil
 			}
-			if len(args) == 1 && len(failures) == 1 {
+			if len(args) == 1 && len(failures) == 1 && len(results) == 0 {
 				return failures[0].err
 			}
 

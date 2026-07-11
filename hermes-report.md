@@ -1,6 +1,8 @@
 # Hermes Report: Go TUI Standardization Review
 
 Date: 2026-07-08
+Snapshot note: findings describe the pre-Install implementation reviewed on
+this date; later changes may have resolved them.
 Scope: `internal/tui/**`, `internal/cli/tui.go`, cross-checked against
 `docs/adr/*`, `docs/superpowers/specs/2026-07-06-go-tui-full-parity-design.md`,
 `2026-07-06-go-tui-views-mockups.md`, and
@@ -20,6 +22,7 @@ outright missing, and what's actively wrong.
 ## 1. Standardization gaps (inconsistent between views today)
 
 ### 1.1 `enter` (details) only works in Active — spec requires it everywhere
+
 `Model.openDetailModal()` (`internal/tui/model.go:156`) has a `switch m.view`
 with **only** a `ViewActive` case. Pressing `enter` in Repo or Doctor does
 nothing. The full-parity spec and views-mockups doc both show a Repo detail
@@ -34,11 +37,13 @@ builders and wire them into `openDetailModal`'s switch, mirroring
 `activeDetailModal`.
 
 ### 1.2 `p` (preview) is Active/Repo only, but that's actually correct
+
 Spec says preview applies to Active and Repo, not Doctor — `openPreviewModal`
 correctly has no Doctor case. No change needed here; flagging only so it's
 not confused with 1.1's gap (this one is *intentional* scope, not a bug).
 
 ### 1.3 Selection model contradicts ADR 0010
+
 ADR 0010 says: "Selection sets are stored per page, so Active, Repo, Doctor,
 and Install can preserve local context without leaking actions across
 pages." The actual implementation (`Model.selected map[string]bool`,
@@ -62,7 +67,8 @@ cursor-only bug — collapsing that back to a single map in code while the ADR
 still claims otherwise is a doc/code mismatch waiting to bite the next
 person who touches selection.
 
-### 1.4 Footer/help still call Install "reserved"
+### 1.4 Historical: footer/help called Install "reserved"
+
 `internal/tui/modal_help.go:28`: `"I", Label: "reserved for Install view"`.
 This is now wrong per ADR 0015 (Install is a decided top-level page, not
 "reserved"), and the `I` key isn't even wired in `model.go`'s key switch at
@@ -79,6 +85,7 @@ text to "Install (design in progress, not yet available)" rather than
 case, and wire it exactly like the other three tabs for standardization.
 
 ### 1.5 Row-selection/cursor markers vs. Doctor's lack of `space`
+
 Active and Repo rows render a selection checkbox (`m.symbols.Unchecked` /
 `Checked`) via `rowPrefix`, and `toggleSelection()`/`" "` is globally wired in
 `handleKey`. Doctor rows also render the same checkbox via `rowPrefix` (see
@@ -99,6 +106,7 @@ Doctor shouldn't have selection — the row renderer just wasn't updated to
 match.
 
 ### 1.6 `c` (clear selection) is undocumented in the parity spec's keymap table but shipped everywhere
+
 `model.go` wires `case "c":` globally, and it's in every view's footer
 (`views.go` `commandPalette`) and in the help modal. This is a *good*,
 harmless addition, but it's not in the full-parity-design spec's keymap table
@@ -110,6 +118,7 @@ contributors don't "discover" it only by reading code, and so nothing removes
 it thinking it's an accidental leftover.
 
 ### 1.7 Inconsistent conflict-diff legend text vs. established glossary
+
 `modal_diff.go`'s `diffLegend()` renders `"Legend: Archive  Incoming active"`.
 The synthesized Install/Repo-updates design doc (and R19, explicitly) settled
 on the label pair **"Archive" vs "Incoming remote"** specifically to avoid
@@ -150,8 +159,8 @@ the ask was "what needs to be changed/fixed."
   this is the seam the future Repo-update background pipeline (ADR 0007) is
   supposed to hook into, and no scaffolding for that (tea.Cmd-based async
   loading, stale-result discarding) exists yet anywhere in `internal/tui`.
-- **Install page** doesn't exist at all yet (expected — tracked in the new
-  synthesized spec doc, not a surprise).
+- **Install page (historical snapshot):** did not exist in the reviewed
+  2026-07-08 snapshot; it is now implemented in `internal/tui/install.go`.
 - **Repo rows have no source/update/audit badges.** Expected per the above;
   `repo.Skill` and the row renderer have no fields for tracked/update/audit
   state yet.
@@ -168,12 +177,14 @@ the ask was "what needs to be changed/fixed."
 ## 3. Bugs / things that are just wrong today
 
 ### 3.1 `containsString` in `rows.go` looks unused outside its own package but has a near-duplicate
+
 Not a functional bug, but worth a quick cleanup pass: `appendUnique` (used
 constantly) calls `containsString`, which is fine — no duplicate found on
 closer check. Retracting this one; false lead during review. (Kept in report
 transparently rather than silently dropping it — no action needed.)
 
 ### 3.2 Preview modal scroll can be pushed negative-adjacent / no bounds re-check on resize
+
 `previewModal.Update`'s `"down"` case does `p.scroll++` with **no upper bound
 check at all** — `clampScroll` is only applied in `View()`, and `View` is
 re-derived from `p.scroll` each render, so this self-corrects visually, but
@@ -184,6 +195,7 @@ render. Harmless today, but it's exactly the kind of ad-hoc scroll math ADR
 properly. Low priority, but a good first candidate to migrate.
 
 ### 3.3 `repoLinkModal.Update` double-applies on Enter
+
 ```go
 case "enter":
     r.apply(m)
@@ -192,6 +204,7 @@ if msg.Type == tea.KeyEnter {
     r.apply(m)
 }
 ```
+
 (`internal/tui/actions.go:271-277`). `msg.String() == "enter"` and
 `msg.Type == tea.KeyEnter` are the same condition reached two different ways,
 so **`r.apply(m)` runs twice** for a single Enter keypress. `apply` calls
@@ -212,6 +225,7 @@ actually succeeded on the first call.
 block; the `case "enter":` inside the switch above already covers it.
 
 ### 3.4 `chipStyle` is dead code
+
 `internal/tui/styles.go` defines `chipStyle` (line 21) and NO_COLOR-resets it
 (line 46), but nothing in `internal/tui` ever calls `chipStyle.Render(...)` —
 verified via grep, the only two hits are the definition and its own reset.
@@ -219,6 +233,7 @@ Not a bug, but dead styling code that should either be wired up (if it was
 meant to replace the ad-hoc `renderRootChip`/`Pill` path) or removed.
 
 ### 3.5 `rootChip()` symbol-mapping duplicated string-switch logic lives in two files with the same name/shape but different purposes
+
 `internal/tui/symbols.go:45` has `rootChip(scope, target string) string`
 which is the canonical `.Ag`/`~Cl` mapper used everywhere. This is fine as a
 single source of truth — just flagging that anyone adding a 4th target
@@ -230,6 +245,7 @@ moment that backlog item ships. Worth a defensive width-cap or a TODO
 comment pointing at the backlog item so it isn't forgotten.
 
 ### 3.6 `renderInspector` for Active never shows the `reason`/broken diagnostics that the row's `activeDetail()` shows
+
 The Active row (`renderActiveRows`) calls `activeDetail(group)` which shows
 `group.Reason` (styled danger red) when status is broken. But
 `renderInspector`'s `ViewActive` case (`views.go:100-105`) only ever prints

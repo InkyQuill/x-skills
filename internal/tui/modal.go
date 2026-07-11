@@ -145,6 +145,9 @@ func visibleModalBody(lines []string, height int, focus int, scroll int, useScro
 			start = len(lines) - height
 		}
 	} else {
+		if start < 0 {
+			start = 0
+		}
 		maxStart := len(lines) - height
 		if start > maxStart {
 			start = maxStart

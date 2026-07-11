@@ -17,7 +17,7 @@ type Filter struct {
 }
 
 func ActiveRoots(cfg config.Config, filter Filter) []ActiveRoot {
-	if filter.Scope != "" && filter.Scope != config.ScopeProject && filter.Scope != config.ScopeGlobal {
+	if filter.Scope != "" && !config.ValidScope(filter.Scope) {
 		return nil
 	}
 

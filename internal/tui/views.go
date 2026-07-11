@@ -558,14 +558,14 @@ func renderRootChip(symbols symbols, chip string, background lipgloss.TerminalCo
 			Color:      globalChip.GetBackground(),
 			Background: background,
 			Text:       chip,
-			TextColor:  lipgloss.Color("230"),
+			TextColor:  chipText.GetForeground(),
 		})
 	}
 	return tuiui.Pill(symbols.BadgeLeft, symbols.BadgeRight, tuiui.PillProps{
 		Color:      projectChip.GetBackground(),
 		Background: background,
 		Text:       chip,
-		TextColor:  lipgloss.Color("230"),
+		TextColor:  chipText.GetForeground(),
 	})
 }
 

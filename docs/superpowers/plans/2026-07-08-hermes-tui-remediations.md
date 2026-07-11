@@ -839,7 +839,7 @@ Replace the body of `docs/adr/0010-tui-actions-use-current-page-selection.md` wi
 ```markdown
 # TUI actions use current-page selection with cursor fallback
 
-All TUI actions operate on selected rows in the current page, falling back to the highlighted row only when that page has no selection. Selection sets are stored per page using view-keyed maps, so Active, Repo, Doctor, and Install can preserve local context without leaking actions across pages.
+All TUI actions operate on selected rows in the current page, falling back to the highlighted row only when that page has no selection. Selection sets are isolated per page using view-keyed maps, but are cleared when switching views. Actions therefore never reuse selections from another page.
 
 Active and Repo support row selection. Doctor intentionally does not: Doctor fix operates on all current Doctor issues after confirmation. Selection state is cleared on view switches to avoid leaking actions across pages and to match the accepted full-parity spec.
 

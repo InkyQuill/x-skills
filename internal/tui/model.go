@@ -124,8 +124,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.modal != nil {
 		closedModal := m.modal
-		close, cmd := m.modal.Update(msg, &m)
-		if close {
+		modalClosed, cmd := m.modal.Update(msg, &m)
+		if modalClosed {
 			m.clearPendingInstallUseOnModalClose(closedModal)
 			m.modal = nil
 		}
@@ -144,9 +144,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.filter.Active {
-		if m.filter.update(msg) {
+		if handled, cmd := m.filter.update(msg); handled {
 			m.cursor = 0
-			return m, nil
+			return m, cmd
 		}
 	}
 
@@ -272,9 +272,12 @@ func (m *Model) openPreviewModal() {
 	case ViewRepo:
 		skills := m.visibleRepoSkills()
 		if m.cursor >= 0 && m.cursor < len(skills) {
-			if path, err := repo.SkillPath(m.cfg, skills[m.cursor].Name); err == nil {
-				m.modal = newPreviewModal("Preview: "+skills[m.cursor].Name, path)
+			path, err := repo.SkillPath(m.cfg, skills[m.cursor].Name)
+			if err != nil {
+				m.status = "could not open preview: " + err.Error()
+				return
 			}
+			m.modal = newPreviewModal("Preview: "+skills[m.cursor].Name, path)
 		}
 	}
 }

@@ -48,8 +48,10 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at the repository
-issues page. All complaints will be reviewed and investigated promptly and fairly.
+reported privately to the community leaders responsible for enforcement at
+`me@inkyquill.net`. Use this confidential channel for sensitive complaints
+instead of the public repository issues page. All complaints will be reviewed
+and investigated promptly and fairly.
 
 ## Attribution
 

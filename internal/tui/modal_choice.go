@@ -62,13 +62,7 @@ func (c choiceModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 		return true, nil
 	}
 	if delta := modalMoveDelta(msg); delta != 0 {
-		c.index += delta
-		if c.index < 0 {
-			c.index = 0
-		}
-		if c.index >= len(c.choices) {
-			c.index = len(c.choices) - 1
-		}
+		c.index = clampModalIndex(c.index+delta, len(c.choices))
 		m.modal = c
 		return false, nil
 	}

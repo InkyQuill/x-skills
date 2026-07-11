@@ -85,6 +85,13 @@ func TestConstrainedModalKeepsFooterVisibleWithLongBody(t *testing.T) {
 	}
 }
 
+func TestVisibleModalBodyClampsNegativeScroll(t *testing.T) {
+	got := visibleModalBody([]string{"one", "two", "three"}, 2, 0, -1, true)
+	if len(got) != 2 {
+		t.Fatalf("visibleModalBody() returned %d lines, want 2", len(got))
+	}
+}
+
 func TestScrollableModalMovesWithJK(t *testing.T) {
 	lines := make([]string, 20)
 	for i := range lines {

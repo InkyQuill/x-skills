@@ -4,12 +4,22 @@ Scope: `internal/tui/**` (~13.4k lines incl. tests) on branch `go-rewrite-protot
 Method: full manual read of every non-generated file, `go vet`, `staticcheck`, `go test -race`,
 and a targeted deep-dive on `install.go` (the largest, network/disk-touching file).
 
+## Current-state verification (2026-07-11)
+
+The review below is retained as the original finding ledger. Against the current dirty working tree:
+
+- `go test ./internal/tui/... -race -count=1` passes, so finding 1 is no longer blocking.
+- The row/command alignment risk in finding 5 is repaired by pairing each operation with its row, but production code still synchronously asserts `installArchiveMsg`; the typed-operation cleanup remains planned.
+- Findings 2–4 and 6–8 remain applicable.
+- Implementation is split between [TUI production readiness](superpowers/plans/2026-07-11-tui-production-readiness.md) and [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md).
+
 ## Blocking issues
 
 ### 1. A test currently fails on this branch
+
 `go test ./internal/tui/... -race` fails:
 
-```
+```text
 --- FAIL: TestInspectorRendersBlockValueWithoutTruncatingDescription (internal/tui/inspector_test.go:88)
 ```
 
@@ -27,6 +37,7 @@ so wrapped lines don't carry trailing padding, then `git add` the new files.
 ## High-severity findings (install.go — the Install/marketplace tab)
 
 ### 2. Cancelled/stale batch archive operations still run to completion
+
 `archiveInstallRows` (`install.go:425-467`) and the `cmd().(installArchiveMsg)` unwrap
 loop it drives never check `useGeneration.isCurrent(token)` before executing each row's
 command — contrast with `installAndUseRowsWithProgress` (lines ~1002-1055), which does
@@ -42,6 +53,7 @@ bail out per-row (like the install/use path already does) instead of only filter
 final message.
 
 ### 3. Search results can trigger an unbounded burst of concurrent git checkouts
+
 `applyInstallSearchResult` (`install.go:1384+`) calls `installArchiveStateCheck` for
 *every* already-archived result in a page of search results and batches them all with
 `tea.Batch`. Each check does a full `checkouts.Checkout` (clone/fetch) +
@@ -57,6 +69,7 @@ janky and could trip GitHub's abuse-rate limiting.
 ## Medium-severity findings
 
 ### 4. Silent failures in the background "update available" check
+
 Inside `installArchiveStateCheck`'s `tea.Cmd` (`install.go:1432-1465`), every failure
 path (checkout error, `FindSkillContext` error, `PlanArchive` error) returns
 `installArchiveStateMsg{state: ""}`, and `applyInstallArchiveStateResult` silently
@@ -66,6 +79,7 @@ looks up-to-date, with no way for the user to tell "no update" apart from "check
 failed." Worth at minimum surfacing a muted "check failed" pill, or logging.
 
 ### 5. Unchecked type assertions rely on an unenforced invariant
+
 `cmd().(installArchiveMsg)` appears three times (`install.go:441, 895, 1009`) unwrapping
 a `tea.Cmd` synchronously. It's safe today only because `archiveInstallRow` always
 returns a non-nil closure of that exact message type — but `archiveInstallRows` guards
@@ -77,6 +91,7 @@ skill name. Not currently triggered; worth a comment or an assertion so it fails
 if that invariant is ever broken.
 
 ### 6. Reload is always synchronous, and the async path is dead code
+
 `model.go:330` defines `reloadCmd()` — a `tea.Cmd` that runs `loadTUIData` off the
 render loop and dispatches `reloadResultMsg` — but **nothing calls it** (verified via
 grep, only the definition matches). Both startup (`New()` → `m.reload()`, `model.go:76`)
@@ -92,6 +107,7 @@ its token-matching plumbing already assume async is the goal).
 ## Low-severity / polish
 
 ### 7. No explicit cancellation on navigating away from Install
+
 All network/checkout operations rely purely on `context.WithTimeout(context.Background(), ...)`
 (60s-ish timeouts throughout `install.go`) with no `context.WithCancel` tied to view
 changes, closing the app, or `ctrl+c`. Leaving the Install tab or quitting doesn't
@@ -102,12 +118,14 @@ and self-cleans, but worth a `context.WithCancel` wired to `tea.Quit`/view-chang
 ships as a long-lived TUI people leave running.
 
 ### 8. Large multi-select batches have no aggregate timeout or progress detail
+
 `archiveInstallRows` and `installAndUseRowsWithProgress` run strictly sequentially, each
 row with its own ~60s timeout but no cap on the whole batch. A 30-skill multi-select with
 a few slow network calls can make the UI appear to hang for minutes with only a generic
 "archiving N skills..." status, no per-item progress or the ability to cancel mid-batch.
 
 ### 9. `git-status`-visible security check: passed
+
 Verified (not just assumed) that path-traversal protection for archive/skill names is
 solid: `internal/remote/add.go:209` (`validateArchiveName`) rejects absolute paths, `.`,
 `..`, `filepath.Clean` mismatches, and path separators before any `filepath.Join`.
@@ -115,11 +133,13 @@ solid: `internal/remote/add.go:209` (`validateArchiveName`) rejects absolute pat
 interpolated into a `CloneURL` string passed to `git clone` as a CLI argument, into a
 `os.MkdirTemp`-generated temp directory. No injection or traversal vector found here.
 
-## Everything else reviewed (model.go, views.go, actions.go, rows.go, filter.go,
+## Everything else reviewed (model.go, views.go, actions.go, rows.go, filter.go
+
 diff.go, inspector.go, modal*.go, animation.go, keys.go, symbols.go, styles.go,
 options.go, ui/components.go)
 
 No correctness bugs found. Notably solid:
+
 - `NO_COLOR` handling is thorough and centralized (`styles.go` `init()`).
 - Modal stack (`modal.go`) has consistent scroll-clamping and small-terminal fallbacks
   (e.g. `conflictDiffModal` refuses to render below a minimum size instead of corrupting
@@ -130,6 +150,7 @@ No correctness bugs found. Notably solid:
 - Cursor/selection state resets correctly on view switch (`setView`, `model.go:360`).
 
 Two very minor observations, not worth separate fix tickets:
+
 - `conflictDiffModal.Update`'s "down"/"pgdown" increment `scroll` with no upper clamp in
   `Update` itself (only clamped later, per-render, in `View`) — harmless (an `int` that
   grows unboundedly under repeated key-mashing, re-clamped every frame) but inconsistent
@@ -158,6 +179,7 @@ The package already started this (`ui/components.go` has `Pill` and `Shortcut`/
 
 2. **Scroll-clamp-on-move boilerplate.** `detailModal.Update`, `helpModal.Update`, and
    `resultModal.Update` all contain the identical pattern:
+
    ```go
    if delta := modalMoveDelta(msg); delta != 0 {
        x.scroll += delta
@@ -165,6 +187,7 @@ The package already started this (`ui/components.go` has `Pill` and `Shortcut`/
        m.modal = x
    }
    ```
+
    Worth a small embeddable `scrollState` helper (`HandleScroll(msg) (newScroll int, handled bool)`)
    in `modal.go` or `ui`, since three of the ~10 modal types are otherwise just
    "title + scrollable body + standard footer" with nothing else going on

@@ -33,22 +33,21 @@ func (f filterState) matches(values ...string) bool {
 	return false
 }
 
-func (f *filterState) update(msg tea.KeyMsg) bool {
+func (f *filterState) update(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		f.Active = false
 		f.Query = ""
 		f.input.SetValue("")
-		return true
+		return true, nil
 	case "enter":
 		f.Active = false
-		return true
+		return true, nil
 	}
 	var cmd tea.Cmd
 	f.input, cmd = f.input.Update(msg)
-	_ = cmd
 	f.Query = f.input.Value()
-	return true
+	return true, cmd
 }
 
 func (m Model) visibleActiveGroups() []ActiveGroup {

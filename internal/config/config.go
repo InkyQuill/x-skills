@@ -102,6 +102,10 @@ func validScope(scope string) bool {
 	return slices.Contains(Scopes, scope)
 }
 
+func ValidScope(scope string) bool {
+	return validScope(scope)
+}
+
 func validTarget(target string) bool {
 	return slices.Contains(Targets, target)
 }
@@ -114,7 +118,7 @@ func (c Config) ManagedRoots() []ManagedRoot {
 }
 
 func LoadGlobal(cfg Config) (Config, error) {
-	configPath := filepath.Join(cfg.ArchiveRoot, "config.yaml")
+	configPath := filepath.Join(cfg.HomeDir, ".x-skills", "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
 		cfg.managedRoots = cfg.defaultManagedRoots()

@@ -20,7 +20,6 @@ type listRootEntry struct {
 	Label    string `json:"label"`
 	Path     string `json:"path"`
 	Builtin  bool   `json:"builtin"`
-	Enabled  bool   `json:"enabled"`
 }
 
 func newListRootsCommand(rootOptions *options) *cobra.Command {
@@ -51,7 +50,6 @@ func writeListRoots(out io.Writer, roots []config.ManagedRoot, asJSON bool) erro
 			Label:    root.Label,
 			Path:     root.Path,
 			Builtin:  root.Builtin,
-			Enabled:  root.Enabled,
 		})
 	}
 	if asJSON {

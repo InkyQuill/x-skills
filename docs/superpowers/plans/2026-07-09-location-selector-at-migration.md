@@ -141,9 +141,7 @@ func resolveLocation(cfg config.Config, selector string) (roots.ActiveRoot, erro
 	all := roots.ActiveRoots(cfg, roots.Filter{})
 	var matches []roots.ActiveRoot
 	for _, root := range all {
-		if trimmed == root.Scope+":"+root.Target ||
-			strings.EqualFold(trimmed, root.Label) ||
-			trimmed == scopePrefix(root.Scope)+root.Target {
+		if locationMatches(root, trimmed) {
 			matches = append(matches, root)
 		}
 	}
@@ -154,6 +152,18 @@ func resolveLocation(cfg config.Config, selector string) (roots.ActiveRoot, erro
 		return roots.ActiveRoot{}, fmt.Errorf("ambiguous --at location %q; use project:target or global:target", selector)
 	}
 	return matches[0], nil
+}
+
+func locationMatches(root roots.ActiveRoot, selector string) bool {
+	selector = strings.ToLower(strings.TrimSpace(selector))
+	target := strings.ToLower(root.Target)
+	scope := strings.ToLower(root.Scope)
+	compactScope := map[string]string{config.ScopeProject: "p", config.ScopeGlobal: "g"}[root.Scope]
+	label := strings.ToLower(root.Label)
+	return selector == scope+":"+target || selector == compactScope+":"+target ||
+		selector == compactScope+":"+strings.TrimLeft(label, ".~") ||
+		selector == label || selector == scopePrefix(root.Scope)+target ||
+		(root.Scope == config.ScopeProject && (selector == target || selector == strings.TrimPrefix(label, ".")))
 }
 
 func scopePrefix(scope string) string {

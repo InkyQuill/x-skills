@@ -114,7 +114,11 @@ func migrateActiveDirectory(active, archived string, linkBack bool, conflictReso
 		return ResultMigratedUnlinked, nil
 	}
 	if err := os.Symlink(archived, active); err != nil {
-		return "", fmt.Errorf("link %q to %q: %w", archived, active, err)
+		linkErr := fmt.Errorf("link %q to %q: %w", archived, active, err)
+		if rollbackErr := os.Rename(archived, active); rollbackErr != nil {
+			return "", errors.Join(linkErr, fmt.Errorf("restore active skill: %w", rollbackErr))
+		}
+		return "", linkErr
 	}
 	if outcome == archiveCopyMatched || outcome == archiveCopyKept {
 		return ResultRelinked, nil

@@ -1,5 +1,13 @@
 # Backlog
 
+## Planned implementation slices
+
+- [TUI production readiness](superpowers/plans/2026-07-11-tui-production-readiness.md): current build baseline, stale-work cancellation, bounded/coalesced update checks, visible advisory failures, progress, and asynchronous refresh.
+- [Skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md): Skills Folder consumers, explicit and inferred Compatibility Profiles, `x-` Built-In Skill naming, `x-port-skill`, and Doctor installation/linking.
+- [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md): committed recommendations, local overlay, recommend/unrecommend, safe restore/full restore, automatic reconciliation, and Git hygiene Doctor checks.
+- [Interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md): aggregate project candidates, compatibility-aware defaults, conflict preservation, CLI/TUI sync, and general archive rename.
+- [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md): shared footer/layout/text/pill helpers and color-independent statuses.
+
 ## TUI And Agent Roots
 
 - Add optional mouse support for the Go TUI. Context: parity design is keyboard-only to keep interactions reliable and testable, but later Bubble Tea mouse handling could support row selection, modal option selection, and scrolling. Evidence: design discussion for Go TUI parity.
@@ -11,6 +19,11 @@
 - Add option to persist multi-selection across view switches. Context: parity design resets selections when changing tabs for safety, but if users find this workflow awkward, we can introduce configuration or state tracking to keep selections per-tab. Evidence: design discussion for Go TUI parity.
 - Add command palette (triggered by `:`). Context: direct shortcuts and a help modal are sufficient for parity, but a command palette can be introduced if the keymap grows too large to manage. Evidence: design discussion for Go TUI parity.
 - Add release/GitHub installer support for an `xs` shortcut when the command name is free. Context: user wants `x-skills` installation to create a short symlink/alias, and this belongs in release packaging rather than agent skill workflows. Evidence: `command -v xs` returned empty locally; install strategy is deferred to GitHub/release packaging.
+
+## Commands and tools
+
+- Implement interactive `sync` in CLI and TUI. `x-skills sync --at .Cl` aggregates skills from every non-destination project Skills Folder, preselects candidates according to compatibility, lets the user exclude skills and resolve divergent variants, migrates unmanaged skills, and preserves destination conflicts under editable archive names. Non-interactive use requires `--all` or repeated `--skill`; `-y` never resolves ambiguity. Plan: [interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md).
+- Implement committed `.x-skills.yaml` recommendations plus gitignored `.x-skills.local.yaml` local state. `restore --at ...` is additive; `restore --full` reconciles only explicitly selected project Skills Folders, migrates unmanaged extras before removal, never deletes archives, and blocks all removal when any desired skill is unavailable. Plans: [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md) and [skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md).
 
 ## TUI Visual Inspiration
 

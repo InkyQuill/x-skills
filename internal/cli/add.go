@@ -41,7 +41,21 @@ func newAddCommand(rootOptions *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add SOURCE [SKILL_NAME...]",
 		Short: "Add remote skills to the archive and optionally link them",
-		Args:  cobra.MinimumNArgs(0),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if opts.gitURL == "" && len(args) == 0 {
+				return fmt.Errorf("source is required")
+			}
+			if opts.gitURL != "" && !opts.all && len(args) == 0 {
+				return fmt.Errorf("--git requires at least one skill name or --all")
+			}
+			if opts.gitURL != "" && opts.all && len(args) > 0 {
+				return fmt.Errorf("--all cannot be used with skill names")
+			}
+			if opts.gitURL == "" && opts.all && len(args) > 1 {
+				return fmt.Errorf("--all cannot be used with skill names")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdd(cmd, rootOptions, opts, args)
 		},
@@ -103,7 +117,7 @@ func runAdd(cmd *cobra.Command, rootOptions *options, opts addOptions, args []st
 		writeAddSingleSuccess(cmd.OutOrStdout(), results[0])
 		return nil
 	}
-	if len(found) == 1 && len(failures) == 1 {
+	if len(found) == 1 && len(failures) == 1 && len(results) == 0 {
 		return failures[0].err
 	}
 

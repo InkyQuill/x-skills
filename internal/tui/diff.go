@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/InkyQuill/x-skills/internal/remote"
 )
 
 type directoryDiff struct {
@@ -71,6 +73,9 @@ func readDiffFiles(root string) (map[string][]byte, error) {
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
+		}
+		if filepath.ToSlash(rel) == remote.MetadataFile {
+			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {

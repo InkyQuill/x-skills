@@ -203,10 +203,6 @@ func TestLoadGlobalConfigAddsAndOverridesManagedRoots(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := Default(project, home)
-	configPath := filepath.Join(home, ".x-skills", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	data := []byte(`
 version: 1
 active_roots:
@@ -221,9 +217,7 @@ active_roots:
     target: opencode
     path: .opencode/skills
 `)
-	if err := os.WriteFile(configPath, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeGlobalConfig(t, home, data)
 
 	loaded, err := LoadGlobal(cfg)
 	if err != nil {
@@ -248,17 +242,37 @@ active_roots:
 	}
 }
 
+func TestLoadGlobalConfigUsesHomeWhenArchiveRootIsOverridden(t *testing.T) {
+	home := t.TempDir()
+	cfg := Default(t.TempDir(), home)
+	cfg.ArchiveRoot = filepath.Join(t.TempDir(), "archive")
+	writeGlobalConfig(t, home, []byte("active_roots:\n  - scope: global\n    target: claude\n    enabled: false\n"))
+
+	loaded, err := LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loaded.ActiveRoot(ScopeGlobal, TargetClaude); err == nil {
+		t.Fatal("global claude root should be disabled by the home config")
+	}
+}
+
+func writeGlobalConfig(t *testing.T, home string, data []byte) {
+	t.Helper()
+	configDir := filepath.Join(home, ".x-skills")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadGlobalConfigAcceptsMissingVersionAsVersionOne(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := Default(project, home)
-	configPath := filepath.Join(home, ".x-skills", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte("active_roots: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeGlobalConfig(t, home, []byte("active_roots: []\n"))
 
 	if _, err := LoadGlobal(cfg); err != nil {
 		t.Fatalf("LoadGlobal() error = %v, want nil", err)
@@ -269,13 +283,7 @@ func TestLoadGlobalConfigAcceptsVersionOne(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := Default(project, home)
-	configPath := filepath.Join(home, ".x-skills", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte("version: 1\nactive_roots: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeGlobalConfig(t, home, []byte("version: 1\nactive_roots: []\n"))
 
 	if _, err := LoadGlobal(cfg); err != nil {
 		t.Fatalf("LoadGlobal() error = %v, want nil", err)
@@ -286,13 +294,7 @@ func TestLoadGlobalConfigRejectsInvalidTarget(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := Default(project, home)
-	configPath := filepath.Join(home, ".x-skills", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte("active_roots:\n  - scope: global\n    target: Open Claw\n    path: ~/.openclaw/skills\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeGlobalConfig(t, home, []byte("active_roots:\n  - scope: global\n    target: Open Claw\n    path: ~/.openclaw/skills\n"))
 
 	_, err := LoadGlobal(cfg)
 	if err == nil || !strings.Contains(err.Error(), `invalid target "Open Claw"`) {
@@ -304,13 +306,7 @@ func TestLoadGlobalConfigRejectsVersionZero(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := Default(project, home)
-	configPath := filepath.Join(home, ".x-skills", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte("version: 0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeGlobalConfig(t, home, []byte("version: 0\n"))
 
 	_, err := LoadGlobal(cfg)
 	if err == nil || !strings.Contains(err.Error(), "unsupported version 0") {
@@ -322,13 +318,7 @@ func TestLoadGlobalConfigRejectsUnknownVersion(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	cfg := Default(project, home)
-	configPath := filepath.Join(home, ".x-skills", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, []byte("version: 2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeGlobalConfig(t, home, []byte("version: 2\n"))
 
 	_, err := LoadGlobal(cfg)
 	if err == nil || !strings.Contains(err.Error(), "unsupported version 2") {

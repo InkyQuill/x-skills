@@ -76,9 +76,20 @@ func resolveLocation(cfg config.Config, selector string) (roots.ActiveRoot, erro
 }
 
 func locationMatches(root roots.ActiveRoot, selector string) bool {
-	return selector == root.Scope+":"+root.Target ||
-		strings.EqualFold(selector, root.Label) ||
-		selector == scopePrefix(root.Scope)+root.Target
+	selector = strings.ToLower(strings.TrimSpace(selector))
+	target := strings.ToLower(root.Target)
+	scope := strings.ToLower(root.Scope)
+	label := strings.ToLower(root.Label)
+	compactScope := "p"
+	if scope == config.ScopeGlobal {
+		compactScope = "g"
+	}
+	return selector == scope+":"+target ||
+		selector == compactScope+":"+target ||
+		selector == compactScope+":"+strings.TrimLeft(label, ".~") ||
+		selector == label ||
+		selector == strings.ToLower(scopePrefix(root.Scope))+target ||
+		(root.Scope == config.ScopeProject && (selector == target || selector == strings.TrimPrefix(label, ".")))
 }
 
 func scopePrefix(scope string) string {

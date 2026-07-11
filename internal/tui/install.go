@@ -324,6 +324,11 @@ func (m *Model) previewInstallResult() tea.Cmd {
 	m.install.previewToken++
 	token := m.install.previewToken
 	checkouts := m.ensureInstallCheckoutCache()
+	if checkouts == nil {
+		return func() tea.Msg {
+			return installPreviewMsg{token: token, name: row.Result.Name, err: errors.New(m.status)}
+		}
+	}
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
 		return func() tea.Msg {
@@ -422,14 +427,19 @@ func (m *Model) archiveInstallBatch(rows []installResultView) tea.Cmd {
 	return cmd
 }
 
+type installArchiveRowCommand struct {
+	row installResultView
+	cmd tea.Cmd
+}
+
 func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiveBatchNext, total int) tea.Cmd {
-	commands := make([]tea.Cmd, 0, len(rows))
+	commands := make([]installArchiveRowCommand, 0, len(rows))
 	for _, row := range rows {
 		cmd := m.archiveInstallRow(row)
 		if cmd == nil {
 			continue
 		}
-		commands = append(commands, cmd)
+		commands = append(commands, installArchiveRowCommand{row: row, cmd: cmd})
 	}
 	if len(commands) == 0 {
 		return nil
@@ -437,26 +447,26 @@ func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiv
 	token := m.install.archiveToken
 	return func() tea.Msg {
 		result := &installArchiveBatchResult{total: total, next: next}
-		for i, cmd := range commands {
-			msg := cmd().(installArchiveMsg)
+		for i, command := range commands {
+			msg := command.cmd().(installArchiveMsg)
 			if msg.err != nil {
 				switch msg.archiveState {
 				case remote.ArchiveStateNameConflict:
 					result.next = &installArchiveBatchNext{
-						row:       rows[i],
+						row:       command.row,
 						action:    remote.ArchiveStateNameConflict,
-						remaining: append(append([]installResultView(nil), rows[i+1:]...), installArchiveBatchNextRows(next)...),
+						remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
 					}
 					return installArchiveMsg{token: token, batch: result}
 				case remote.ArchiveStateUpdateAvailable:
 					result.next = &installArchiveBatchNext{
-						row:       rows[i],
+						row:       command.row,
 						action:    remote.ArchiveStateUpdateAvailable,
-						remaining: append(append([]installResultView(nil), rows[i+1:]...), installArchiveBatchNextRows(next)...),
+						remaining: append(append([]installResultView(nil), remainingArchiveRows(commands[i+1:])...), installArchiveBatchNextRows(next)...),
 					}
 					return installArchiveMsg{token: token, batch: result}
 				default:
-					result.failures = append(result.failures, rows[i].Result.Name+": "+msg.err.Error())
+					result.failures = append(result.failures, command.row.Result.Name+": "+msg.err.Error())
 					continue
 				}
 			}
@@ -464,6 +474,14 @@ func (m *Model) archiveInstallRows(rows []installResultView, next *installArchiv
 		}
 		return installArchiveMsg{token: token, batch: result}
 	}
+}
+
+func remainingArchiveRows(commands []installArchiveRowCommand) []installResultView {
+	rows := make([]installResultView, 0, len(commands))
+	for _, command := range commands {
+		rows = append(rows, command.row)
+	}
+	return rows
 }
 
 func (m *Model) openInstallArchiveBatchNext(next *installArchiveBatchNext) tea.Cmd {
@@ -508,6 +526,11 @@ func (m *Model) archiveInstallRowWithConflict(row installResultView, archiveName
 	token := m.install.archiveToken
 	identity := installArchiveIdentityFromResult(row.Result)
 	checkouts := m.ensureInstallCheckoutCache()
+	if checkouts == nil {
+		return func() tea.Msg {
+			return installArchiveMsg{token: token, name: archiveName, identity: identity, err: errors.New(m.status)}
+		}
+	}
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
 		return func() tea.Msg {
@@ -586,6 +609,11 @@ func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath
 	token := m.install.archiveToken
 	identity := installArchiveIdentityFromResult(row.Result)
 	checkouts := m.ensureInstallCheckoutCache()
+	if checkouts == nil {
+		return func() tea.Msg {
+			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: errors.New(m.status)}
+		}
+	}
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
 		return func() tea.Msg {
@@ -622,7 +650,7 @@ func (m *Model) archiveInstallRowRenamingExisting(row installResultView, oldPath
 		})
 		if err != nil {
 			if rollbackErr := rollbackExistingArchiveRename(oldPath, newPath); rollbackErr != nil {
-				err = fmt.Errorf("apply incoming archive after renaming existing archive: %w; rollback rename: %v", err, rollbackErr)
+				err = fmt.Errorf("apply incoming archive after renaming existing archive: %w; rollback rename: %w", err, rollbackErr)
 			}
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: err}
 		}
@@ -708,6 +736,11 @@ func newInstallRenameModal(row installResultView, renameExisting bool) modal {
 }
 
 func (m *Model) renameExistingArchiveThenInstall(row installResultView, newName string) tea.Cmd {
+	if len(m.repoUsage[row.Result.Name]) > 0 {
+		m.status = "cannot rename archive while active links exist; unlink them first"
+		m.install.Message = m.status
+		return nil
+	}
 	oldPath, err := repo.SkillPath(m.cfg, row.Result.Name)
 	if err != nil {
 		m.status = err.Error()
@@ -746,6 +779,9 @@ func (m *Model) openInstallUpdateDiff(row installResultView) tea.Cmd {
 	m.install.previewToken++
 	token := m.install.previewToken
 	checkouts := m.ensureInstallCheckoutCache()
+	if checkouts == nil {
+		return func() tea.Msg { return installUpdateDiffMsg{token: token, row: row, err: errors.New(m.status)} }
+	}
 	source, err := m.gitSourceForInstall(row.Result)
 	if err != nil {
 		return func() tea.Msg {
@@ -886,14 +922,30 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 	m.install.useInFlight = true
 	m.install.useInFlightToken = token
 	cfg := m.cfg
+	archivePath, pathErr := repo.SkillPath(cfg, row.Result.Name)
+	if pathErr != nil {
+		m.install.useInFlight = false
+		m.status = pathErr.Error()
+		m.install.Message = m.status
+		return nil
+	}
 	useGeneration := m.install.ensureUseGeneration()
 	return func() tea.Msg {
+		backupPath := ""
 		if !useGeneration.isCurrent(token) {
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		if archiveCmd != nil {
+			var err error
+			backupPath, err = prepareInstallUseArchiveRollback(archivePath)
+			if err != nil {
+				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
+			}
 			archiveMsg := archiveCmd().(installArchiveMsg)
 			if archiveMsg.err != nil {
+				if rollbackErr := rollbackInstallUseArchive(archivePath, backupPath); rollbackErr != nil {
+					archiveMsg.err = errors.Join(archiveMsg.err, rollbackErr)
+				}
 				return installUseMsg{
 					token:        token,
 					name:         row.Result.Name,
@@ -906,9 +958,15 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 			}
 		}
 		if !useGeneration.isCurrent(token) {
+			if archiveCmd != nil {
+				_ = rollbackInstallUseArchive(archivePath, backupPath)
+			}
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, stale: true}
 		}
 		if err := preflightInstallUseDestinations(cfg, row.Result.Name, destinations); err != nil {
+			if archiveCmd != nil {
+				err = errors.Join(err, rollbackInstallUseArchive(archivePath, backupPath))
+			}
 			return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 		}
 		createdPaths := make([]string, 0, len(destinations))
@@ -924,10 +982,16 @@ func (m *Model) installAndUse(row installResultView, destinations []installDesti
 				if rollbackErr := rollbackInstallUseLinks(createdPaths); rollbackErr != nil {
 					err = errors.Join(err, fmt.Errorf("rollback partial install-use links: %w", rollbackErr))
 				}
+				if archiveCmd != nil {
+					err = errors.Join(err, rollbackInstallUseArchive(archivePath, backupPath))
+				}
 				return installUseMsg{token: token, name: row.Result.Name, destinations: destinations, err: err}
 			}
 			if result.Path != "" {
 				createdPaths = append(createdPaths, result.Path)
+			}
+			if backupPath != "" {
+				_ = os.RemoveAll(backupPath)
 			}
 			if !useGeneration.isCurrent(token) {
 				if err := rollbackInstallUseLinks(createdPaths); err != nil {
@@ -1090,6 +1154,38 @@ func rollbackInstallUseLinks(paths []string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func prepareInstallUseArchiveRollback(archivePath string) (string, error) {
+	if _, err := os.Lstat(archivePath); os.IsNotExist(err) {
+		return "", nil
+	} else if err != nil {
+		return "", fmt.Errorf("inspect archive before install: %w", err)
+	}
+	backupPath, err := os.MkdirTemp(filepath.Dir(archivePath), "."+filepath.Base(archivePath)+"-use-backup-")
+	if err != nil {
+		return "", fmt.Errorf("reserve install-use archive backup: %w", err)
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return "", fmt.Errorf("prepare install-use archive backup: %w", err)
+	}
+	if err := os.CopyFS(backupPath, os.DirFS(archivePath)); err != nil {
+		return "", fmt.Errorf("backup install-use archive: %w", err)
+	}
+	return backupPath, nil
+}
+
+func rollbackInstallUseArchive(archivePath, backupPath string) error {
+	if err := os.RemoveAll(archivePath); err != nil {
+		return fmt.Errorf("remove failed install-use archive: %w", err)
+	}
+	if backupPath == "" {
+		return nil
+	}
+	if err := os.Rename(backupPath, archivePath); err != nil {
+		return fmt.Errorf("restore install-use archive: %w", err)
+	}
+	return nil
 }
 
 func preflightInstallUseDestinations(cfg config.Config, name string, destinations []installDestination) error {
@@ -1362,7 +1458,12 @@ func checkedInstallDestinations(available []installDestination) []installDestina
 
 func (m *Model) ensureInstallCheckoutCache() *remote.CheckoutCache {
 	if m.install.checkouts == nil {
-		m.install.checkouts = remote.NewCheckoutCache(filepath.Join(os.TempDir(), "x-skills-tui-checkouts"))
+		root, err := os.MkdirTemp("", "x-skills-tui-checkouts-*")
+		if err != nil {
+			m.status = "create checkout cache: " + err.Error()
+			return nil
+		}
+		m.install.checkouts = remote.NewCheckoutCache(root)
 	}
 	return m.install.checkouts
 }
@@ -1443,6 +1544,9 @@ func (m *Model) installArchiveStateCheck(result remote.SearchResult, token int) 
 		return nil
 	}
 	checkouts := m.ensureInstallCheckoutCache()
+	if checkouts == nil {
+		return nil
+	}
 	cfg := m.cfg
 	identity := installArchiveIdentityFromResult(result)
 	return func() tea.Msg {

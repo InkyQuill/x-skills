@@ -40,10 +40,13 @@ Remote `skills.sh` search/install and Repo update checks were deferred when this
 spec was first written, but a later design session decided to build them as a
 top-level `I:Install` page and a background Repo update-check pipeline. See
 [Go TUI Install And Repo Updates Design](./2026-07-06-go-tui-install-and-repo-updates-design.md),
+[TUI Dynamic Roots Adaptation](../plans/2026-07-09-tui-dynamic-roots-adaptation.md),
 ADR 0007, ADR 0009, ADR 0011, ADR 0012, and ADR 0015 for the current, authoritative
 scope. This file's Active/Repo/Doctor content remains accurate; treat any
 remaining "out of scope"/"deferred" language about Install/search/update checks
-elsewhere in this file as superseded.
+elsewhere in this file as superseded. The dynamic-roots adaptation also
+supersedes fixed-root destination assumptions and applicable root-label or
+root-list wording with configured-root behavior.
 
 Deferred items still tracked in `docs/backlog.md`.
 

@@ -27,6 +27,7 @@ func (t textModal) Title() string {
 }
 
 func (t textModal) View(width, height int, m Model) string {
+	t.input.Width = max(width-12, 1)
 	lines := []string{
 		t.label,
 		t.input.View(),

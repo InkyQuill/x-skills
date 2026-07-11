@@ -314,7 +314,7 @@ Preview uses Glamour-rendered Markdown by default. `r` toggles raw/rendered.
 │   A        switch to Active view                                     │
 │   R        switch to Repo view                                       │
 │   D        switch to Doctor view                                     │
-│   I        Install (design in progress, not yet available)           │
+│   I        switch to Install view                                    │
 │   enter    view row details                                          │
 │   /        enter local filter mode                                   │
 │   space    toggle Active/Repo row selection                          │

@@ -135,7 +135,7 @@ func (c *CheckoutCache) checkout(ctx context.Context, source GitSource) (Checkou
 	if source.Ref != "" {
 		args = append(args, "--branch", source.Ref)
 	}
-	args = append(args, source.CloneURL, dir)
+	args = append(args, "--", source.CloneURL, dir)
 	if err := runGitCommand(ctx, "", args...); err != nil {
 		return Checkout{}, cleanupCheckoutDir(dir, err)
 	}

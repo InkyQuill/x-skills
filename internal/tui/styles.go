@@ -20,6 +20,7 @@ var (
 	kbdStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("236"))
 	projectChip         = lipgloss.NewStyle().Background(lipgloss.Color("24"))
 	globalChip          = lipgloss.NewStyle().Background(lipgloss.Color("95"))
+	chipText            = lipgloss.NewStyle().Foreground(lipgloss.Color("230"))
 	okStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	accentStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("110"))
 	inspectorTitleStyle = accentStyle
@@ -49,6 +50,7 @@ func init() {
 		kbdStyle = kbdStyle.UnsetForeground().UnsetBackground()
 		projectChip = projectChip.UnsetForeground().UnsetBackground()
 		globalChip = globalChip.UnsetForeground().UnsetBackground()
+		chipText = chipText.UnsetForeground().UnsetBackground()
 		okStyle = okStyle.UnsetForeground().UnsetBackground()
 		accentStyle = accentStyle.UnsetForeground().UnsetBackground()
 		inspectorTitleStyle = inspectorTitleStyle.UnsetForeground().UnsetBackground()

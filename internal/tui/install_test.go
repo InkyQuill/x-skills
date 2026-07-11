@@ -2142,6 +2142,9 @@ func TestInstallAndUseRollsBackPartialLinksAfterLateFailure(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "svelte-coder")); !os.IsNotExist(err) {
 		t.Fatalf(".Cl link exists after failed link: %v", err)
 	}
+	if _, err := os.Lstat(filepath.Join(cfg.ArchiveSkillsRoot(), "svelte-coder")); !os.IsNotExist(err) {
+		t.Fatalf("archive remains after failed install-and-use: %v", err)
+	}
 	if m.status != "late link failure" {
 		t.Fatalf("status = %q", m.status)
 	}

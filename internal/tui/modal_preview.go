@@ -18,6 +18,7 @@ type previewModal struct {
 	title    string
 	path     string
 	raw      string
+	content  string
 	rendered bool
 	viewport viewport.Model
 }
@@ -32,7 +33,7 @@ func newPreviewModal(title, skillPath string) modal {
 	}
 	vp := viewport.New(0, 0)
 	p := previewModal{title: title, path: filepath.Join(skillPath, "SKILL.md"), raw: raw, rendered: true, viewport: vp}
-	p.viewport.SetContent(p.renderContent())
+	p.refreshContent()
 	return p
 }
 
@@ -41,13 +42,20 @@ func (p previewModal) Title() string {
 }
 
 func (p previewModal) renderContent() string {
+	return p.content
+}
+
+func (p *previewModal) refreshContent() {
 	if p.rendered {
 		rendered, err := glamour.Render(renderedPreviewMarkdown(p.raw), "dark")
 		if err == nil {
-			return strings.TrimRight(rendered, "\n")
+			p.content = strings.TrimRight(rendered, "\n")
+			p.viewport.SetContent(p.content)
+			return
 		}
 	}
-	return strings.TrimRight(p.raw, "\n")
+	p.content = strings.TrimRight(p.raw, "\n")
+	p.viewport.SetContent(p.content)
 }
 
 func (p previewModal) View(width, height int, m Model) string {
@@ -65,7 +73,6 @@ func (p previewModal) View(width, height int, m Model) string {
 	}
 	p.viewport.Width = bodyWidth
 	p.viewport.Height = bodyHeight
-	p.viewport.SetContent(p.renderContent())
 	skillFile := filepath.Base(filepath.Dir(p.path)) + "/" + filepath.Base(p.path)
 	detail := truncate(fmt.Sprintf("%s  |  %s", skillFile, mode), bodyWidth)
 	lines := []string{
@@ -149,7 +156,7 @@ func (p previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	}
 	if msg.String() == "r" {
 		p.rendered = !p.rendered
-		p.viewport.SetContent(p.renderContent())
+		p.refreshContent()
 		p.viewport.GotoTop()
 		m.modal = p
 		return false, nil

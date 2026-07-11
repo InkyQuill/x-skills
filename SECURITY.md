@@ -6,7 +6,7 @@ If you discover a security vulnerability in x-skills, please report it
 privately rather than opening a public issue.
 
 **To report:** open a [GitHub Security Advisory](https://github.com/InkyQuill/x-skills/security/advisories/new)
-or email the maintainer.
+or email the maintainer at `me@inkyquill.net`.
 
 Please include:
 

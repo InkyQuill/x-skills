@@ -53,7 +53,7 @@ func TestDirectoryFingerprintIncludesFileContents(t *testing.T) {
 	}
 }
 
-func TestDirectoryFingerprintStreamsFileWithoutStatSizePrefix(t *testing.T) {
+func TestDirectoryFingerprintFramesFileContentWithSize(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "skill.md"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
@@ -64,10 +64,10 @@ func TestDirectoryFingerprintStreamsFileWithoutStatSizePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("file\x00skill.md\x00hello\x00"))
+	_, _ = hash.Write([]byte("file\x00skill.md\x005\x00hello"))
 	want := hex.EncodeToString(hash.Sum(nil))
 	if got != want {
-		t.Fatalf("Directory() = %q, want streamed file hash %q", got, want)
+		t.Fatalf("Directory() = %q, want size-framed file hash %q", got, want)
 	}
 }
 

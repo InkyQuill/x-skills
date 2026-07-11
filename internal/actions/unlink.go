@@ -107,8 +107,19 @@ func copySkillToArchive(active, archived, conflictResolution string) (archiveCop
 	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
 		return "", fmt.Errorf("create archive root %q: %w", filepath.Dir(archived), err)
 	}
-	if err := copySkillDirectory(active, archived); err != nil {
+	temp, err := os.MkdirTemp(filepath.Dir(archived), "."+filepath.Base(archived)+"-tmp-")
+	if err != nil {
+		return "", fmt.Errorf("create temporary archive: %w", err)
+	}
+	if err := os.Remove(temp); err != nil {
+		return "", fmt.Errorf("prepare temporary archive: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(temp) }()
+	if err := copySkillDirectory(active, temp); err != nil {
 		return "", err
+	}
+	if err := os.Rename(temp, archived); err != nil {
+		return "", fmt.Errorf("install archive copy: %w", err)
 	}
 	return archiveCopyCreated, nil
 }
@@ -156,6 +167,9 @@ func copySkillDirectory(src, dst string) error {
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
+		}
+		if filepath.ToSlash(rel) == ".x-skills.json" {
+			return nil
 		}
 		target := filepath.Join(dst, rel)
 		info, err := entry.Info()

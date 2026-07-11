@@ -42,7 +42,7 @@ design doc and the backlog for current status before relying on any of it.
 ```bash
 x-skills list
 x-skills list --at project:codex
-x-skills list --at .Ag --at ~Cl
+x-skills list --at .Ag --at '~Cl'
 x-skills list-roots --json
 
 x-skills repo
@@ -60,7 +60,7 @@ x-skills unlink supergoal --at global:claude --delete-unmanaged
 
 x-skills add owner/repo@skill
 x-skills add owner/repo@skill --no-link -y
-x-skills add owner/repo --all --at .Ag --at ~Cl
+x-skills add owner/repo --all --at .Ag --at '~Cl'
 x-skills add owner/repo skill-name --at .Cd -y
 
 x-skills tui

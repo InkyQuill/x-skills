@@ -17,7 +17,7 @@
 - Grilling Q&A selected restrained Unicode and color, list + inspector shell, and modal actions.
 - Current Install rows are plain formatted strings inside one `rowSegment`, not rich rows.
 - Current inspector has ad hoc plain lines; it should become a reusable Key/Value renderer.
-- Animation worktree exists at `/home/inky/Development/x-skills-tui-animations`.
+- Animation worktree is expected as a sibling checkout named `../x-skills-tui-animations`. Locate it with `git worktree list`, or create it with `git worktree add ../x-skills-tui-animations <animation-branch>` before importing changes.
 - Do not run a direct git merge while either checkout is dirty. Use selective patch/cherry-pick after tests isolate the visual behavior.
 
 ## Animation Worktree Merge Assessment
@@ -365,7 +365,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Copy animation helper file**
 
-Use `/home/inky/Development/x-skills-tui-animations/internal/tui/animation.go` as source, but keep this branch's imports and model shape.
+Use `../x-skills-tui-animations/internal/tui/animation.go` as source after locating the checkout with `git worktree list` (or creating it as described above), but keep this branch's imports and model shape.
 
 Do not run `git merge tui-diamond-animations` while worktrees are dirty.
 

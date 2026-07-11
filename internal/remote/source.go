@@ -48,7 +48,24 @@ func WriteSourceMetadata(skillDir string, meta SourceMetadata) error {
 		return fmt.Errorf("encode source metadata: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(filepath.Join(skillDir, MetadataFile), data, 0o644); err != nil {
+	temp, err := os.CreateTemp(skillDir, ".x-skills-metadata-*")
+	if err != nil {
+		return fmt.Errorf("write source metadata: %w", err)
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if err := temp.Chmod(0o644); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("write source metadata: %w", err)
+	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("write source metadata: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("write source metadata: %w", err)
+	}
+	if err := os.Rename(tempPath, filepath.Join(skillDir, MetadataFile)); err != nil {
 		return fmt.Errorf("write source metadata: %w", err)
 	}
 	return nil

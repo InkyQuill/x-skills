@@ -46,7 +46,7 @@ Deferred from this design (tracked in `docs/backlog.md`):
 ## CLI Surface
 
 ```bash
-x-skills search QUERY [--owner OWNER] [--limit N] [--audit] [--json|-j]
+x-skills search QUERY [--owner OWNER] [--limit N] [--json|-j]
 x-skills add SOURCE [SKILL_NAME...] [--no-link] [--to DEST...] [--git URL]
                      [--ref REF] [--all] [--replace] [--archive-as NAME]
                      [--rename-existing NAME] [-y|-n] [--no-input]

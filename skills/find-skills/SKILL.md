@@ -10,7 +10,7 @@ Discover skills repo-first, then registry-first. Prefer `x-skills` over `npx ski
 ## Workflow
 
 1. Clarify the capability in 2-5 keywords: domain, framework/tool, and task type.
-2. Inspect local state before recommending remote installs:
+1. Inspect local state before recommending remote installs:
 
 ```bash
 x-skills repo
@@ -19,7 +19,7 @@ x-skills list
 
 If `x-skills` is unavailable but `./bin/x-skills` exists in the current repo, use `./bin/x-skills`.
 
-3. Search remote candidates from the CLI/API only. Agents should not use the TUI:
+1. Search remote candidates from the CLI/API only. Agents should not use the TUI:
 
 ```bash
 x-skills search <query>
@@ -34,7 +34,7 @@ curl -fsSL 'https://skills.sh/api/search?q=<query>&limit=20'
 
 Parse results for `name`, `description`, `owner`, `repo`, `path`, `installs`, and `audit`. Treat search/API failures as transient unless the same repository/path also fails during checkout.
 
-4. Reconcile remote results with local archive:
+1. Reconcile remote results with local archive:
 
 - Already archived with matching source metadata: recommend linking, not reinstalling.
 - Same name but different source: flag as a conflict; recommend preview/diff before replacing.

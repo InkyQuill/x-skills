@@ -399,7 +399,7 @@ func TestAddAllArchivesEveryDiscoveredSkill(t *testing.T) {
 	}
 }
 
-func TestAddWithoutNamesOrAllFailsAfterListingDiscoveredSkills(t *testing.T) {
+func TestAddWithGitWithoutNamesOrAllFailsValidation(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	repo := makeAddGitRepo(t)
@@ -415,16 +415,8 @@ func TestAddWithoutNamesOrAllFailsAfterListingDiscoveredSkills(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing skill name error")
 	}
-	text := err.Error()
-	for _, want := range []string{
-		"multiple skills found; specify a name or use --all",
-		"found: alpha-skill, beta-skill",
-		"x-skills add --git " + repo + " alpha-skill",
-		"x-skills add --git " + repo + " --all",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("error = %q, want substring %q", text, want)
-		}
+	if !strings.Contains(err.Error(), "--git requires at least one skill name or --all") {
+		t.Fatalf("error = %q, want --git validation error", err)
 	}
 }
 

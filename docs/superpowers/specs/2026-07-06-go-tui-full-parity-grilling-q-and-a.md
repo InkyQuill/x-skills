@@ -1,6 +1,6 @@
 # Go TUI Full Parity Grilling Q&A
 
-Source session: `/home/inky/.codex/sessions/2026/07/06/rollout-2026-07-06T09-35-02-019f3623-2c46-7720-9dc7-f0d3a3fa4a56.jsonl`
+Source session: July 6, 2026 Go TUI parity design discussion.
 
 This file preserves the numbered grilling questions, user answers, and short assistant-recorded outcomes from the July 6, 2026 Go TUI parity design session. It is intended as guidance for future spec and implementation work.
 
@@ -12,7 +12,7 @@ Session message ids: assistant `59`, user `60`
 
 **Question**
 
-Open the companion here: http://localhost:65423
+The original visual companion is unavailable; the durable character mockups are preserved in `2026-07-06-go-tui-views-mockups.md`.
 
 It’s showing three actual character-based shell mockups for the primary TUI structure. Question 1: which shell should be the base?
 
@@ -35,7 +35,7 @@ Session message ids: assistant `63`, user `64`
 
 **Question**
 
-Open the companion: http://localhost:65423
+The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 Question 2: choose the color + Unicode density.
 
@@ -61,7 +61,7 @@ Session message ids: assistant `67`, user `68`
 
 **Question**
 
-Open the companion: http://localhost:65423
+The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 Question 3: where should the action/wizard state live?
 
@@ -83,7 +83,7 @@ Session message ids: assistant `71`, user `72`
 
 **Question**
 
-Open the companion: http://localhost:65423
+The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 Question 4: what modal pattern should mutations use?
 
@@ -134,7 +134,7 @@ Session message ids: assistant `78`, user `79`
 
 **Question**
 
-Open the companion: http://localhost:65423
+The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 Question 6: how should the fullscreen line-diff modal be structured?
 
@@ -159,7 +159,7 @@ Session message ids: assistant `81`, user `82`
 
 **Question**
 
-Open the companion: http://localhost:65423
+The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 Question 7: how much unchanged file context should the unified diff show?
 
@@ -239,7 +239,7 @@ Session message ids: assistant `90`, user `91`
 
 **Question**
 
-Open the companion: http://localhost:65423
+The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 Question 10: how much detail belongs in Active rows versus the Inspector?
 
@@ -750,7 +750,7 @@ Session message ids: assistant `148`, user `149`
 
 Question 29: should filtering match only names, or names plus descriptions/paths/status?
 
-My recommendation: **names, aliases, descriptions, and location chips; not full absolute paths by default**. Full paths are noisy and can cause surprising matches like `/home/inky`.
+My recommendation: **names, aliases, descriptions, and location chips; not full absolute paths by default**. Full paths are noisy and can cause surprising matches like `/home/user`.
 
 Options:
 - **A. Name + aliases only**
@@ -940,7 +940,7 @@ B.
 
 **Recorded Outcome**
 
-Repo preview modal is set: Glamour-rendered Markdown with operational metadata, usage chips, path, and a raw toggle. I’ll continue using the fresh companion URL for visual questions: http://localhost:63675.
+Repo preview modal is set: Glamour-rendered Markdown with operational metadata, usage chips, path, and a raw toggle. The original visual companion is unavailable; use `2026-07-06-go-tui-views-mockups.md`.
 
 ## Q37
 
@@ -3874,7 +3874,9 @@ A.
 
 **Recorded Outcome**
 
-We’ll use an `internal/sources` boundary for network/source discovery and keep actions as orchestration.
+Superseded by implementation: network and source discovery live in
+`internal/remote`; actions remain orchestration. Future work should extend the
+implemented `internal/remote` boundary rather than create `internal/sources`.
 
 ## R56
 

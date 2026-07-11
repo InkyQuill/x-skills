@@ -3,6 +3,7 @@ package roots
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -22,6 +23,21 @@ func TestActiveRootsCanBeFiltered(t *testing.T) {
 	}
 	if filtered[0].Label != ".Cd" {
 		t.Fatalf("Label = %q", filtered[0].Label)
+	}
+}
+
+func TestActiveRootsIncludesConsumers(t *testing.T) {
+	cfg := config.Default("/project", "/home/inky")
+	want := map[string][]string{
+		config.TargetAgents: {"codex", "pi", "opencode", "crush"},
+		config.TargetClaude: {"claude"},
+		config.TargetCodex:  {"codex"},
+	}
+
+	for _, root := range ActiveRoots(cfg, Filter{}) {
+		if !slices.Equal(root.Consumers, want[root.Target]) {
+			t.Fatalf("%s:%s consumers = %v, want %v", root.Scope, root.Target, root.Consumers, want[root.Target])
+		}
 	}
 }
 

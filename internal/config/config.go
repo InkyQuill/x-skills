@@ -36,12 +36,13 @@ type Config struct {
 }
 
 type ManagedRoot struct {
-	Scope   string
-	Target  string
-	Path    string
-	Label   string
-	Builtin bool
-	Enabled bool
+	Scope     string
+	Target    string
+	Path      string
+	Label     string
+	Consumers []string
+	Builtin   bool
+	Enabled   bool
 }
 
 func (r ManagedRoot) Location() string {
@@ -156,14 +157,34 @@ type fileConfig struct {
 }
 
 type activeRootYAML struct {
-	Scope   string `yaml:"scope"`
-	Target  string `yaml:"target"`
-	Path    string `yaml:"path"`
-	Label   string `yaml:"label"`
-	Enabled *bool  `yaml:"enabled"`
+	Scope     string   `yaml:"scope"`
+	Target    string   `yaml:"target"`
+	Path      string   `yaml:"path"`
+	Label     string   `yaml:"label"`
+	Consumers []string `yaml:"consumers"`
+	Enabled   *bool    `yaml:"enabled"`
 }
 
 var targetPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// NormalizeConsumers validates consumer IDs and returns them in canonical order.
+func NormalizeConsumers(consumers []string) ([]string, error) {
+	normalized := make([]string, 0, len(consumers))
+	seen := make(map[string]struct{}, len(consumers))
+	for _, consumer := range consumers {
+		consumer = strings.ToLower(strings.TrimSpace(consumer))
+		if !targetPattern.MatchString(consumer) {
+			return nil, fmt.Errorf("invalid consumer %q; expected ^[a-z][a-z0-9-]*$", consumer)
+		}
+		if _, exists := seen[consumer]; exists {
+			continue
+		}
+		seen[consumer] = struct{}{}
+		normalized = append(normalized, consumer)
+	}
+	slices.Sort(normalized)
+	return normalized, nil
+}
 
 func (c Config) defaultManagedRoots() []ManagedRoot {
 	return []ManagedRoot{
@@ -178,12 +199,26 @@ func (c Config) defaultManagedRoots() []ManagedRoot {
 
 func (c Config) defaultManagedRoot(scope, target, path, label string) ManagedRoot {
 	return ManagedRoot{
-		Scope:   scope,
-		Target:  target,
-		Path:    path,
-		Label:   label,
-		Builtin: true,
-		Enabled: true,
+		Scope:     scope,
+		Target:    target,
+		Path:      path,
+		Label:     label,
+		Consumers: defaultConsumers(target),
+		Builtin:   true,
+		Enabled:   true,
+	}
+}
+
+func defaultConsumers(target string) []string {
+	switch target {
+	case TargetAgents:
+		return []string{"codex", "pi", "opencode", "crush"}
+	case TargetClaude:
+		return []string{"claude"}
+	case TargetCodex:
+		return []string{"codex"}
+	default:
+		return nil
 	}
 }
 
@@ -202,10 +237,18 @@ func (c Config) managedRootFromYAML(entry activeRootYAML) (ManagedRoot, error) {
 		enabled = *entry.Enabled
 	}
 	root := ManagedRoot{
-		Scope:   scope,
-		Target:  target,
-		Label:   strings.TrimSpace(entry.Label),
-		Enabled: enabled,
+		Scope:     scope,
+		Target:    target,
+		Label:     strings.TrimSpace(entry.Label),
+		Consumers: nil,
+		Enabled:   enabled,
+	}
+	if entry.Consumers != nil {
+		consumers, err := NormalizeConsumers(entry.Consumers)
+		if err != nil {
+			return ManagedRoot{}, err
+		}
+		root.Consumers = consumers
 	}
 	if enabled {
 		pathValue := strings.TrimSpace(entry.Path)

@@ -121,6 +121,11 @@ Custom managed roots live in `~/.x-skills/config.yaml`:
 ```yaml
 version: 1
 active_roots:
+  - scope: project
+    target: agents
+    path: .agents/skills
+    label: .Ag
+    consumers: [codex, pi, opencode, crush]
   - scope: global
     target: hermes
     path: ~/.config/hermes/skills
@@ -133,7 +138,9 @@ active_roots:
 Config entries add or override roots by `scope` and `target`. `enabled: false`
 disables a root and does not require `path`. Relative project paths are resolved
 from the current project root; relative global paths and `~/` paths are resolved
-from the home directory. Target ids must match `^[a-z][a-z0-9-]*$`.
+from the home directory. Target and consumer ids must match
+`^[a-z][a-z0-9-]*$`. Omitted consumers on a custom root mean that its consumer
+set is unknown.
 
 Use `x-skills list-roots` to inspect enabled managed roots and discover
 available `--at` selectors. Use `x-skills list-roots --json` for

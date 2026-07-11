@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -196,6 +197,83 @@ func TestManagedRootsDefaults(t *testing.T) {
 		if !root.Builtin || !root.Enabled {
 			t.Fatalf("%s root = %#v, want builtin enabled", key, root)
 		}
+	}
+}
+
+func TestManagedRootsDefaultConsumers(t *testing.T) {
+	cfg := Default(t.TempDir(), t.TempDir())
+	want := map[string][]string{
+		TargetAgents: {"codex", "pi", "opencode", "crush"},
+		TargetClaude: {"claude"},
+		TargetCodex:  {"codex"},
+	}
+
+	for _, root := range cfg.ManagedRoots() {
+		if !slices.Equal(root.Consumers, want[root.Target]) {
+			t.Fatalf("%s consumers = %v, want %v", root.Location(), root.Consumers, want[root.Target])
+		}
+	}
+}
+
+func TestLoadGlobalConfigNormalizesConsumers(t *testing.T) {
+	home := t.TempDir()
+	cfg := Default(t.TempDir(), home)
+	data := []byte("version: 1\nactive_roots:\n  - scope: project\n    target: agents\n    path: .agents/skills\n    consumers: [codex, pi, codex]\n")
+	writeGlobalConfig(t, home, data)
+
+	loaded, err := LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range loaded.ManagedRoots() {
+		if root.Scope == ScopeProject && root.Target == TargetAgents {
+			if want := []string{"codex", "pi"}; !slices.Equal(root.Consumers, want) {
+				t.Fatalf("Consumers = %v, want %v", root.Consumers, want)
+			}
+			return
+		}
+	}
+	t.Fatal("project agents root missing")
+}
+
+func TestLoadGlobalConfigLeavesOmittedCustomConsumersUnknown(t *testing.T) {
+	home := t.TempDir()
+	cfg := Default(t.TempDir(), home)
+	writeGlobalConfig(t, home, []byte("active_roots:\n  - scope: project\n    target: opencode\n    path: .opencode/skills\n"))
+
+	loaded, err := LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range loaded.ManagedRoots() {
+		if root.Target == "opencode" {
+			if root.Consumers != nil {
+				t.Fatalf("Consumers = %v, want nil", root.Consumers)
+			}
+			return
+		}
+	}
+	t.Fatal("opencode root missing")
+}
+
+func TestNormalizeConsumers(t *testing.T) {
+	t.Run("normalizes", func(t *testing.T) {
+		got, err := NormalizeConsumers([]string{" Pi ", "codex", "PI", "open-code"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"codex", "open-code", "pi"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("NormalizeConsumers() = %v, want %v", got, want)
+		}
+	})
+
+	for _, consumers := range [][]string{{""}, {"open_code"}, {"9agent"}} {
+		t.Run(strings.Join(consumers, ","), func(t *testing.T) {
+			if _, err := NormalizeConsumers(consumers); err == nil {
+				t.Fatalf("NormalizeConsumers(%q) error = nil, want error", consumers)
+			}
+		})
 	}
 }
 

@@ -5,10 +5,11 @@ import (
 )
 
 type ActiveRoot struct {
-	Scope  string
-	Target string
-	Path   string
-	Label  string
+	Scope     string
+	Target    string
+	Path      string
+	Label     string
+	Consumers []string
 }
 
 type Filter struct {
@@ -33,10 +34,11 @@ func ActiveRoots(cfg config.Config, filter Filter) []ActiveRoot {
 			continue
 		}
 		roots = append(roots, ActiveRoot{
-			Scope:  managed.Scope,
-			Target: managed.Target,
-			Path:   managed.Path,
-			Label:  managed.Label,
+			Scope:     managed.Scope,
+			Target:    managed.Target,
+			Path:      managed.Path,
+			Label:     managed.Label,
+			Consumers: managed.Consumers,
 		})
 	}
 

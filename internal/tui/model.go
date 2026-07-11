@@ -55,6 +55,8 @@ type Model struct {
 	mutationInFlight       bool
 	mutationProjectTouched bool
 	pendingMutationCmd     tea.Cmd
+	recommendationToken    uint64
+	recommendationInFlight bool
 }
 
 type reloadResultMsg struct {
@@ -168,6 +170,8 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, m.applyDoctorFixResult(msg)
 	case mutationReconcileMsg:
 		return m, m.applyMutationReconcileResult(msg)
+	case recommendationResultMsg:
+		return m, m.applyRecommendationResult(msg)
 	case reloadResultMsg:
 		if msg.token != m.reloadToken {
 			return m, nil
@@ -289,7 +293,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		if m.view == ViewRepo {
-			m.toggleRepoRecommendations()
+			return m, m.toggleRepoRecommendations()
 		}
 	case "m":
 		if m.view == ViewActive {

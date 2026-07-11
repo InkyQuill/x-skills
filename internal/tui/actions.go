@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,6 +26,18 @@ type mutationReconcileMsg struct {
 	issues    []doctor.Issue
 	repoUsage map[string][]string
 	err       error
+}
+
+type recommendationResultMsg struct {
+	token     uint64
+	names     []string
+	promote   bool
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
+	err       error
+	reloadErr error
 }
 
 func (m *Model) queueProjectReconciliation() bool {
@@ -362,44 +375,76 @@ func (m Model) selectedRepoSkillNames() []string {
 	return names
 }
 
-func (m *Model) toggleRepoRecommendations() {
+func (m *Model) toggleRepoRecommendations() tea.Cmd {
+	if m.recommendationInFlight {
+		return nil
+	}
 	names := m.selectedRepoSkillNames()
 	if len(names) == 0 {
-		return
+		return nil
 	}
-	recommended, err := manifest.LoadRecommended(m.cfg.ProjectRoot)
-	if err != nil {
-		m.status = "project recommendation update failed: " + err.Error()
-		return
-	}
-	recommendedNames := make(map[string]struct{}, len(recommended.Skills))
-	for _, skill := range recommended.Skills {
-		recommendedNames[skill.Name] = struct{}{}
-	}
-	recommendedCount := 0
-	for _, name := range names {
-		if _, ok := recommendedNames[name]; ok {
-			recommendedCount++
-		}
-	}
-	if recommendedCount != 0 && recommendedCount != len(names) {
-		m.modal = newResultModal("Project recommendations", []string{"Select only recommended skills to remove, or only local skills to promote."})
-		return
-	}
-	if recommendedCount == len(names) {
-		err = manifest.Unrecommend(m.cfg, names)
+	m.recommendationToken++
+	token := m.recommendationToken
+	m.recommendationInFlight = true
+	m.status = "updating project recommendations..."
+	cfg := m.cfg
+	queuedNames := slices.Clone(names)
+	return func() tea.Msg {
+		msg := recommendationResultMsg{token: token, names: queuedNames}
+		recommended, err := manifest.LoadRecommended(cfg.ProjectRoot)
 		if err == nil {
-			m.status = "Removed " + repoSelectionTitle(names) + " from project recommendations"
+			recommendedNames := make(map[string]struct{}, len(recommended.Skills))
+			for _, skill := range recommended.Skills {
+				recommendedNames[skill.Name] = struct{}{}
+			}
+			recommendedCount := 0
+			for _, name := range queuedNames {
+				if _, ok := recommendedNames[name]; ok {
+					recommendedCount++
+				}
+			}
+			switch {
+			case recommendedCount != 0 && recommendedCount != len(queuedNames):
+				err = errors.New("select only recommended skills to remove, or only local skills to promote")
+			case recommendedCount == len(queuedNames):
+				err = manifest.Unrecommend(cfg, queuedNames)
+			default:
+				msg.promote = true
+				err = manifest.Recommend(cfg, queuedNames)
+			}
 		}
-	} else {
-		err = manifest.Recommend(m.cfg, names)
-		if err == nil {
-			m.status = "Promoted " + repoSelectionTitle(names) + " to project recommendations"
-		}
+		msg.err = err
+		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
+		return msg
 	}
-	if err != nil {
-		m.status = "project recommendation update failed: " + err.Error()
+}
+
+func (m *Model) applyRecommendationResult(msg recommendationResultMsg) tea.Cmd {
+	if msg.token != m.recommendationToken {
+		return nil
 	}
+	m.recommendationInFlight = false
+	if msg.reloadErr == nil {
+		m.active = msg.active
+		m.repo = msg.repo
+		m.issues = msg.issues
+		m.repoUsage = msg.repoUsage
+		m.clampCursor()
+	}
+	if msg.err != nil {
+		m.status = "project recommendation update failed: " + msg.err.Error()
+		return nil
+	}
+	action := "Removed " + repoSelectionTitle(msg.names) + " from project recommendations"
+	if msg.promote {
+		action = "Promoted " + repoSelectionTitle(msg.names) + " to project recommendations"
+	}
+	if msg.reloadErr != nil {
+		m.status = action + ", but refreshing the TUI failed: " + msg.reloadErr.Error()
+		return nil
+	}
+	m.status = action
+	return nil
 }
 
 func repoSelectionLabel(label string, count int) string {

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/remote"
 )
@@ -52,27 +51,23 @@ func Unrecommend(cfg config.Config, names []string) error {
 	if err != nil {
 		return err
 	}
-	active, err := actions.ScanActive(cfg, actions.ScanFilter{Scope: config.ScopeProject})
-	if err != nil {
-		return fmt.Errorf("scan project skills: %w", err)
-	}
-	activeNames := make(map[string]struct{}, len(active))
-	for _, occurrence := range active {
-		if occurrence.Status != actions.StatusBroken {
-			activeNames[occurrence.Name] = struct{}{}
-		}
-	}
-
+	remove := make(map[string]struct{}, len(names))
 	for _, name := range names {
-		index := slices.IndexFunc(recommended.Skills, func(skill Skill) bool { return skill.Name == name })
-		if index < 0 {
+		if _, duplicate := remove[name]; duplicate {
+			return fmt.Errorf("duplicate skill name %q", name)
+		}
+		if !slices.ContainsFunc(recommended.Skills, func(skill Skill) bool { return skill.Name == name }) {
 			return fmt.Errorf("skill %q is not in the Recommended Skill Manifest", name)
 		}
-		skill := recommended.Skills[index]
-		recommended.Skills = slices.Delete(recommended.Skills, index, index+1)
-		if _, present := activeNames[name]; present {
-			local.Skills = upsertSkill(local.Skills, skill)
-		}
+		remove[name] = struct{}{}
+	}
+	recommended.Skills = slices.DeleteFunc(recommended.Skills, func(skill Skill) bool {
+		_, removed := remove[skill.Name]
+		return removed
+	})
+	local, err = planLocalReconciliation(cfg, local, recommended)
+	if err != nil {
+		return err
 	}
 	return writeManifestPair(cfg.ProjectRoot, recommended, local)
 }

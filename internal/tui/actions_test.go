@@ -29,12 +29,27 @@ func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) 
 	m := New(cfg)
 	m.setView(ViewRepo)
 
-	updated, _ := m.Update(keyRunes("r"))
+	updated, cmd := m.Update(keyRunes("r"))
 	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("recommendation key command = nil, want asynchronous command")
+	}
 	if m.view != ViewRepo {
 		t.Fatalf("view = %s, want Repo", m.view)
 	}
 	recommended, err := manifest.LoadRecommended(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommended.Skills) != 0 {
+		t.Fatalf("recommended changed before command delivery: %#v", recommended.Skills)
+	}
+	if _, duplicate := m.Update(keyRunes("r")); duplicate != nil {
+		t.Fatal("second recommendation command started while first is in flight")
+	}
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
+	recommended, err = manifest.LoadRecommended(project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +60,12 @@ func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) 
 		t.Fatalf("status = %q, want promotion result", m.status)
 	}
 
-	updated, _ = m.Update(keyRunes("r"))
+	updated, cmd = m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("unrecommendation key command = nil, want asynchronous command")
+	}
+	updated, _ = m.Update(cmd())
 	m = mustModel(t, updated)
 	recommended, err = manifest.LoadRecommended(project)
 	if err != nil {
@@ -56,6 +76,19 @@ func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) 
 	}
 	if !strings.Contains(m.status, "Removed") {
 		t.Fatalf("status = %q, want removal result", m.status)
+	}
+}
+
+func TestStaleRecommendationResultDoesNotMutateCurrentGeneration(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.recommendationToken = 2
+	m.recommendationInFlight = true
+	m.status = "current operation"
+
+	updated, _ := m.Update(recommendationResultMsg{token: 1, names: []string{"stale"}, promote: true})
+	m = mustModel(t, updated)
+	if !m.recommendationInFlight || m.status != "current operation" {
+		t.Fatalf("stale result mutated model: inFlight=%v status=%q", m.recommendationInFlight, m.status)
 	}
 }
 

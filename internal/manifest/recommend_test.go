@@ -135,6 +135,80 @@ func TestUnrecommendMovesStillActiveProjectSkillToLocal(t *testing.T) {
 	}
 }
 
+func TestUnrecommendReconcilesUnmanagedActiveIdentity(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	writeRecommendationArchive(t, cfg, "shared", remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "repo", SkillPath: "skills/shared"})
+	if err := WriteRecommended(cfg.ProjectRoot, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceGitHub, Repository: "owner/repo", Path: "skills/shared"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "shared")
+	if err := os.MkdirAll(active, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(active, "SKILL.md"), []byte("---\nname: shared\ndescription: divergent local copy\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Unrecommend(cfg, []string{"shared"}); err != nil {
+		t.Fatalf("Unrecommend() error = %v", err)
+	}
+	local, err := LoadLocal(cfg.ProjectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(local.Skills) != 1 || local.Skills[0].Source.Type != SourceArchive || local.Skills[0].Fingerprint == "" {
+		t.Fatalf("local skills = %#v, want observed archive identity with fingerprint", local.Skills)
+	}
+}
+
+func TestUnrecommendRejectsDivergentActiveIdentitiesWithoutWriting(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	writeRecommendationArchive(t, cfg, "shared", remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "repo", SkillPath: "skills/shared"})
+	want := Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceGitHub, Repository: "owner/repo", Path: "skills/shared"}}}}
+	if err := WriteRecommended(cfg.ProjectRoot, want); err != nil {
+		t.Fatal(err)
+	}
+	for target, description := range map[string]string{config.TargetAgents: "first", config.TargetCodex: "second"} {
+		active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, target), "shared")
+		if err := os.MkdirAll(active, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(active, "SKILL.md"), []byte("---\nname: shared\ndescription: "+description+"\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := Unrecommend(cfg, []string{"shared"})
+	if err == nil || !strings.Contains(err.Error(), "divergent identities") {
+		t.Fatalf("Unrecommend() error = %v", err)
+	}
+	got, loadErr := LoadRecommended(cfg.ProjectRoot)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("recommended changed on reconciliation failure: got %#v, want %#v", got, want)
+	}
+}
+
+func TestUnrecommendWithoutActiveProjectSkillOnlyRemovesRecommended(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	writeRecommendationArchive(t, cfg, "shared", remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "repo", SkillPath: "skills/shared"})
+	if err := WriteRecommended(cfg.ProjectRoot, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceGitHub, Repository: "owner/repo", Path: "skills/shared"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Unrecommend(cfg, []string{"shared"}); err != nil {
+		t.Fatal(err)
+	}
+	local, err := LoadLocal(cfg.ProjectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(local.Skills) != 0 {
+		t.Fatalf("local skills = %#v, want empty", local.Skills)
+	}
+}
+
 func writeRecommendationArchive(t *testing.T, cfg config.Config, name string, meta remote.SourceMetadata) {
 	t.Helper()
 	dir := filepath.Join(cfg.ArchiveSkillsRoot(), name)

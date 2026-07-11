@@ -32,6 +32,20 @@ func ReconcileLocal(cfg config.Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	next, err := planLocalReconciliation(cfg, old, recommended)
+	if err != nil {
+		return Result{}, err
+	}
+	if reflect.DeepEqual(old, next) {
+		return Result{Skills: next.Skills}, nil
+	}
+	if err := WriteLocal(cfg.ProjectRoot, next); err != nil {
+		return Result{}, err
+	}
+	return Result{Changed: true, Skills: next.Skills}, nil
+}
+
+func planLocalReconciliation(cfg config.Config, old, recommended Manifest) (Manifest, error) {
 	recommendedNames := make(map[string]struct{}, len(recommended.Skills))
 	for _, skill := range recommended.Skills {
 		recommendedNames[skill.Name] = struct{}{}
@@ -48,13 +62,13 @@ func ReconcileLocal(cfg config.Config) (Result, error) {
 		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), skill.Name)); errors.Is(err, os.ErrNotExist) {
 			retained[skill.Name] = skill
 		} else if err != nil {
-			return Result{}, fmt.Errorf("inspect archived skill %q: %w", skill.Name, err)
+			return Manifest{}, fmt.Errorf("inspect archived skill %q: %w", skill.Name, err)
 		}
 	}
 
 	active, err := actions.ScanActive(cfg, actions.ScanFilter{Scope: config.ScopeProject})
 	if err != nil {
-		return Result{}, fmt.Errorf("scan project skills: %w", err)
+		return Manifest{}, fmt.Errorf("scan project skills: %w", err)
 	}
 	observed := make(map[string]Skill)
 	for _, occurrence := range active {
@@ -67,10 +81,10 @@ func ReconcileLocal(cfg config.Config) (Result, error) {
 		}
 		skill, err := reconciledSkill(cfg, name, occurrence.Path, occurrence.Status)
 		if err != nil {
-			return Result{}, err
+			return Manifest{}, err
 		}
 		if previous, exists := observed[name]; exists && !sameIdentity(previous, skill) {
-			return Result{}, fmt.Errorf("project skill %q has divergent identities across Skills Folders; reconcile the active copies before retrying", name)
+			return Manifest{}, fmt.Errorf("project skill %q has divergent identities across Skills Folders; reconcile the active copies before retrying", name)
 		}
 		observed[name] = skill
 	}
@@ -82,15 +96,9 @@ func ReconcileLocal(cfg config.Config) (Result, error) {
 		next.Skills = append(next.Skills, skill)
 	}
 	if err := normalizeAndValidate(&next, true); err != nil {
-		return Result{}, fmt.Errorf("reconcile local manifest: %w", err)
+		return Manifest{}, fmt.Errorf("reconcile local manifest: %w", err)
 	}
-	if reflect.DeepEqual(old, next) {
-		return Result{Skills: next.Skills}, nil
-	}
-	if err := WriteLocal(cfg.ProjectRoot, next); err != nil {
-		return Result{}, err
-	}
-	return Result{Changed: true, Skills: next.Skills}, nil
+	return next, nil
 }
 
 func reconciledSkill(cfg config.Config, name, activePath, status string) (Skill, error) {

@@ -152,7 +152,6 @@ func TestDiscoverRejectsExistingNonDirectoryDestination(t *testing.T) {
 	}
 
 	for _, destinationPath := range []string{filePath, symlinkPath} {
-		destinationPath := destinationPath
 		t.Run(filepath.Base(destinationPath), func(t *testing.T) {
 			_, err := Discover(cfg, []roots.ActiveRoot{{Path: destinationPath, Consumers: []string{"pi"}}})
 			if err == nil || !strings.Contains(err.Error(), "resolve destination Skills Folder") {

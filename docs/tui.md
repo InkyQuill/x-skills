@@ -1,6 +1,6 @@
 # TUI guide
 
-Run `x-skills tui`. The Bubble Tea interface works from the current project and has Active, Repo, Doctor, and Install top-level pages, plus a Sync workbench opened from Active. Page switching uses `A`, `R`, `D`, and `I`; `ctrl+r` refreshes, `/` filters the current page, `?` opens help, and `q`/`Esc` backs out before quitting. Arrow keys or `j`/`k` move, `space` toggles a row, and `enter` applies the focused modal action. Footers show the keys valid in the current context.
+Run `x-skills tui`. The Bubble Tea interface works from the current project and has Active, Repo, Doctor, and Install top-level pages, plus a Sync workbench opened from Active. Page switching uses `A`, `R`, `D`, and `I`; `ctrl+r` refreshes, `/` filters the current page, `?` opens help, `Esc` cancels the active modal or input, and `q` quits from the top level. Arrow keys or `j`/`k` move, `space` toggles a row, and `enter` applies the focused modal action. Footers show the keys valid in the current context.
 
 ## Pages and selection
 

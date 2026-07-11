@@ -21,6 +21,9 @@ type UnlinkRequest struct {
 }
 
 func Unlink(cfg config.Config, req UnlinkRequest) (MutationResult, error) {
+	mutationMu.Lock()
+	defer mutationMu.Unlock()
+
 	paths, err := mutationPaths(cfg, req.Name, req.Scope, req.Target)
 	if err != nil {
 		return MutationResult{}, err

@@ -82,7 +82,9 @@ func (plan *RestorePlan) Close() error {
 		return nil
 	}
 	err := os.RemoveAll(plan.checkoutRoot)
-	plan.checkoutRoot = ""
+	if err == nil {
+		plan.checkoutRoot = ""
+	}
 	return err
 }
 
@@ -267,6 +269,7 @@ func validateRestorePlanForApply(cfg config.Config, plan RestorePlan) error {
 		}
 		changeSets = [][]Change{eligibleAdditions}
 	}
+	plannedArchives := make(map[string]string)
 	for _, changes := range changeSets {
 		for _, change := range changes {
 			if err := validatePlannedChange(cfg, change); err != nil {
@@ -288,6 +291,11 @@ func validateRestorePlanForApply(cfg config.Config, plan RestorePlan) error {
 					return err
 				}
 			}
+			archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), change.ArchiveName)
+			if prior, exists := plannedArchives[archivePath]; exists {
+				return fmt.Errorf("migration archive destination %q is already planned for %q", change.ArchiveName, prior)
+			}
+			plannedArchives[archivePath] = change.Name
 		}
 	}
 	return nil
@@ -315,10 +323,15 @@ func planDestinationNormalization(cfg config.Config, destination roots.ActiveRoo
 	activeFP, activeErr := fingerprint.Directory(path)
 	archiveFP, archiveErr := fingerprint.Directory(archive)
 	if activeErr == nil && archiveErr == nil && activeFP == archiveFP {
+		change.Kind, change.ArchiveName = ChangeRemove, ""
 		return change, nil, nil
 	}
 	change.ArchiveName = ""
-	conflict := &MigrationConflict{Name: name, Path: path, ExistingArchive: archive, SuggestedName: availableRestoreArchiveName(cfg, name+"-preserved")}
+	suggested, err := availableRestoreArchiveName(cfg, name+"-preserved")
+	if err != nil {
+		return nil, nil, err
+	}
+	conflict := &MigrationConflict{Name: name, Path: path, ExistingArchive: archive, SuggestedName: suggested}
 	return change, conflict, nil
 }
 
@@ -424,9 +437,14 @@ func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, des
 				if _, err := os.Lstat(archive); err == nil {
 					activeFP, activeErr := fingerprint.Directory(skill.Path)
 					archiveFP, archiveErr := fingerprint.Directory(archive)
-					if activeErr != nil || archiveErr != nil || activeFP != archiveFP {
+					if activeErr == nil && archiveErr == nil && activeFP == archiveFP {
+						kind, archiveName = ChangeRemove, ""
+					} else {
 						archiveName = ""
-						suggested := availableRestoreArchiveName(cfg, occurrenceName+"-preserved")
+						suggested, err := availableRestoreArchiveName(cfg, occurrenceName+"-preserved")
+						if err != nil {
+							return nil, nil, err
+						}
 						conflicts = append(conflicts, MigrationConflict{Name: occurrenceName, Path: skill.Path, ExistingArchive: archive, SuggestedName: suggested})
 					}
 				} else if !errors.Is(err, os.ErrNotExist) {
@@ -494,14 +512,16 @@ func validatePlannedChange(cfg config.Config, change Change) error {
 	return nil
 }
 
-func availableRestoreArchiveName(cfg config.Config, base string) string {
+func availableRestoreArchiveName(cfg config.Config, base string) (string, error) {
 	for index := 0; ; index++ {
 		name := base
 		if index > 0 {
 			name = fmt.Sprintf("%s-%d", base, index+1)
 		}
 		if _, err := os.Lstat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); errors.Is(err, os.ErrNotExist) {
-			return name
+			return name, nil
+		} else if err != nil {
+			return "", fmt.Errorf("inspect restore archive name %q: %w", name, err)
 		}
 	}
 }
@@ -573,14 +593,15 @@ func copyRestoreTree(source, destination string) error {
 			if err != nil {
 				return err
 			}
-			defer func() { _ = in.Close() }()
 			out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
 			if err != nil {
+				_ = in.Close()
 				return err
 			}
 			_, copyErr := io.Copy(out, in)
+			inCloseErr := in.Close()
 			closeErr := out.Close()
-			return errors.Join(copyErr, closeErr)
+			return errors.Join(copyErr, inCloseErr, closeErr)
 		}
 	})
 }

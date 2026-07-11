@@ -78,7 +78,7 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 	}
 	issues = append(issues, builtInIssues...)
 	if filter.Scope == "" || filter.Scope == config.ScopeProject {
-		gitIssues, err := diagnoseGitHygiene(cfg)
+		gitIssues, err := diagnoseGitHygiene(cfg, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -171,6 +171,9 @@ func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResul
 		if issue.Kind == KindInactiveBuiltIn && opts.ArchiveOnlyBuiltIns {
 			results = append(results, FixResult{Name: issue.Name, Action: "archived but inactive", Path: issue.Path})
 		}
+		if opts.ArchiveOnlyBuiltIns {
+			continue
+		}
 		for _, destination := range opts.BuiltInDestinations {
 			linked, linkErr := actions.Link(cfg, actions.LinkRequest{Name: issue.Name, Scope: destination.Scope, Target: destination.Target})
 			if linkErr != nil {
@@ -218,7 +221,7 @@ func FixIssues(issues []Issue) ([]FixResult, error) {
 	return results, nil
 }
 
-func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
+func diagnoseGitHygiene(cfg config.Config, filter Filter) ([]Issue, error) {
 	inside, err := gitInsideWorkTree(cfg.ProjectRoot)
 	if err != nil || !inside {
 		return nil, err
@@ -257,7 +260,7 @@ func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
 		issues = append(issues, Issue{Kind: KindLocalManifestTracked, Name: ".x-skills.local.yaml", Location: "project", Path: local, Reason: "local manifest is tracked by Git", SafeFix: "git rm --cached -- " + shellQuote(".x-skills.local.yaml"), ProjectRoot: cfg.ProjectRoot})
 	}
 
-	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject}) {
+	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: filter.Target}) {
 		rel, err := filepath.Rel(cfg.ProjectRoot, root.Path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
@@ -278,7 +281,8 @@ func gitInsideWorkTree(projectRoot string) (bool, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "rev-parse", "--is-inside-work-tree")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok && !hasGitMarker(projectRoot) {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && !hasGitMarker(projectRoot) {
 			return false, nil
 		}
 		return false, fmt.Errorf("inspect Git work tree: %w: %s", err, strings.TrimSpace(string(out)))
@@ -302,7 +306,8 @@ func hasGitMarker(path string) bool {
 func gitPathIgnored(projectRoot, path string) (bool, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "check-ignore", "--quiet", "--", path)
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		return false, fmt.Errorf("inspect ignored path %q: %w", path, err)
@@ -313,7 +318,8 @@ func gitPathIgnored(projectRoot, path string) (bool, error) {
 func gitPathTracked(projectRoot, path string) (bool, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--error-unmatch", "--", path)
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		return false, fmt.Errorf("inspect tracked path %q: %w", path, err)

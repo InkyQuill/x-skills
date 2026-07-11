@@ -254,8 +254,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.filter.Active {
+		previousQuery := m.filter.Query
 		if handled, cmd := m.filter.update(msg); handled {
 			m.cursor = 0
+			if m.filter.Query != previousQuery {
+				m.selected[m.view] = map[string]bool{}
+			}
 			return m, cmd
 		}
 	}
@@ -500,6 +504,7 @@ func (m *Model) setView(view ViewName) {
 	}
 	if m.view == ViewInstall && view != ViewInstall {
 		m.cancelInstallWork()
+		m.install.InputMode = installInputNone
 	}
 	m.view = view
 	m.cursor = 0

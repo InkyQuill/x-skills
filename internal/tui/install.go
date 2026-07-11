@@ -804,7 +804,7 @@ func (m *Model) archiveInstallRowRenamingExisting(row installResultView, newName
 		if err != nil {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, err: err}
 		}
-		if _, err := actions.RenameArchive(cfg, row.Result.Name, newName); err != nil {
+		if _, err := actions.RenameArchiveContext(ctx, cfg, row.Result.Name, newName); err != nil {
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: err}
 		}
 		_, err = installApplyArchive(remote.AddRequest{
@@ -815,7 +815,7 @@ func (m *Model) archiveInstallRowRenamingExisting(row installResultView, newName
 			Conflict:    remote.ConflictReplaceArchive,
 		})
 		if err != nil {
-			if _, rollbackErr := actions.RenameArchive(cfg, newName, row.Result.Name); rollbackErr != nil {
+			if _, rollbackErr := actions.RenameArchiveContext(context.WithoutCancel(ctx), cfg, newName, row.Result.Name); rollbackErr != nil {
 				err = fmt.Errorf("apply incoming archive after renaming existing archive: %w; rollback rename: %w", err, rollbackErr)
 			}
 			return installArchiveMsg{token: token, name: row.Result.Name, identity: identity, archiveState: remote.ArchiveStateNameConflict, err: err}
@@ -1206,16 +1206,33 @@ func (m *Model) installAndUseRowsWithProgress(
 	}
 	token := m.install.bumpUseToken()
 	archiveOperations := make([]installArchiveRowOperation, 0, len(rows))
+	archiveRollbacks := make([]*installUseBatchArchiveRollback, 0, len(rows))
 	for i, row := range rows {
 		if i == 0 && useExistingFirstArchive {
 			archiveOperations = append(archiveOperations, nil)
+			archiveRollbacks = append(archiveRollbacks, nil)
 			continue
 		}
-		operation := m.archiveInstallRow(row)
+		archivePath, err := repo.SkillPath(m.cfg, row.Result.Name)
+		if err != nil {
+			m.status = err.Error()
+			m.install.Message = m.status
+			return nil
+		}
+		rollback := &installUseBatchArchiveRollback{archivePath: archivePath}
+		operation := m.archiveInstallRowPreparing(row, func() error {
+			backupPath, err := installUsePrepareArchiveRollback(archivePath)
+			if err == nil {
+				rollback.backupPath = backupPath
+				rollback.prepared = true
+			}
+			return err
+		})
 		if operation == nil {
 			return nil
 		}
 		archiveOperations = append(archiveOperations, operation)
+		archiveRollbacks = append(archiveRollbacks, rollback)
 	}
 	m.install.useInFlight = true
 	m.install.useInFlightToken = token
@@ -1232,8 +1249,9 @@ func (m *Model) installAndUseRowsWithProgress(
 		createdPaths := make([]string, 0, len(rows)*len(destinations))
 		for i, row := range rows {
 			if !useGeneration.isCurrent(token) {
-				if err := rollbackInstallUseLinks(createdPaths); err != nil {
-					return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+				err := errors.Join(rollbackInstallUseLinks(createdPaths), rollbackInstallUseBatchArchives(archiveRollbacks))
+				if err != nil {
+					return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use batch: %w", err)}
 				}
 				return installUseMsg{token: token, destinations: destinations, stale: true}
 			}
@@ -1242,6 +1260,7 @@ func (m *Model) installAndUseRowsWithProgress(
 				archiveMsg := runInstallArchiveRow(ctx, archiveOperations[i])
 				cancel()
 				if archiveMsg.err != nil {
+					rollbackErr := rollbackInstallUseBatchArchive(archiveRollbacks[i])
 					switch archiveMsg.archiveState {
 					case remote.ArchiveStateNameConflict, remote.ArchiveStateUpdateAvailable:
 						result.next = &installUseBatchNext{
@@ -1256,10 +1275,10 @@ func (m *Model) installAndUseRowsWithProgress(
 							archiveState: archiveMsg.archiveState,
 							destinations: destinations,
 							batch:        result,
-							err:          archiveMsg.err,
+							err:          errors.Join(archiveMsg.err, rollbackErr, discardInstallUseBatchArchives(archiveRollbacks[:i])),
 						}
 					default:
-						result.failures = append(result.failures, row.Result.Name+": "+archiveMsg.err.Error())
+						result.failures = append(result.failures, row.Result.Name+": "+errors.Join(archiveMsg.err, rollbackErr).Error())
 						continue
 					}
 				}
@@ -1269,8 +1288,9 @@ func (m *Model) installAndUseRowsWithProgress(
 			for _, dest := range destinations {
 				if !useGeneration.isCurrent(token) {
 					rollbackPaths := append(append([]string(nil), createdPaths...), rowCreatedPaths...)
-					if err := rollbackInstallUseLinks(rollbackPaths); err != nil {
-						return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+					err := errors.Join(rollbackInstallUseLinks(rollbackPaths), rollbackInstallUseBatchArchives(archiveRollbacks))
+					if err != nil {
+						return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use batch: %w", err)}
 					}
 					return installUseMsg{token: token, destinations: destinations, stale: true}
 				}
@@ -1279,6 +1299,7 @@ func (m *Model) installAndUseRowsWithProgress(
 					if rollbackErr := rollbackInstallUseLinks(rowCreatedPaths); rollbackErr != nil {
 						err = errors.Join(err, fmt.Errorf("rollback partial install-use links: %w", rollbackErr))
 					}
+					err = errors.Join(err, rollbackInstallUseBatchArchive(archiveRollbacks[i]))
 					result.failures = append(result.failures, row.Result.Name+": "+err.Error())
 					rowFailed = true
 					break
@@ -1288,8 +1309,9 @@ func (m *Model) installAndUseRowsWithProgress(
 				}
 				if !useGeneration.isCurrent(token) {
 					rollbackPaths := append(append([]string(nil), createdPaths...), rowCreatedPaths...)
-					if err := rollbackInstallUseLinks(rollbackPaths); err != nil {
-						return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use links: %w", err)}
+					err := errors.Join(rollbackInstallUseLinks(rollbackPaths), rollbackInstallUseBatchArchives(archiveRollbacks))
+					if err != nil {
+						return installUseMsg{token: token, destinations: destinations, err: fmt.Errorf("rollback stale install-use batch: %w", err)}
 					}
 					return installUseMsg{token: token, destinations: destinations, stale: true}
 				}
@@ -1299,6 +1321,9 @@ func (m *Model) installAndUseRowsWithProgress(
 				result.success = append(result.success, row.Result.Name)
 			}
 		}
+		if err := discardInstallUseBatchArchives(archiveRollbacks); err != nil {
+			return installUseMsg{token: token, destinations: destinations, batch: result, err: err}
+		}
 		if len(result.success) > 0 && installDestinationsContainProject(destinations) {
 			if _, err := manifest.ReconcileLocal(cfg); err != nil {
 				return installUseMsg{token: token, destinations: destinations, batch: result, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)}
@@ -1306,6 +1331,40 @@ func (m *Model) installAndUseRowsWithProgress(
 		}
 		return installUseMsg{token: token, destinations: destinations, batch: result}
 	}
+}
+
+type installUseBatchArchiveRollback struct {
+	archivePath string
+	backupPath  string
+	prepared    bool
+}
+
+func rollbackInstallUseBatchArchive(rollback *installUseBatchArchiveRollback) error {
+	if rollback == nil || !rollback.prepared {
+		return nil
+	}
+	rollback.prepared = false
+	return installUseRollbackArchive(rollback.archivePath, rollback.backupPath)
+}
+
+func rollbackInstallUseBatchArchives(rollbacks []*installUseBatchArchiveRollback) error {
+	var errs []error
+	for i := len(rollbacks) - 1; i >= 0; i-- {
+		errs = append(errs, rollbackInstallUseBatchArchive(rollbacks[i]))
+	}
+	return errors.Join(errs...)
+}
+
+func discardInstallUseBatchArchives(rollbacks []*installUseBatchArchiveRollback) error {
+	var errs []error
+	for _, rollback := range rollbacks {
+		if rollback == nil || !rollback.prepared {
+			continue
+		}
+		rollback.prepared = false
+		errs = append(errs, discardInstallUseArchiveRollback(rollback.backupPath))
+	}
+	return errors.Join(errs...)
 }
 
 func installDestinationsContainProject(destinations []installDestination) bool {

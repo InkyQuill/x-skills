@@ -86,6 +86,66 @@ func TestConstrainedModalKeepsFooterVisibleWithLongBody(t *testing.T) {
 	}
 }
 
+func TestModalContentDimensionsGrowMonotonically(t *testing.T) {
+	previousWidth := 0
+	for width := 1; width <= 100; width++ {
+		got := modalContentWidth(width)
+		if got < previousWidth {
+			t.Fatalf("modalContentWidth(%d) = %d, decreased from %d", width, got, previousWidth)
+		}
+		previousWidth = got
+	}
+	previousHeight := 0
+	for height := 1; height <= 30; height++ {
+		got := modalContentHeight(height)
+		if got < previousHeight {
+			t.Fatalf("modalContentHeight(%d) = %d, decreased from %d", height, got, previousHeight)
+		}
+		previousHeight = got
+	}
+}
+
+func TestConstrainedModalSanitizesTitleAndBodyControls(t *testing.T) {
+	view := renderConstrainedModal(80, 20, constrainedModalOptions{
+		Title: "title\x1b[31mred",
+		Body:  []string{"body\x1b]8;;https://evil.test\x07link\x1b]8;;\x07"},
+	})
+	for _, control := range []string{"\x1b]8", "\x07", "\x1b[31m"} {
+		if strings.Contains(view, control) {
+			t.Fatalf("modal retained terminal control %q: %q", control, view)
+		}
+	}
+}
+
+func TestConflictDiffKeepsSelectedFileVisibleBeyondViewport(t *testing.T) {
+	files := make([]diffFile, 20)
+	for i := range files {
+		files[i] = diffFile{Path: fmt.Sprintf("file-%02d.md", i), Text: "same"}
+	}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	modal := conflictDiffModal{name: "many", diff: directoryDiff{Files: files}, selected: len(files) - 1}
+	view := plain(modal.View(100, 18, m))
+	if !strings.Contains(view, "file-19.md") {
+		t.Fatalf("selected file is outside visible viewport:\n%s", view)
+	}
+}
+
+func TestPreviewUpdateStoresViewportDimensions(t *testing.T) {
+	skill := makeSkill(t, t.TempDir(), "preview-size", "Preview.")
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width, m.height = 80, 24
+	m.modal = newPreviewModal("Preview", skill)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	preview, ok := m.modal.(*previewModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *previewModal", m.modal)
+	}
+	if preview.viewport.Width != 68 || preview.viewport.Height != 12 {
+		t.Fatalf("viewport = %dx%d, want 68x12", preview.viewport.Width, preview.viewport.Height)
+	}
+}
+
 func TestPresentModalBodyClampsNegativeScroll(t *testing.T) {
 	got := presentModalBody([]string{"one", "two", "three"}, 2, 0, -1, true)
 	if len(got) != 2 {
@@ -393,7 +453,7 @@ func TestPreviewModalRenderedHidesFrontmatterAndShowsBody(t *testing.T) {
 			t.Fatalf("rendered preview should hide frontmatter %q:\n%s", unexpected, view)
 		}
 	}
-	for _, want := range []string{"Metadata description", "Focused Preview", "installing quality checks"} {
+	for _, want := range []string{"Focused Preview", "installing quality checks"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("rendered preview missing body content %q:\n%s", want, view)
 		}

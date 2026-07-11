@@ -655,6 +655,22 @@ func TestClassifyDestinationRejectsBrokenSymlink(t *testing.T) {
 	}
 }
 
+func TestArchivePathMatchesFingerprintRejectsSymlinkedArchiveEntry(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	external := makePlanSkill(t, t.TempDir(), "external", "external")
+	if err := os.MkdirAll(cfg.ArchiveSkillsRoot(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "external")
+	if err := os.Symlink(external, archive); err != nil {
+		t.Fatal(err)
+	}
+	_, err := archivePathMatchesFingerprint(cfg, archive, mustPlanFingerprint(t, external))
+	if err == nil || !strings.Contains(err.Error(), "real directory") {
+		t.Fatalf("error = %v, want symlinked archive rejection", err)
+	}
+}
+
 func assertPlanSnapshot(t *testing.T, before map[string]planSnapshotEntry, paths ...string) {
 	t.Helper()
 	after := snapshotPlanTree(t, paths...)

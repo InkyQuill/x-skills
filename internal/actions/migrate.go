@@ -51,6 +51,9 @@ func (e *ArchiveConflictError) Error() string {
 }
 
 func Migrate(cfg config.Config, req MigrateRequest) (MutationResult, error) {
+	mutationMu.Lock()
+	defer mutationMu.Unlock()
+
 	paths, err := mutationPaths(cfg, req.Name, req.Scope, req.Target)
 	if err != nil {
 		return MutationResult{}, err

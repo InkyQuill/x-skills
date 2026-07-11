@@ -163,10 +163,13 @@ func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roo
 func filterDoctorIssuesByLocations(issues []doctor.Issue, locations []roots.ActiveRoot) []doctor.Issue {
 	allowed := pathPrefixSet(locations)
 	projectSelected := false
+	globalSelected := len(locations) == 0
 	for _, location := range locations {
 		if location.Scope == config.ScopeProject {
 			projectSelected = true
-			break
+		}
+		if location.Scope == config.ScopeGlobal {
+			globalSelected = true
 		}
 	}
 	filtered := make([]doctor.Issue, 0, len(issues))
@@ -178,7 +181,9 @@ func filterDoctorIssuesByLocations(issues []doctor.Issue, locations []roots.Acti
 			}
 			continue
 		case doctor.KindMissingBuiltIn, doctor.KindInactiveBuiltIn:
-			filtered = append(filtered, issue)
+			if globalSelected {
+				filtered = append(filtered, issue)
+			}
 			continue
 		}
 		for prefix := range allowed {

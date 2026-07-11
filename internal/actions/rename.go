@@ -60,6 +60,9 @@ func RenameArchive(cfg config.Config, oldName, newName string) (RenameResult, er
 }
 
 func RenameArchiveContext(ctx context.Context, cfg config.Config, oldName, newName string) (RenameResult, error) {
+	mutationMu.Lock()
+	defer mutationMu.Unlock()
+
 	result := RenameResult{OtherProjectsMayUseArchive: true, RelinkedPaths: []string{}, ManifestUpdates: []string{}}
 	oldPath, newPath, err := renameArchivePaths(cfg, oldName, newName)
 	if err != nil {
@@ -102,6 +105,7 @@ func RenameArchiveContext(ctx context.Context, cfg config.Config, oldName, newNa
 	}
 	relinked := []renameUsage{}
 	writtenManifests := []renameManifest{}
+	pendingManifestUpdates := []string{}
 	rollback := func(cause error) (RenameResult, error) {
 		rollbackErr := rollbackArchiveRename(oldPath, newPath, relinked, writtenManifests)
 		if rollbackErr != nil {
@@ -141,11 +145,12 @@ func RenameArchiveContext(ctx context.Context, cfg config.Config, oldName, newNa
 			return rollback(fmt.Errorf("update %s: %w", manifests[i].label, err))
 		}
 		writtenManifests = append(writtenManifests, manifests[i])
-		result.ManifestUpdates = append(result.ManifestUpdates, manifests[i].label)
+		pendingManifestUpdates = append(pendingManifestUpdates, manifests[i].label)
 	}
 	for _, usage := range relinked {
 		result.RelinkedPaths = append(result.RelinkedPaths, usage.path)
 	}
+	result.ManifestUpdates = pendingManifestUpdates
 	return result, nil
 }
 

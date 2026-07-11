@@ -24,7 +24,7 @@ Archive rename is currently a Repo-page TUI action, not a Cobra command. It atom
 
 ## Destination selectors and prompts
 
-Repeatable `--at` accepts canonical selectors (`project:agents`, `global:codex`), compact selectors (`p:Ag`, `g:Cd`), scope-prefixed labels (`.Ag`, `~Cd`), and configured labels. A bare target/label is accepted only when it resolves uniquely. Ambiguity fails with candidates in non-interactive mode and is presented as a choice interactively; `-y` and `-n` never choose a location.
+Repeatable `--at` accepts canonical selectors (`project:agents`, `global:codex`), compact selectors (`p:Ag`, `g:Cd`), scope-prefixed labels (`.Ag`, `~Cd`), and configured labels. A bare target or label such as `codex` resolves only to a project root; global roots require an explicit global selector such as `global:codex`, `g:Cd`, or `~Cd`. Ambiguity fails with candidates in non-interactive mode and is presented as a choice interactively; `-y` and `-n` never choose a location.
 
 `-y/--yes` and `-n/--no` apply only to yes/no confirmation boundaries such as replacement, unlinking, deletion, or applying a prepared change. They are mutually exclusive. `--no-input` makes any required prompt an actionable error. Interactive `sync` is a selection workflow, not a yes/no prompt: it starts identical candidate groups selected, asks for divergent same-name variants, and then asks for explicit destination Skills Folders.
 

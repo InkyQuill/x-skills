@@ -12,8 +12,8 @@ func TestInFlightActionsReportStatusInsteadOfSilentlyIgnoringKeys(t *testing.T) 
 		view            ViewName
 		configure       func(*Model)
 	}{
-		{name: "restore", key: "s", want: "restore already running", configure: func(m *Model) { m.restoreInFlight = true }},
-		{name: "sync", key: "S", want: "sync already running", configure: func(m *Model) { m.syncInFlight = true }},
+		{name: "restore", key: "s", want: "restore already running", view: ViewActive, configure: func(m *Model) { m.restoreInFlight = true }},
+		{name: "sync", key: "S", want: "sync already running", view: ViewActive, configure: func(m *Model) { m.syncInFlight = true }},
 		{name: "doctor", key: "f", want: "doctor fix already running", view: ViewDoctor, configure: func(m *Model) { m.doctorFixInFlight = true }},
 		{name: "rename", key: keyRepoRename, want: "rename already running", view: ViewRepo, configure: func(m *Model) { m.renameInFlight = true }},
 	} {
@@ -27,5 +27,15 @@ func TestInFlightActionsReportStatusInsteadOfSilentlyIgnoringKeys(t *testing.T) 
 				t.Fatalf("status = %q, want %q", got.status, test.want)
 			}
 		})
+	}
+}
+
+func TestLeavingInstallClearsInstallInputMode(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.InputMode = installInputQuery
+	m.setView(ViewActive)
+	if m.install.InputMode != installInputNone {
+		t.Fatalf("InputMode = %v, want installInputNone", m.install.InputMode)
 	}
 }

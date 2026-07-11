@@ -72,6 +72,7 @@ func unlinkNamesWithOptions(
 	var results []actions.MutationResult
 	var failures []mutationFailure
 	var skipped []mutationSkipped
+	projectMutated := false
 	for _, name := range names {
 		if locationErr != nil {
 			failures = append(failures, mutationFailure{name: name, err: locationErr})
@@ -130,9 +131,12 @@ func unlinkNamesWithOptions(
 		}
 		results = append(results, result)
 		if skill.Root.Scope == config.ScopeProject {
-			if _, err := manifest.ReconcileLocal(cfg); err != nil {
-				failures = append(failures, mutationFailure{name: name, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
-			}
+			projectMutated = true
+		}
+	}
+	if projectMutated {
+		if _, err := manifest.ReconcileLocal(cfg); err != nil {
+			failures = append(failures, mutationFailure{name: "local manifest", err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
 		}
 	}
 	return results, failures, skipped

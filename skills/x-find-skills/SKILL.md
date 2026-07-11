@@ -22,8 +22,8 @@ If `x-skills` is unavailable but `./bin/x-skills` exists in the current repo, us
 1. Search remote candidates from the CLI/API only. Agents should not use the TUI:
 
 ```bash
-x-skills search <query>
-x-skills search <query> --owner <owner> --json
+x-skills search '<multi-word query>'
+x-skills search '<multi-word query>' --owner <owner> --json
 ```
 
 If `x-skills search` is unavailable in an older checkout, call the skills.sh API directly:

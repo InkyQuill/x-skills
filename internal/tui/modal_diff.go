@@ -91,6 +91,10 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 		diffWidth = minDiffWidth
 	}
 	bodyHeight := conflictDiffBodyHeight(height)
+	fileScroll := 0
+	if c.selected >= bodyHeight {
+		fileScroll = c.selected - bodyHeight + 1
+	}
 	acceptLabel := "save active"
 	if c.incomingLabel == "Incoming remote" {
 		acceptLabel = "use incoming"
@@ -117,9 +121,10 @@ func (c conflictDiffModal) View(width, height int, m Model) string {
 	c.scroll = tuiui.ClampScroll(c.scroll, len(diffLines), bodyHeight)
 	for row := 0; row < bodyHeight; row++ {
 		fileCell := ""
-		if row < len(c.diff.Files) {
-			file := c.diff.Files[row]
-			fileCell = fmt.Sprintf("%s %s %s", fileCursor(m, row, c.selected), diffMarker(file.Kind), file.Path)
+		fileIndex := fileScroll + row
+		if fileIndex < len(c.diff.Files) {
+			file := c.diff.Files[fileIndex]
+			fileCell = fmt.Sprintf("%s %s %s", fileCursor(m, fileIndex, c.selected), diffMarker(file.Kind), file.Path)
 		}
 		diffIndex := c.scroll + row
 		diffCell := ""

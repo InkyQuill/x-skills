@@ -21,6 +21,9 @@ type MutationResult struct {
 }
 
 func Link(cfg config.Config, req LinkRequest) (MutationResult, error) {
+	mutationMu.Lock()
+	defer mutationMu.Unlock()
+
 	paths, err := mutationPaths(cfg, req.Name, req.Scope, req.Target)
 	if err != nil {
 		return MutationResult{}, err

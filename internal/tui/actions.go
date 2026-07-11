@@ -100,6 +100,9 @@ func (m *Model) beginRepoRename(oldName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		msg := renameArchiveResultMsg{token: token, oldName: oldName, newName: newName}
 		msg.result, msg.err = actions.RenameArchiveContext(ctx, cfg, oldName, newName)
+		if ctx.Err() != nil {
+			return msg
+		}
 		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
 		return msg
 	}

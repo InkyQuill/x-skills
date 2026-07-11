@@ -282,7 +282,7 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 			if conflicts[archive].DestinationStatus != "managed" {
 				return fmt.Errorf("archive replacement %q has invalid destination status", archive)
 			}
-			matches, err := pathMatchesFingerprint(archive, migration.Fingerprint)
+			matches, err := archivePathMatchesFingerprint(cfg, archive, migration.Fingerprint)
 			if err != nil || matches {
 				return fmt.Errorf("archive replacement %q no longer diverges", archive)
 			}
@@ -292,7 +292,7 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 	}
 	for destination, link := range links {
 		_, replacing := conflicts[destination]
-		archiveMatches, archiveErr := pathMatchesFingerprint(link.ArchivePath, link.Fingerprint)
+		archiveMatches, archiveErr := archivePathMatchesFingerprint(cfg, link.ArchivePath, link.Fingerprint)
 		_, migration := migrations[link.ArchivePath]
 		if !migration && (archiveErr != nil || !archiveMatches) {
 			return fmt.Errorf("link archive %q drifted from preflight", link.ArchivePath)
@@ -584,7 +584,7 @@ func validateLinkImmediately(cfg config.Config, work applyWork, link Change) err
 			archiveReplacement = true
 		}
 	}
-	archiveMatches, err := pathMatchesFingerprint(link.ArchivePath, link.Fingerprint)
+	archiveMatches, err := archivePathMatchesFingerprint(cfg, link.ArchivePath, link.Fingerprint)
 	if err != nil || !archiveMatches {
 		return fmt.Errorf("link archive %q drifted before mutation", link.ArchivePath)
 	}
@@ -661,7 +661,7 @@ func copyTreeAtomic(source, destination string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(temp)
+	defer func() { _ = os.RemoveAll(temp) }()
 	if err := copyTree(source, temp); err != nil {
 		return err
 	}

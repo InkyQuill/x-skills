@@ -25,7 +25,7 @@ type previewModal struct {
 
 func newPreviewModal(title, skillPath string) modal {
 	rawBytes, err := os.ReadFile(filepath.Join(skillPath, "SKILL.md"))
-	raw := ""
+	var raw string
 	if err != nil {
 		raw = "read SKILL.md: " + err.Error()
 	} else {
@@ -34,7 +34,7 @@ func newPreviewModal(title, skillPath string) modal {
 	vp := viewport.New(0, 0)
 	p := previewModal{title: title, path: filepath.Join(skillPath, "SKILL.md"), raw: raw, rendered: true, viewport: vp}
 	p.refreshContent()
-	return p
+	return &p
 }
 
 func (p previewModal) Title() string {
@@ -54,7 +54,7 @@ func (p *previewModal) refreshContent() {
 	p.viewport.SetContent(p.content)
 }
 
-func (p previewModal) View(width, height int, m Model) string {
+func (p *previewModal) View(width, height int, m Model) string {
 	mode := "rendered with Glamour"
 	if !p.rendered {
 		mode = "raw SKILL.md"
@@ -67,8 +67,7 @@ func (p previewModal) View(width, height int, m Model) string {
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
-	p.viewport.Width = bodyWidth
-	p.viewport.Height = bodyHeight
+	p.viewport.Width, p.viewport.Height = bodyWidth, bodyHeight
 	skillFile := filepath.Base(filepath.Dir(p.path)) + "/" + filepath.Base(p.path)
 	detail := tuiui.TruncateANSI(fmt.Sprintf("%s  |  %s", skillFile, mode), bodyWidth)
 	lines := []string{
@@ -146,7 +145,9 @@ func linesAfter(lines []string, index int) string {
 	return strings.Join(lines[index:], "")
 }
 
-func (p previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+func (p *previewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	p.viewport.Width = max(m.width-12, 20)
+	p.viewport.Height = max(m.height-12, 4)
 	if closeOnEscapeOrQuit(msg) {
 		return true, nil
 	}

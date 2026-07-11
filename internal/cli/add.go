@@ -232,6 +232,7 @@ func applyAddSkills(
 ) ([]addSkillResult, []mutationFailure) {
 	results := make([]addSkillResult, 0, len(found))
 	var failures []mutationFailure
+	projectMutated := false
 	conflict := remote.ConflictArchiveOnly
 	if opts.replace {
 		conflict = remote.ConflictReplaceArchive
@@ -268,11 +269,14 @@ func applyAddSkills(
 			added.linked = append(added.linked, destination)
 		}
 		if containsProjectRoot(added.linked) {
-			if _, err := manifest.ReconcileLocal(cfg); err != nil {
-				failures = append(failures, mutationFailure{name: archiveName, err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
-			}
+			projectMutated = true
 		}
 		results = append(results, added)
+	}
+	if projectMutated {
+		if _, err := manifest.ReconcileLocal(cfg); err != nil {
+			failures = append(failures, mutationFailure{name: "local manifest", err: fmt.Errorf("skill mutation succeeded but local manifest reconciliation failed: %w", err)})
+		}
 	}
 	return results, failures
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -23,7 +24,7 @@ func newRestoreCommand(opts *options) *cobra.Command {
 		Use:   "restore",
 		Short: "Restore project skills into explicit Skills Folders",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 			cfg := opts.config()
 			destinations, err := resolveLocations(cfg, selectors)
 			if err != nil {
@@ -41,7 +42,7 @@ func newRestoreCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer plan.Close()
+			defer func() { runErr = errors.Join(runErr, plan.Close()) }()
 			printRestorePlan(cmd, plan)
 			if err := resolveRestoreConflicts(cmd, opts, &plan); err != nil {
 				return err

@@ -194,7 +194,7 @@ func doctorInspectorSections(m Model) []inspectorSection {
 	}
 
 	return []inspectorSection{{
-		Title: string(issue.Kind),
+		Title: issue.Kind,
 		Rows:  rows,
 	}}
 }

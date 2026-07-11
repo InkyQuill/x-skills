@@ -76,17 +76,12 @@ func tabLabel(active bool, key, label string) string {
 }
 
 func modalStyle(width, height int) lipgloss.Style {
-	modalWidth := width - 8
-	if modalWidth > 88 {
-		modalWidth = 88
-	}
-	if modalWidth < 40 {
-		modalWidth = width - 2
-	}
+	modalWidth := modalContentWidth(width) + 2
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("110")).
 		Padding(0, 1).
+		MaxHeight(max(height-2, 1)).
 		Width(modalWidth)
 }
 

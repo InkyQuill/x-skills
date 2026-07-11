@@ -248,7 +248,7 @@ func (c Config) managedRootFromYAML(entry activeRootYAML) (ManagedRoot, error) {
 		Scope:     scope,
 		Target:    target,
 		Label:     strings.TrimSpace(entry.Label),
-		Consumers: nil,
+		Consumers: defaultConsumers(target),
 		Enabled:   enabled,
 	}
 	if entry.Consumers != nil {

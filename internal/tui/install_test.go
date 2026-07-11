@@ -2033,7 +2033,7 @@ func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil")
 	}
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -2087,7 +2087,7 @@ func TestInstallDestinationModalUsesConfiguredRoots(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil")
 	}
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -2133,7 +2133,7 @@ func TestInstallAndUseEnterClosesDestinationModalBeforeCommand(t *testing.T) {
 		}
 	}
 
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.status != "installed svelte-coder to .Ag" {
@@ -2226,7 +2226,7 @@ func TestInstallAndUseBlocksDestinationModalWhileInFlightAndCompletes(t *testing
 		t.Fatalf("status = %q", m.status)
 	}
 
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -2568,7 +2568,7 @@ func TestInstallAndUseRollsBackPartialLinksAfterLateFailure(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil")
 	}
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -2786,7 +2786,7 @@ func TestInstallAndUseBatchRollsBackFailedRowPartialLinks(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("batch install-use cmd is nil")
 	}
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 
@@ -2850,7 +2850,7 @@ func TestInstallAndUseRollsBackLinksAfterMidLinkInvalidation(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil")
 	}
-	msg := cmd().(installUseMsg)
+	msg := commandMessage[installUseMsg](t, cmd)
 	if !msg.stale {
 		t.Fatalf("stale = false, want true")
 	}
@@ -3446,7 +3446,7 @@ func TestInstallAndUseNameConflictReplaceThenContinuesToDestinations(t *testing.
 	if cmd == nil {
 		t.Fatal("install-use cmd is nil after conflict resolution")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if m.status != "installed svelte-coder to .Ag" {
@@ -3491,7 +3491,7 @@ func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("initial batch install-use cmd is nil")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if m.modal == nil || !strings.Contains(plain(m.modal.View(120, 35, m)), "Name conflict: react-coder") {
@@ -3527,6 +3527,46 @@ func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	}
 }
 
+func TestInstallAndUseBatchRollsBackArchivesWhenGenerationBecomesStale(t *testing.T) {
+	repoDir := makeTUITestGitRepo(t)
+	writeTUITestRemoteSkill(t, repoDir, "skills/alpha", "alpha", "Alpha.")
+	writeTUITestRemoteSkill(t, repoDir, "skills/beta", "beta", "Beta.")
+	gitTUITestCommit(t, repoDir, "initial")
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.testCloneURL = repoDir
+	rows := []installResultView{
+		{Result: remote.SearchResult{Name: "alpha", Path: "skills/alpha"}, ArchiveState: remote.ArchiveStateNotArchived},
+		{Result: remote.SearchResult{Name: "beta", Path: "skills/beta"}, ArchiveState: remote.ArchiveStateNotArchived},
+	}
+	originalApply := installApplyArchive
+	calls := 0
+	installApplyArchive = func(request remote.AddRequest) (remote.AddResult, error) {
+		result, err := originalApply(request)
+		calls++
+		if calls == 1 {
+			m.install.ensureUseGeneration().next()
+		}
+		return result, err
+	}
+	t.Cleanup(func() { installApplyArchive = originalApply })
+	cmd := m.installAndUseRowsWithProgress(rows, []installDestination{{Scope: config.ScopeProject, Target: config.TargetAgents}}, nil, false)
+	if cmd == nil {
+		t.Fatal("batch command is nil")
+	}
+	msg := commandMessage[installUseMsg](t, cmd)
+	if !msg.stale || msg.err != nil {
+		t.Fatalf("message = %#v, want stale rollback", msg)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if _, err := os.Lstat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("archive %s remains after stale batch: %v", name, err)
+		}
+	}
+}
+
 func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/react-coder", "react-coder", "Incoming React help.")
@@ -3557,7 +3597,7 @@ func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) 
 	if cmd == nil {
 		t.Fatal("initial batch install-use cmd is nil")
 	}
-	updated, _ = m.Update(cmd().(installUseMsg))
+	updated, _ = m.Update(commandMessage[installUseMsg](t, cmd))
 	m = mustModel(t, updated)
 	for range 2 {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -3637,7 +3677,7 @@ func TestInstallAndUseBatchContinuesAfterMiddleUpdate(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("initial batch install-use cmd is nil")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, cmd = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if cmd == nil {
@@ -3787,7 +3827,7 @@ func TestInstallAndUseUpdateAcceptIncomingThenContinuesToDestinations(t *testing
 	if cmd == nil {
 		t.Fatal("install-use cmd is nil after update resolution")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if m.status != "installed svelte-coder to .Ag" {
@@ -3838,7 +3878,7 @@ func TestInstallAndUseUpdateKeepArchiveThenContinuesToDestinations(t *testing.T)
 	if cmd == nil {
 		t.Fatal("install-use cmd is nil after keeping archive")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if m.status != "installed svelte-coder to .Ag" {
@@ -4179,7 +4219,7 @@ func TestInstallAndUseArchivedRowDiscoveredUpdateRoutesToDiff(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("install-use cmd is nil")
 	}
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, cmd = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if cmd == nil {
@@ -4205,7 +4245,7 @@ func TestInstallAndUseArchivedRowDiscoveredUpdateRoutesToDiff(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("install-use cmd is nil after keeping archive")
 	}
-	useMsg = cmd().(installUseMsg)
+	useMsg = commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 	if m.status != "installed svelte-coder to .Ag" {
@@ -4752,7 +4792,7 @@ func TestInstallUseBatchUpdateDiffMissingSkillContinuesWithTail(t *testing.T) {
 		t.Fatalf("missing skill update diff opened modal before tail command:\n%s", installTestModalView(m, 120, 35))
 	}
 
-	useMsg := cmd().(installUseMsg)
+	useMsg := commandMessage[installUseMsg](t, cmd)
 	updated, _ = m.Update(useMsg)
 	m = mustModel(t, updated)
 

@@ -159,7 +159,7 @@ func PreflightContext(
 		if err != nil {
 			return Plan{}, fmt.Errorf("inspect archive for %q: %w", candidate.Name, err)
 		}
-		archiveMatches, err := pathMatchesFingerprint(archivePath, candidate.Fingerprint)
+		archiveMatches, err := archivePathMatchesFingerprint(cfg, archivePath, candidate.Fingerprint)
 		if err != nil {
 			return Plan{}, fmt.Errorf("inspect archive for %q: %w", candidate.Name, err)
 		}
@@ -580,6 +580,11 @@ func classifyDestination(cfg config.Config, path, archivePath, candidateFingerpr
 		if isArchivedPath(cfg, resolved) {
 			status = actions.StatusManaged
 		}
+		if resolvedInfo, statErr := os.Stat(resolved); statErr != nil {
+			return destinationClassification{}, fmt.Errorf("inspect resolved destination %q: %w", resolved, statErr)
+		} else if !resolvedInfo.IsDir() {
+			return destinationClassification{kind: destinationDivergent, status: status}, nil
+		}
 		if sameCanonicalPath(resolved, archivePath) {
 			if archiveMatches {
 				return destinationClassification{kind: destinationManaged, status: actions.StatusManaged}, nil
@@ -636,6 +641,32 @@ func pathMatchesFingerprint(path, want string) (bool, error) {
 		return false, err
 	}
 	return got == want, nil
+}
+
+func archivePathMatchesFingerprint(cfg config.Config, path, want string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, fmt.Errorf("archive entry %q must be a real directory", path)
+	}
+	root, err := canonicalPath(cfg.ArchiveSkillsRoot())
+	if err != nil {
+		return false, err
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false, err
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, fmt.Errorf("archive entry %q resolves outside archive root", path)
+	}
+	return pathMatchesFingerprint(resolved, want)
 }
 
 func isArchivedPath(cfg config.Config, path string) bool {

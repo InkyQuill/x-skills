@@ -117,9 +117,7 @@ func normalizeAndValidate(manifest *Manifest, allowArchive bool) error {
 			return fmt.Errorf("skill %q: %w", skill.Name, err)
 		}
 	}
-	slices.SortStableFunc(manifest.Skills, func(a, b Skill) int {
-		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
-	})
+	slices.SortStableFunc(manifest.Skills, compareSkillNames)
 	return nil
 }
 

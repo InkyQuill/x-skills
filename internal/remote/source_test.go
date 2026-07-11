@@ -153,7 +153,7 @@ func TestReadSourceMetadataMissing(t *testing.T) {
 
 func TestSourceIdentityMatchesSameGitHubSkill(t *testing.T) {
 	left := SourceMetadata{SourceType: SourceTypeGitHub, Owner: "vercel-labs", Repo: "skills", SkillPath: "skills/svelte-coder"}
-	right := SourceMetadata{SourceType: SourceTypeGitHub, Owner: "vercel-labs", Repo: "skills", SkillPath: filepath.ToSlash("skills/svelte-coder")}
+	right := SourceMetadata{SourceType: SourceTypeGitHub, Owner: "vercel-labs", Repo: "skills", SkillPath: `skills\svelte-coder`}
 	if !left.SameIdentity(right) {
 		t.Fatalf("expected same identity: %#v %#v", left, right)
 	}
@@ -161,7 +161,7 @@ func TestSourceIdentityMatchesSameGitHubSkill(t *testing.T) {
 
 func TestSourceIdentityMatchesSameGitSkill(t *testing.T) {
 	left := SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/skills.git", SkillPath: "skills/svelte-coder"}
-	right := SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/skills.git", SkillPath: filepath.ToSlash("skills/svelte-coder")}
+	right := SourceMetadata{SourceType: SourceTypeGit, CloneURL: "https://example.com/skills.git", SkillPath: `skills\svelte-coder`}
 	if !left.SameIdentity(right) {
 		t.Fatalf("expected same identity: %#v %#v", left, right)
 	}

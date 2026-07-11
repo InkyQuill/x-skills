@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,7 +133,7 @@ func TestPlanRestoreExposesMigrationConflictWithoutMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer plan.Close()
-	if len(plan.Conflicts) != 1 || plan.Removals[0].ArchiveName != "" {
+	if len(plan.Conflicts) != 1 || len(plan.Removals) != 1 || plan.Removals[0].ArchiveName != "" {
 		t.Fatalf("plan = %#v", plan)
 	}
 	after, _ := fingerprint.Directory(filepath.Join(root.Path, "extra"))
@@ -157,9 +158,37 @@ func TestPlanRestoreNormalizesDivergentDesiredDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer plan.Close()
+	defer func() { _ = plan.Close() }()
 	if len(plan.Normalizations) != 1 || len(plan.Additions) != 1 || len(plan.Conflicts) != 1 {
 		t.Fatalf("plan = %#v", plan)
+	}
+}
+
+func TestFullRestoreArchivesUnmanagedExtraWhenArchiveDoesNotExist(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	active := filepath.Join(root.Path, "extra")
+	makeRestoreSkill(t, active, "extra")
+	if err := os.WriteFile(filepath.Join(active, "unique"), []byte("preserve"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = plan.Close() }()
+	if len(plan.Removals) != 1 || plan.Removals[0].Kind != ChangeMigrate || plan.Removals[0].ArchiveName != "extra" {
+		t.Fatalf("removals = %#v, want migration to archive extra", plan.Removals)
+	}
+	if _, err := ApplyRestore(context.Background(), cfg, plan); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(cfg.ArchiveSkillsRoot(), "extra", "unique")); err != nil || string(data) != "preserve" {
+		t.Fatalf("archived content = %q, err=%v", data, err)
+	}
+	if _, err := os.Lstat(active); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("active unmanaged copy remains: %v", err)
 	}
 }
 
@@ -182,6 +211,7 @@ func TestPlanAndApplyRestoreFetchRemoteSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	if len(plan.Available) != 1 || !plan.Available[0].NeedsArchive {
 		t.Fatalf("available = %#v", plan.Available)
 	}
@@ -206,6 +236,7 @@ func TestApplyRestoreUsesResolvedPreserveName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	plan.Removals[0].ArchiveName = plan.Conflicts[0].SuggestedName
 	name := plan.Removals[0].ArchiveName
 	if _, err := ApplyRestore(context.Background(), cfg, plan); err != nil {
@@ -232,6 +263,7 @@ func TestApplyRestoreKeepsSafeAdditionsWhenRemovalsBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	result, err := ApplyRestore(context.Background(), cfg, plan)
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +289,7 @@ func TestApplyRestoreReconcilesAfterPartialMutationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	// Create a late conflict after planning so one earlier addition succeeds first.
 	makeRestoreSkill(t, plan.Additions[1].Path, "wanted")
 	result, err := ApplyRestore(context.Background(), cfg, plan)
@@ -284,6 +317,7 @@ func TestApplyRestoreRejectsChangedPlannedPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	plan.Additions[0].Path = filepath.Join(project, "elsewhere", "wanted")
 	if _, err := ApplyRestore(context.Background(), cfg, plan); err == nil {
 		t.Fatal("ApplyRestore error = nil")
@@ -312,6 +346,7 @@ func TestApplyRestoreUnavailableBlocksDesiredNormalization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	result, err := ApplyRestore(context.Background(), cfg, plan)
 	if err != nil {
 		t.Fatal(err)
@@ -345,6 +380,7 @@ func TestApplyRestoreUnavailableIgnoresBlockedConflictAndAppliesUnrelatedAdditio
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	if len(plan.Conflicts) != 1 || len(plan.Normalizations) != 1 || plan.Normalizations[0].ArchiveName != "" {
 		t.Fatalf("plan = %#v", plan)
 	}
@@ -399,6 +435,7 @@ func TestPlanAndApplyRestoreUseUnmanagedOccurrenceName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	if len(plan.Removals) != 1 || plan.Removals[0].Name != "custom-name" {
 		t.Fatalf("removals = %#v", plan.Removals)
 	}
@@ -426,6 +463,7 @@ func TestPlanAndApplyRestoreUseManagedExtraOccurrenceName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	if len(plan.Removals) != 1 || plan.Removals[0].Name != "custom-name" || plan.Removals[0].Kind != ChangeRemove {
 		t.Fatalf("removals = %#v", plan.Removals)
 	}
@@ -454,6 +492,7 @@ func TestApplyRestoreReportsSuccessfulNormalizationBeforeLaterFailure(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	makeRestoreSkill(t, filepath.Join(codex.Path, "wanted"), "wanted")
 	result, err := ApplyRestore(context.Background(), cfg, plan)
 	if err == nil {
@@ -477,6 +516,7 @@ func TestPlanRestoreBlocksFullRemovalsWhenDesiredSkillUnavailable(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	if len(plan.Unavailable) != 1 || plan.Unavailable[0].Name != "missing" {
 		t.Fatalf("unavailable = %#v, want missing", plan.Unavailable)
 	}
@@ -506,6 +546,7 @@ func TestPlanRestoreScopesAdditionsAndFullRemovalsToExplicitProjectRoots(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	if len(plan.Additions) != 1 || plan.Additions[0].Path != filepath.Join(agents.Path, "wanted") {
 		t.Fatalf("additions = %#v", plan.Additions)
 	}
@@ -527,6 +568,7 @@ func TestApplyRestoreAddsLinksAndMigratesUnmanagedExtrasWithoutDeletingArchives(
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = plan.Close() }()
 	result, err := ApplyRestore(context.Background(), cfg, plan)
 	if err != nil {
 		t.Fatal(err)

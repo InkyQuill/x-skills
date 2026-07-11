@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
@@ -11,7 +12,7 @@ import (
 type modal interface {
 	Title() string
 	View(width, height int, m Model) string
-	Update(msg tea.KeyMsg, m *Model) (close bool, cmd tea.Cmd)
+	Update(msg tea.KeyMsg, m *Model) (shouldClose bool, cmd tea.Cmd)
 }
 
 func closeOnEscapeOrQuit(msg tea.KeyMsg) bool {
@@ -62,7 +63,7 @@ func renderConstrainedModal(width, height int, opts constrainedModalOptions) str
 	contentWidth := modalContentWidth(width)
 	maxContentHeight := modalContentHeight(height)
 
-	header := []string{accentStyle.Render(tuiui.TruncateANSI(opts.Title, contentWidth))}
+	header := []string{accentStyle.Render(tuiui.TruncateANSI(ansi.Strip(opts.Title), contentWidth))}
 	footer := truncateModalLines(opts.Footer, contentWidth)
 	footerHeight := len(footer)
 	if footerHeight > 0 {
@@ -73,7 +74,11 @@ func renderConstrainedModal(width, height int, opts constrainedModalOptions) str
 		bodyHeight = 1
 	}
 
-	body := presentModalBody(truncateModalLines(opts.Body, contentWidth), bodyHeight, opts.Focus, opts.Scroll, opts.UseScroll)
+	safeBody := make([]string, len(opts.Body))
+	for i, line := range opts.Body {
+		safeBody[i] = ansi.Strip(line)
+	}
+	body := presentModalBody(truncateModalLines(safeBody, contentWidth), bodyHeight, opts.Focus, opts.Scroll, opts.UseScroll)
 	lines := make([]string, 0, len(header)+len(body)+footerHeight)
 	lines = append(lines, header...)
 	lines = append(lines, body...)
@@ -94,7 +99,7 @@ func modalContentWidth(width int) int {
 		modalWidth = 88
 	}
 	if modalWidth < 40 {
-		modalWidth = width - 2
+		modalWidth = min(40, width-2)
 	}
 	contentWidth := modalWidth - 2
 	if contentWidth < 1 {
@@ -106,7 +111,7 @@ func modalContentWidth(width int) int {
 func modalContentHeight(height int) int {
 	maxHeight := height - 4
 	if maxHeight < 4 {
-		maxHeight = height - 2
+		maxHeight = min(4, height-2)
 	}
 	if maxHeight < 1 {
 		return 1

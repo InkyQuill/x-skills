@@ -164,7 +164,7 @@ func restoreRecommended(filename string, backup []byte, existed bool) error {
 		return err
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(0o644); err != nil {
 		_ = temp.Close()
 		return err

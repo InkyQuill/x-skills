@@ -15,11 +15,21 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
+
+func requireRestorePlanModal(t *testing.T, value modal) restorePlanModal {
+	t.Helper()
+	preview, ok := value.(restorePlanModal)
+	if !ok {
+		t.Fatalf("modal = %T, want restorePlanModal", value)
+	}
+	return preview
+}
 
 func TestRestoreWorkbenchUsesProjectDestinationsAndPlansAsynchronously(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
@@ -60,13 +70,33 @@ func TestRestoreWorkbenchUsesProjectDestinationsAndPlansAsynchronously(t *testin
 }
 
 func TestRestorePlanStaleDeliveryCleansStaging(t *testing.T) {
-	plan := manifest.RestorePlan{}
-	m := New(config.Default(t.TempDir(), t.TempDir()))
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "wanted", "Wanted.")
+	fp, err := fingerprint.Directory(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.WriteLocal(cfg.ProjectRoot, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "wanted", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: fp}}}); err != nil {
+		t.Fatal(err)
+	}
+	root := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: config.TargetAgents})[0]
+	plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{Destinations: []roots.ActiveRoot{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := plan.StagingRootForTest()
+	if staging == "" {
+		t.Fatal("PlanRestore returned empty staging root")
+	}
+	m := New(cfg)
 	m.restoreToken = 2
 	updated, _ := m.Update(restorePlanMsg{token: 1, plan: plan})
 	m = mustModel(t, updated)
 	if m.modal != nil {
 		t.Fatalf("stale restore plan opened modal: %T", m.modal)
+	}
+	if _, err := os.Lstat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale restore staging remains: %v", err)
 	}
 }
 
@@ -77,7 +107,7 @@ func TestRestoreConflictRenameIsEditableBeforeApply(t *testing.T) {
 		Conflicts:      []manifest.MigrationConflict{{Name: "wanted", Path: "/project/.agents/skills/wanted", SuggestedName: "wanted-preserved"}},
 	}
 	m.openRestorePlan(plan)
-	preview := m.modal.(restorePlanModal)
+	preview := requireRestorePlanModal(t, m.modal)
 	preview.editConflict(&m, 0)
 	rename, ok := m.modal.(restoreRenameModal)
 	if !ok {
@@ -90,7 +120,7 @@ func TestRestoreConflictRenameIsEditableBeforeApply(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("editing restore archive name started mutation")
 	}
-	preview = m.modal.(restorePlanModal)
+	preview = requireRestorePlanModal(t, m.modal)
 	if got := preview.plan.Normalizations[0].ArchiveName; got != "wanted-local" {
 		t.Fatalf("archive name = %q, want wanted-local", got)
 	}
@@ -263,7 +293,7 @@ func TestRestoreMultipleConflictsAreNavigableAndRenameBackPreservesPreview(t *te
 	m.openRestorePlan(plan)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = mustModel(t, updated)
-	preview := m.modal.(restorePlanModal)
+	preview := requireRestorePlanModal(t, m.modal)
 	if preview.conflictIndex != 1 {
 		t.Fatalf("conflict index = %d, want 1", preview.conflictIndex)
 	}
@@ -274,7 +304,7 @@ func TestRestoreMultipleConflictsAreNavigableAndRenameBackPreservesPreview(t *te
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = mustModel(t, updated)
-	preview = m.modal.(restorePlanModal)
+	preview = requireRestorePlanModal(t, m.modal)
 	if preview.conflictIndex != 1 {
 		t.Fatalf("preview conflict index after back = %d, want 1", preview.conflictIndex)
 	}
@@ -419,7 +449,7 @@ func TestActiveMigrateDivergentArchiveOpensConflictModal(t *testing.T) {
 	}
 
 	updated, _ = m.Update(keyRunes("k"))
-	m = mustModel(t, updated)
+	mustModel(t, updated)
 	info, err := skills.Read(archived)
 	if err != nil {
 		t.Fatal(err)

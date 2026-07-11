@@ -10,7 +10,113 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/roots"
 )
+
+func TestFilterDoctorGitHygieneByMultipleLocations(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	agents := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: config.TargetAgents})[0]
+	claude := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: config.TargetClaude})[0]
+	globalAgents := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal, Target: config.TargetAgents})[0]
+	issues := []doctor.Issue{
+		{Kind: doctor.KindRecommendedManifestUntracked, Path: filepath.Join(project, ".x-skills.yaml")},
+		{Kind: doctor.KindLocalManifestTracked, Path: filepath.Join(project, ".x-skills.local.yaml")},
+		{Kind: doctor.KindSkillsFolderTracked, Path: agents.Path},
+		{Kind: doctor.KindSkillsFolderTracked, Path: claude.Path},
+	}
+
+	tests := []struct {
+		name      string
+		locations []roots.ActiveRoot
+		wantKinds []string
+		wantPaths []string
+	}{
+		{name: "global only excludes project hygiene", locations: []roots.ActiveRoot{globalAgents}, wantKinds: nil, wantPaths: nil},
+		{name: "selected project includes manifests and selected folder", locations: []roots.ActiveRoot{agents, globalAgents}, wantKinds: []string{doctor.KindRecommendedManifestUntracked, doctor.KindLocalManifestTracked, doctor.KindSkillsFolderTracked}, wantPaths: []string{filepath.Join(project, ".x-skills.yaml"), filepath.Join(project, ".x-skills.local.yaml"), agents.Path}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterDoctorIssuesByLocations(issues, tt.locations)
+			if len(got) != len(tt.wantKinds) {
+				t.Fatalf("filtered issues = %#v, want %d", got, len(tt.wantKinds))
+			}
+			for i := range got {
+				if got[i].Kind != tt.wantKinds[i] || got[i].Path != tt.wantPaths[i] {
+					t.Fatalf("issue[%d] = %#v, want kind %q path %q", i, got[i], tt.wantKinds[i], tt.wantPaths[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorMultipleLocationsScopeGitHygiene(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	runDoctorGit(t, project, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".agents/skills/agent/SKILL.md", ".claude/skills/claude/SKILL.md"} {
+		path := filepath.Join(project, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("---\nname: test\ndescription: test\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runDoctorGit(t, project, "add", "--", rel)
+	}
+
+	var out bytes.Buffer
+	if err := Execute([]string{"--home", home, "--project-root", project, "doctor", "--at", "global:agents", "--at", "global:claude"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "manifest-untracked") || strings.Contains(out.String(), "skills-folder-tracked") {
+		t.Fatalf("global-only Doctor leaked project Git hygiene:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Execute([]string{"--home", home, "--project-root", project, "doctor", "--at", "project:agents", "--at", "global:agents"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"recommended-manifest-untracked", filepath.Join(project, ".agents", "skills")} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("mixed-scope Doctor missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), filepath.Join(project, ".claude", "skills")) {
+		t.Fatalf("mixed-scope Doctor leaked unselected project folder:\n%s", out.String())
+	}
+}
+
+func TestDoctorFixUsesLocationFilteredGitHygieneIssues(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	agents := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: config.TargetAgents})[0]
+	claude := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: config.TargetClaude})[0]
+	globalAgents := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal, Target: config.TargetAgents})[0]
+	issues := []doctor.Issue{
+		{Kind: doctor.KindLocalManifestTracked, Name: ".x-skills.local.yaml", Path: filepath.Join(project, ".x-skills.local.yaml"), ProjectRoot: project, SafeFix: "git rm --cached -- '.x-skills.local.yaml'"},
+		{Kind: doctor.KindSkillsFolderTracked, Name: agents.Label, Path: agents.Path, ProjectRoot: project, SafeFix: "git rm -r --cached -- '.agents/skills'"},
+		{Kind: doctor.KindSkillsFolderTracked, Name: claude.Label, Path: claude.Path, ProjectRoot: project, SafeFix: "git rm -r --cached -- '.claude/skills'"},
+	}
+	filtered := filterDoctorIssuesByLocations(issues, []roots.ActiveRoot{agents, globalAgents})
+	if _, err := doctor.FixIssues(filtered); err != nil {
+		t.Fatal(err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(project, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ignore), ".x-skills.local.yaml") || !strings.Contains(string(ignore), "/.agents/skills/") {
+		t.Fatalf("selected Git hygiene fixes missing:\n%s", ignore)
+	}
+	if strings.Contains(string(ignore), "/.claude/skills/") {
+		t.Fatalf("unselected project folder was fixed:\n%s", ignore)
+	}
+}
 
 func TestDoctorReportsGitHygieneAndOnlyFixesGitignore(t *testing.T) {
 	project := t.TempDir()

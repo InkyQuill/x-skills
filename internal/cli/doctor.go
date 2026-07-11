@@ -141,15 +141,12 @@ func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roo
 	if err != nil {
 		return nil, err
 	}
-	filtered := issues
-	if len(locations) > 1 {
-		filtered = filterDoctorIssuesByLocations(issues, locations)
-	}
+	filtered := filterDoctorIssuesByLocations(issues, locations)
 	destinations := locations
 	if archiveOnlyBuiltIns {
 		destinations = nil
 	}
-	for _, issue := range issues {
+	for _, issue := range filtered {
 		if issue.Kind != doctor.KindMissingBuiltIn && issue.Kind != doctor.KindInactiveBuiltIn {
 			continue
 		}
@@ -162,7 +159,7 @@ func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roo
 	if err != nil {
 		return results, err
 	}
-	builtInResults, err := doctor.FixBuiltIns(cfg, issues, doctor.FixOptions{
+	builtInResults, err := doctor.FixBuiltIns(cfg, filtered, doctor.FixOptions{
 		BuiltInDestinations: destinations,
 		ArchiveOnlyBuiltIns: archiveOnlyBuiltIns,
 	})
@@ -170,13 +167,23 @@ func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roo
 }
 
 func filterDoctorIssuesByLocations(issues []doctor.Issue, locations []roots.ActiveRoot) []doctor.Issue {
-	if len(locations) <= 1 {
-		return issues
-	}
 	allowed := pathPrefixSet(locations)
+	projectSelected := false
+	for _, location := range locations {
+		if location.Scope == config.ScopeProject {
+			projectSelected = true
+			break
+		}
+	}
 	filtered := make([]doctor.Issue, 0, len(issues))
 	for _, issue := range issues {
-		if issue.Kind == doctor.KindRecommendedManifestUntracked || issue.Kind == doctor.KindLocalManifestTracked || issue.Kind == doctor.KindSkillsFolderTracked {
+		switch issue.Kind {
+		case doctor.KindRecommendedManifestUntracked, doctor.KindLocalManifestTracked:
+			if projectSelected {
+				filtered = append(filtered, issue)
+			}
+			continue
+		case doctor.KindMissingBuiltIn, doctor.KindInactiveBuiltIn:
 			filtered = append(filtered, issue)
 			continue
 		}

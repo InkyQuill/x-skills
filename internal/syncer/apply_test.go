@@ -20,14 +20,15 @@ func TestApplyMigratesPreservesLinksAndReconcilesManifest(t *testing.T) {
 	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "selected")
 	destination := filepath.Join(cfg.ProjectRoot, ".codex", "skills", "review")
 	makeApplySkillAt(t, destination, "destination copy")
+	destinationFP := applyFingerprint(t, destination)
 	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "review")
 	preserved := filepath.Join(cfg.ArchiveSkillsRoot(), "review-from-agents")
 	fp := applyFingerprint(t, source)
 	plan := Plan{
 		Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: archive}},
-		Links:      []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: LinkNormalize, ArchivePath: archive, DestinationPath: destination}},
+		Links:      []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: LinkNormalize, ArchivePath: archive, DestinationPath: destination, DestinationFingerprint: destinationFP}},
 		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: destination, DestinationStatus: actions.StatusUnmanaged,
-			Resolution: ConflictResolution{DestinationPath: destination, PreserveAs: "review-from-agents", Action: ConflictReplace}}},
+			DestinationFingerprint: destinationFP, Resolution: ConflictResolution{DestinationPath: destination, PreserveAs: "review-from-agents", Action: ConflictReplace}}},
 	}
 
 	var progress []Progress
@@ -63,10 +64,11 @@ func TestApplyArchiveConflictUsesSharedRenameForVisibleAliases(t *testing.T) {
 	}
 	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "incoming")
 	fp := applyFingerprint(t, source)
+	existingFP := applyFingerprint(t, existing)
 	plan := Plan{
 		Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: existing}},
 		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: existing, DestinationStatus: actions.StatusManaged,
-			Resolution: ConflictResolution{DestinationPath: existing, PreserveAs: "review-preserved", Action: ConflictReplace}}},
+			DestinationFingerprint: existingFP, ManagedTarget: existing, Resolution: ConflictResolution{DestinationPath: existing, PreserveAs: "review-preserved", Action: ConflictReplace}}},
 	}
 	result := Apply(context.Background(), cfg, plan)
 	if len(result.Failed) != 0 || result.PlanError != nil {
@@ -88,14 +90,15 @@ func TestApplyRollsBackLinksForFailedSkillButKeepsPreservedArchives(t *testing.T
 	secondRoot := filepath.Join(cfg.ProjectRoot, ".codex", "skills")
 	second := filepath.Join(secondRoot, "review")
 	makeApplySkillAt(t, first, "old destination")
+	firstFP := applyFingerprint(t, first)
 	preserved := filepath.Join(cfg.ArchiveSkillsRoot(), "review-from-agents")
 	plan := Plan{
 		Links: []Change{
-			{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: LinkNormalize, ArchivePath: archive, DestinationPath: first},
+			{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: LinkNormalize, ArchivePath: archive, DestinationPath: first, DestinationFingerprint: firstFP},
 			{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: LinkCreate, ArchivePath: archive, DestinationPath: second},
 		},
 		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: first, DestinationStatus: actions.StatusUnmanaged,
-			Resolution: ConflictResolution{DestinationPath: first, PreserveAs: "review-from-agents", Action: ConflictReplace}}},
+			DestinationFingerprint: firstFP, Resolution: ConflictResolution{DestinationPath: first, PreserveAs: "review-from-agents", Action: ConflictReplace}}},
 	}
 
 	result := Apply(context.Background(), cfg, plan, ApplyOptions{Progress: func(update Progress) {
@@ -303,10 +306,11 @@ func TestApplyReportsArchivePublicationWhenSourceRemovalFails(t *testing.T) {
 	source := makeApplySkill(t, filepath.Join(cfg.ProjectRoot, ".agents", "skills"), "review", "selected")
 	fp := applyFingerprint(t, source)
 	archive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "review", "old archive")
+	archiveConflictFP := applyFingerprint(t, archive)
 	preserved := filepath.Join(cfg.ArchiveSkillsRoot(), "review-old")
 	plan := Plan{Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: archive}},
 		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: archive, DestinationStatus: actions.StatusManaged,
-			Resolution: ConflictResolution{DestinationPath: archive, PreserveAs: "review-old", Action: ConflictReplace}}}}
+			DestinationFingerprint: archiveConflictFP, ManagedTarget: archive, Resolution: ConflictResolution{DestinationPath: archive, PreserveAs: "review-old", Action: ConflictReplace}}}}
 	parent := filepath.Dir(source)
 	result := Apply(context.Background(), cfg, plan, ApplyOptions{Progress: func(update Progress) {
 		if update.Action == ConflictReplace {
@@ -453,6 +457,76 @@ func TestApplyRejectsStagedMigrationFingerprintDriftBeforePublication(t *testing
 	assertApplyFile(t, filepath.Join(source, "content.txt"), "selected")
 	if _, err := os.Lstat(archive); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("archive published: %v", err)
+	}
+}
+
+func TestApplyRejectsReplacementIdentityDriftAtMutationBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		managed bool
+		after   bool
+	}{
+		{name: "unmanaged before preservation"},
+		{name: "unmanaged before replacement", after: true},
+		{name: "managed before preservation", managed: true},
+		{name: "managed before replacement", managed: true, after: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := applyConfig(t)
+			archive := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "review", "selected")
+			selectedFP := applyFingerprint(t, archive)
+			destination := filepath.Join(cfg.ProjectRoot, ".agents", "skills", "review")
+			status := actions.StatusUnmanaged
+			managedTarget := ""
+			if test.managed {
+				managedTarget = makeApplySkill(t, cfg.ArchiveSkillsRoot(), "old-review", "approved old")
+				if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(managedTarget, destination); err != nil {
+					t.Fatal(err)
+				}
+				status = actions.StatusManaged
+			} else {
+				makeApplySkillAt(t, destination, "approved old")
+			}
+			fingerprintPath := destination
+			if test.managed {
+				fingerprintPath = managedTarget
+			}
+			destinationFP := applyFingerprint(t, fingerprintPath)
+			preserveName := "review-approved-old"
+			change := Change{CandidateID: "review:" + selectedFP, Name: "review", Fingerprint: selectedFP, Action: LinkNormalize,
+				ArchivePath: archive, DestinationPath: destination, DestinationFingerprint: destinationFP, ManagedTarget: managedTarget}
+			conflict := Conflict{CandidateID: change.CandidateID, Name: change.Name, Fingerprint: change.Fingerprint,
+				DestinationPath: destination, DestinationStatus: status, DestinationFingerprint: destinationFP, ManagedTarget: managedTarget,
+				Resolution: ConflictResolution{DestinationPath: destination, PreserveAs: preserveName, Action: ConflictReplace}}
+			fs := defaultApplyFilesystem()
+			drift := func(string) error {
+				if test.managed {
+					other := makeApplySkill(t, cfg.ArchiveSkillsRoot(), "other-review", "new managed content")
+					if err := os.Remove(destination); err != nil {
+						return err
+					}
+					return os.Symlink(other, destination)
+				}
+				return os.WriteFile(filepath.Join(destination, "content.txt"), []byte("new unmanaged content"), 0o644)
+			}
+			if test.after {
+				fs.afterPreserve = drift
+			} else {
+				fs.beforePreserve = drift
+			}
+
+			result := Apply(context.Background(), cfg, Plan{Links: []Change{change}, Conflicts: []Conflict{conflict}}, ApplyOptions{filesystem: fs})
+			if len(result.Failed) != 1 || result.Failed[0].Err == nil {
+				t.Fatalf("Apply drift result = %#v", result)
+			}
+			info, err := os.Lstat(destination)
+			if err != nil || (test.managed && info.Mode()&os.ModeSymlink == 0) || (!test.managed && !info.IsDir()) {
+				t.Fatalf("destination was replaced: %v, %v", info, err)
+			}
+		})
 	}
 }
 

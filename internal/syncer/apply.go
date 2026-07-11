@@ -74,6 +74,12 @@ func Apply(ctx context.Context, cfg config.Config, plan Plan, options ...ApplyOp
 	if filesystem.afterStage == nil {
 		filesystem.afterStage = defaults.afterStage
 	}
+	if filesystem.beforePreserve == nil {
+		filesystem.beforePreserve = defaults.beforePreserve
+	}
+	if filesystem.afterPreserve == nil {
+		filesystem.afterPreserve = defaults.afterPreserve
+	}
 	work := indexApplyWork(plan)
 	result := Result{}
 	completed := 0
@@ -260,6 +266,10 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 		if _, exists := conflicts[path]; exists {
 			return fmt.Errorf("duplicate conflict %q", path)
 		}
+		if conflict.DestinationFingerprint == "" || (conflict.DestinationStatus == actions.StatusManaged && conflict.ManagedTarget == "") ||
+			(conflict.DestinationStatus == actions.StatusUnmanaged && conflict.ManagedTarget != "") {
+			return fmt.Errorf("conflict %q has incomplete destination identity", path)
+		}
 		conflicts[path] = conflict
 	}
 	for archive, migration := range migrations {
@@ -296,6 +306,12 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 		}
 		if replacing && conflicts[destination].DestinationStatus != classification.status {
 			return fmt.Errorf("replacement destination %q status drifted from %q to %q", destination, conflicts[destination].DestinationStatus, classification.status)
+		}
+		if replacing && !classificationMatchesConflict(classification, conflicts[destination]) {
+			return fmt.Errorf("replacement destination %q identity drifted from preflight", destination)
+		}
+		if replacing && (link.DestinationFingerprint != conflicts[destination].DestinationFingerprint || link.ManagedTarget != conflicts[destination].ManagedTarget) {
+			return fmt.Errorf("replacement destination %q has inconsistent planned identity", destination)
 		}
 		if !replacing && link.Action == LinkCreate && classification.kind != destinationMissing {
 			return fmt.Errorf("link destination %q drifted from missing state", destination)
@@ -375,13 +391,15 @@ type skillMutation struct {
 }
 
 type applyFilesystem struct {
-	removeAll  func(string) error
-	rename     func(string, string) error
-	afterStage func(string) error
+	removeAll      func(string) error
+	rename         func(string, string) error
+	afterStage     func(string) error
+	beforePreserve func(string) error
+	afterPreserve  func(string) error
 }
 
 func defaultApplyFilesystem() applyFilesystem {
-	return applyFilesystem{removeAll: os.RemoveAll, rename: os.Rename, afterStage: func(string) error { return nil }}
+	return applyFilesystem{removeAll: os.RemoveAll, rename: os.Rename, afterStage: func(string) error { return nil }, beforePreserve: func(string) error { return nil }, afterPreserve: func(string) error { return nil }}
 }
 
 func applySkill(ctx context.Context, cfg config.Config, filesystem applyFilesystem, work applyWork, emit func(string)) (skillMutation, error) {
@@ -471,8 +489,21 @@ func applySkill(ctx context.Context, cfg config.Config, filesystem applyFilesyst
 			archiveRoot = filepath.Dir(work.migrations[0].ArchivePath)
 		}
 		preserved := filepath.Join(archiveRoot, conflict.Resolution.PreserveAs)
+		if err := filesystem.beforePreserve(conflict.DestinationPath); err != nil {
+			return mutation, err
+		}
+		if err := validateReplacementIdentity(cfg, conflict); err != nil {
+			return mutation, err
+		}
 		if err := copyTreeAtomic(conflict.DestinationPath, preserved); err != nil {
 			return mutation, fmt.Errorf("preserve destination %q as %q: %w", conflict.DestinationPath, preserved, err)
+		}
+		preservedFingerprint, err := fingerprint.Directory(preserved)
+		if err != nil || preservedFingerprint != conflict.DestinationFingerprint {
+			return mutation, fmt.Errorf("preserved destination %q does not match approved identity", conflict.DestinationPath)
+		}
+		if err := filesystem.afterPreserve(conflict.DestinationPath); err != nil {
+			return mutation, err
 		}
 		emit(ConflictReplace)
 	}
@@ -556,7 +587,7 @@ func validateLinkImmediately(cfg config.Config, work applyWork, link Change) err
 		return err
 	}
 	if replacement.Resolution.Action != "" {
-		if classification.kind != destinationDivergent || classification.status != replacement.DestinationStatus {
+		if classification.kind != destinationDivergent || !classificationMatchesConflict(classification, replacement) {
 			return fmt.Errorf("replacement destination %q drifted before mutation", link.DestinationPath)
 		}
 		return nil
@@ -566,6 +597,23 @@ func validateLinkImmediately(cfg config.Config, work applyWork, link Change) err
 	}
 	if link.Action == LinkNormalize && classification.kind != destinationMatching && !(archiveReplacement && classification.kind == destinationManaged) {
 		return fmt.Errorf("link destination %q drifted before normalization", link.DestinationPath)
+	}
+	return nil
+}
+
+func classificationMatchesConflict(classification destinationClassification, conflict Conflict) bool {
+	return classification.status == conflict.DestinationStatus &&
+		classification.fingerprint == conflict.DestinationFingerprint &&
+		classification.managedTarget == conflict.ManagedTarget
+}
+
+func validateReplacementIdentity(cfg config.Config, conflict Conflict) error {
+	classification, err := classifyDestination(cfg, conflict.DestinationPath, "", conflict.Fingerprint, false, false)
+	if err != nil {
+		return err
+	}
+	if classification.kind != destinationDivergent || !classificationMatchesConflict(classification, conflict) {
+		return fmt.Errorf("replacement destination %q drifted before preservation", conflict.DestinationPath)
 	}
 	return nil
 }

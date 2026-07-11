@@ -45,6 +45,116 @@ func TestRenameArchivePreservesSkillAndSourceMetadataIdentity(t *testing.T) {
 	}
 }
 
+func TestRenameArchiveRejectsDestinationAppearingAtMutationBoundary(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	oldPath := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	newPath := filepath.Join(cfg.ArchiveSkillsRoot(), "new")
+	original := renameArchiveFilesystem
+	renameArchiveFilesystem.beforeMutation = func(kind string) error {
+		if kind == "archive" {
+			return os.Mkdir(newPath, 0o755)
+		}
+		return nil
+	}
+	t.Cleanup(func() { renameArchiveFilesystem = original })
+
+	_, err := RenameArchive(cfg, "old", "new")
+	if err == nil || !strings.Contains(err.Error(), "archive destination") {
+		t.Fatalf("error = %v, want destination drift", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(oldPath, "SKILL.md")); statErr != nil {
+		t.Fatalf("source archive changed: %v", statErr)
+	}
+	if info, statErr := os.Stat(newPath); statErr != nil || !info.IsDir() {
+		t.Fatalf("appeared destination was changed: %v, %v", info, statErr)
+	}
+}
+
+func TestRenameArchiveRejectsManifestDriftBeforeFirstWrite(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	manifestPath := filepath.Join(project, ".x-skills.yaml")
+	writeRenameManifest(t, manifestPath, "old", "archive")
+	original := renameArchiveFilesystem
+	renameArchiveFilesystem.beforeMutation = func(kind string) error {
+		if kind == "manifest:.x-skills.yaml" {
+			return os.WriteFile(manifestPath, []byte("external edit\n"), 0o644)
+		}
+		return nil
+	}
+	t.Cleanup(func() { renameArchiveFilesystem = original })
+
+	_, err := RenameArchive(cfg, "old", "new")
+	if err == nil || !strings.Contains(err.Error(), "manifest .x-skills.yaml drifted") {
+		t.Fatalf("error = %v, want manifest drift", err)
+	}
+	data, readErr := os.ReadFile(manifestPath)
+	if readErr != nil || string(data) != "external edit\n" {
+		t.Fatalf("manifest = %q, %v; want external edit preserved", data, readErr)
+	}
+}
+
+func TestRenameArchiveRollsBackOnlyCompletedManifestWrites(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	recommended := filepath.Join(project, ".x-skills.yaml")
+	local := filepath.Join(project, ".x-skills.local.yaml")
+	writeRenameManifest(t, recommended, "old", "archive")
+	writeRenameManifest(t, local, "old", "archive")
+	original := renameArchiveFilesystem
+	renameArchiveFilesystem.beforeMutation = func(kind string) error {
+		if kind == "manifest:.x-skills.local.yaml" {
+			if err := os.WriteFile(local, []byte("external local edit\n"), 0o644); err != nil {
+				return err
+			}
+			return errors.New("injected failure after first manifest write")
+		}
+		return nil
+	}
+	t.Cleanup(func() { renameArchiveFilesystem = original })
+
+	_, err := RenameArchive(cfg, "old", "new")
+	if err == nil || !strings.Contains(err.Error(), "injected failure after first manifest write") {
+		t.Fatalf("error = %v", err)
+	}
+	data, readErr := os.ReadFile(local)
+	if readErr != nil || string(data) != "external local edit\n" {
+		t.Fatalf("unwritten manifest = %q, %v; want external edit preserved", data, readErr)
+	}
+}
+
+func TestRenameArchiveSurfacesRollbackManifestDrift(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	recommended := filepath.Join(project, ".x-skills.yaml")
+	local := filepath.Join(project, ".x-skills.local.yaml")
+	writeRenameManifest(t, recommended, "old", "archive")
+	writeRenameManifest(t, local, "old", "archive")
+	original := renameArchiveFilesystem
+	renameArchiveFilesystem.beforeMutation = func(kind string) error {
+		if kind == "manifest:.x-skills.local.yaml" {
+			if err := os.WriteFile(recommended, []byte("external recommended edit\n"), 0o644); err != nil {
+				return err
+			}
+			return errors.New("injected second manifest failure")
+		}
+		return nil
+	}
+	t.Cleanup(func() { renameArchiveFilesystem = original })
+
+	_, err := RenameArchive(cfg, "old", "new")
+	if err == nil || !strings.Contains(err.Error(), "rollback drift") {
+		t.Fatalf("error = %v, want rollback drift", err)
+	}
+	data, readErr := os.ReadFile(recommended)
+	if readErr != nil || string(data) != "external recommended edit\n" {
+		t.Fatalf("drifted manifest = %q, %v; want external edit preserved", data, readErr)
+	}
+}
+
 func TestRenameArchiveReportsManifestWriteAndRollbackFailure(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, t.TempDir())
@@ -66,7 +176,7 @@ func TestRenameArchiveReportsManifestWriteAndRollbackFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { renameArchiveFilesystem = original })
 	_, err := RenameArchive(cfg, "old", "new")
-	if err == nil || !strings.Contains(err.Error(), "update .x-skills.local.yaml") || !strings.Contains(err.Error(), "restore .x-skills.local.yaml") || !strings.Contains(err.Error(), "injected symlink rollback failure") {
+	if err == nil || !strings.Contains(err.Error(), "update .x-skills.local.yaml") || strings.Contains(err.Error(), "restore .x-skills.local.yaml") || !strings.Contains(err.Error(), "injected symlink rollback failure") {
 		t.Fatalf("error = %v", err)
 	}
 }

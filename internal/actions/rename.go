@@ -24,17 +24,19 @@ type RenameResult struct {
 }
 
 type renameFilesystem struct {
-	rename         func(string, string) error
-	remove         func(string) error
-	symlink        func(string, string) error
-	beforeMutation func(string) error
+	rename          func(string, string) error
+	renameNoReplace func(string, string) error
+	remove          func(string) error
+	symlink         func(string, string) error
+	beforeMutation  func(string) error
 }
 
 var renameArchiveFilesystem = renameFilesystem{
-	rename:         os.Rename,
-	remove:         os.Remove,
-	symlink:        os.Symlink,
-	beforeMutation: func(string) error { return nil },
+	rename:          os.Rename,
+	renameNoReplace: renameNoReplace,
+	remove:          os.Remove,
+	symlink:         os.Symlink,
+	beforeMutation:  func(string) error { return nil },
 }
 
 type renameManifest struct {
@@ -44,6 +46,7 @@ type renameManifest struct {
 	mode    os.FileMode
 	next    []byte
 	changed bool
+	present bool
 }
 
 type renameUsage struct {
@@ -91,12 +94,16 @@ func RenameArchiveContext(ctx context.Context, cfg config.Config, oldName, newNa
 			return result, err
 		}
 	}
-	if err := renameArchiveFilesystem.rename(oldPath, newPath); err != nil {
+	if err := requireRenamePathAbsent(newPath); err != nil {
+		return result, err
+	}
+	if err := renameArchiveFilesystem.renameNoReplace(oldPath, newPath); err != nil {
 		return result, fmt.Errorf("rename archive %q to %q: %w", oldPath, newPath, err)
 	}
 	relinked := []renameUsage{}
+	writtenManifests := []renameManifest{}
 	rollback := func(cause error) (RenameResult, error) {
-		rollbackErr := rollbackArchiveRename(oldPath, newPath, relinked, manifests)
+		rollbackErr := rollbackArchiveRename(oldPath, newPath, relinked, writtenManifests)
 		if rollbackErr != nil {
 			return result, errors.Join(cause, rollbackErr)
 		}
@@ -124,15 +131,31 @@ func RenameArchiveContext(ctx context.Context, cfg config.Config, oldName, newNa
 		if err := checkRenameContext(ctx); err != nil {
 			return rollback(err)
 		}
+		if err := renameArchiveFilesystem.beforeMutation("manifest:" + manifests[i].label); err != nil {
+			return rollback(err)
+		}
+		if err := revalidateRenameManifest(manifests[i], manifests[i].data); err != nil {
+			return rollback(err)
+		}
 		if err := writeRenameFile(manifests[i].path, manifests[i].next, manifests[i].mode); err != nil {
 			return rollback(fmt.Errorf("update %s: %w", manifests[i].label, err))
 		}
+		writtenManifests = append(writtenManifests, manifests[i])
 		result.ManifestUpdates = append(result.ManifestUpdates, manifests[i].label)
 	}
 	for _, usage := range relinked {
 		result.RelinkedPaths = append(result.RelinkedPaths, usage.path)
 	}
 	return result, nil
+}
+
+func requireRenamePathAbsent(path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("archive destination %q appeared before mutation", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect archive destination %q: %w", path, err)
+	}
+	return nil
 }
 
 func renameArchivePaths(cfg config.Config, oldName, newName string) (string, string, error) {
@@ -307,9 +330,20 @@ func prepareRenameManifests(projectRoot, oldName, newName string) ([]renameManif
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", files[i].label, err)
 		}
-		files[i].data, files[i].next, files[i].changed, files[i].mode = data, next, changed, info.Mode().Perm()
+		files[i].data, files[i].next, files[i].changed, files[i].mode, files[i].present = data, next, changed, info.Mode().Perm(), true
 	}
 	return files, nil
+}
+
+func revalidateRenameManifest(manifest renameManifest, want []byte) error {
+	data, err := os.ReadFile(manifest.path)
+	if errors.Is(err, os.ErrNotExist) && !manifest.present {
+		return nil
+	}
+	if err != nil || !manifest.present || !bytes.Equal(data, want) {
+		return fmt.Errorf("manifest %s drifted before mutation", manifest.label)
+	}
+	return nil
 }
 
 func renameManifestIdentity(data []byte, oldName, newName string) ([]byte, bool, error) {
@@ -414,10 +448,12 @@ func writeRenameFile(path string, data []byte, mode os.FileMode) error {
 func rollbackArchiveRename(oldPath, newPath string, relinked []renameUsage, manifests []renameManifest) error {
 	errs := []error{}
 	for _, manifest := range slices.Backward(manifests) {
-		if manifest.changed {
-			if err := writeRenameFile(manifest.path, manifest.data, manifest.mode); err != nil {
-				errs = append(errs, fmt.Errorf("restore %s: %w", manifest.label, err))
-			}
+		if err := revalidateRenameManifest(renameManifest{path: manifest.path, label: manifest.label, present: true}, manifest.next); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: rollback drift: %w", manifest.label, err))
+			continue
+		}
+		if err := writeRenameFile(manifest.path, manifest.data, manifest.mode); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: %w", manifest.label, err))
 		}
 	}
 	for _, usage := range slices.Backward(relinked) {

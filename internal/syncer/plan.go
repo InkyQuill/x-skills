@@ -40,23 +40,27 @@ type ConflictResolution struct {
 }
 
 type Change struct {
-	CandidateID     string
-	Name            string
-	Fingerprint     string
-	Action          string
-	SourcePath      string
-	ArchivePath     string
-	DestinationPath string
+	CandidateID            string
+	Name                   string
+	Fingerprint            string
+	Action                 string
+	SourcePath             string
+	ArchivePath            string
+	DestinationPath        string
+	DestinationFingerprint string
+	ManagedTarget          string
 }
 
 type Conflict struct {
-	CandidateID         string
-	Name                string
-	Fingerprint         string
-	DestinationPath     string
-	DestinationStatus   string
-	SuggestedPreserveAs string
-	Resolution          ConflictResolution
+	CandidateID            string
+	Name                   string
+	Fingerprint            string
+	DestinationPath        string
+	DestinationStatus      string
+	DestinationFingerprint string
+	ManagedTarget          string
+	SuggestedPreserveAs    string
+	Resolution             ConflictResolution
 }
 
 type Skip struct {
@@ -161,6 +165,10 @@ func PreflightContext(
 		}
 		archiveReplacement := false
 		if archiveExists && !archiveMatches {
+			destinationFingerprint, fingerprintErr := fingerprint.Directory(archivePath)
+			if fingerprintErr != nil {
+				return Plan{}, fmt.Errorf("fingerprint archive conflict %q: %w", archivePath, fingerprintErr)
+			}
 			resolution := resolutionByPath[archivePath]
 			if resolution.Action != "" {
 				usedResolutions[archivePath] = struct{}{}
@@ -173,6 +181,7 @@ func PreflightContext(
 				CandidateID: candidate.ID, Name: candidate.Name,
 				Fingerprint:     candidate.Fingerprint,
 				DestinationPath: archivePath, DestinationStatus: actions.StatusManaged,
+				DestinationFingerprint: destinationFingerprint, ManagedTarget: archivePath,
 				SuggestedPreserveAs: suggestion, Resolution: resolution,
 			}
 			switch resolution.Action {
@@ -249,11 +258,14 @@ func PreflightContext(
 						CandidateID: candidate.ID, Name: candidate.Name,
 						Fingerprint:     candidate.Fingerprint,
 						DestinationPath: destinationPath, DestinationStatus: classification.status,
+						DestinationFingerprint: classification.fingerprint, ManagedTarget: classification.managedTarget,
 						SuggestedPreserveAs: suggestion, Resolution: resolution,
 					}
 					plan.Conflicts = append(plan.Conflicts, conflict)
 					if resolution.Action == ConflictReplace {
-						plan.Links = append(plan.Links, linkChange(candidate, archivePath, destinationPath, LinkNormalize))
+						change := linkChange(candidate, archivePath, destinationPath, LinkNormalize)
+						change.DestinationFingerprint, change.ManagedTarget = classification.fingerprint, classification.managedTarget
+						plan.Links = append(plan.Links, change)
 					}
 				default:
 					return Plan{}, fmt.Errorf("unknown conflict action %q", resolution.Action)
@@ -544,8 +556,10 @@ const (
 )
 
 type destinationClassification struct {
-	kind   destinationKind
-	status string
+	kind          destinationKind
+	status        string
+	fingerprint   string
+	managedTarget string
 }
 
 func classifyDestination(cfg config.Config, path, archivePath, candidateFingerprint string, archiveMatches, archiveReplacement bool) (destinationClassification, error) {
@@ -577,14 +591,25 @@ func classifyDestination(cfg config.Config, path, archivePath, candidateFingerpr
 	} else if !info.IsDir() {
 		return destinationClassification{kind: destinationDivergent, status: status}, nil
 	}
+	destinationFingerprint, fingerprintErr := fingerprint.Directory(resolved)
+	if fingerprintErr != nil {
+		return destinationClassification{}, fmt.Errorf("fingerprint destination %q: %w", path, fingerprintErr)
+	}
+	managedTarget := ""
+	if status == actions.StatusManaged {
+		managedTarget, err = canonicalPath(resolved)
+		if err != nil {
+			return destinationClassification{}, fmt.Errorf("canonicalize managed destination target %q: %w", path, err)
+		}
+	}
 	matches, err := pathMatchesFingerprint(resolved, candidateFingerprint)
 	if err != nil {
 		return destinationClassification{}, fmt.Errorf("fingerprint destination %q: %w", path, err)
 	}
 	if matches {
-		return destinationClassification{kind: destinationMatching, status: status}, nil
+		return destinationClassification{kind: destinationMatching, status: status, fingerprint: destinationFingerprint, managedTarget: managedTarget}, nil
 	}
-	return destinationClassification{kind: destinationDivergent, status: status}, nil
+	return destinationClassification{kind: destinationDivergent, status: status, fingerprint: destinationFingerprint, managedTarget: managedTarget}, nil
 }
 
 func pathExists(path string) (bool, error) {

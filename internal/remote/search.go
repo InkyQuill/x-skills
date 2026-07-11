@@ -28,6 +28,7 @@ type SearchResult struct {
 	Owner       string        `json:"owner"`
 	Repo        string        `json:"repo"`
 	Path        string        `json:"path"`
+	Ref         string        `json:"ref,omitempty"`
 	Installs    int           `json:"installs"`
 	Audit       *AuditSummary `json:"audit,omitempty"`
 }

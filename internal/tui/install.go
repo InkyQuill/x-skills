@@ -155,6 +155,7 @@ type installArchiveIdentity struct {
 	owner string
 	repo  string
 	path  string
+	ref   string
 }
 
 type installArchiveBatchResult struct {
@@ -1658,7 +1659,7 @@ func (m *Model) cleanupInstallCheckoutCache() {
 
 func (m Model) gitSourceForInstall(result remote.SearchResult) (remote.GitSource, error) {
 	if m.install.testCloneURL != "" {
-		return remote.GitSource{CloneURL: m.install.testCloneURL}, nil
+		return remote.GitSource{CloneURL: m.install.testCloneURL, Ref: result.Ref}, nil
 	}
 	if result.Owner == "" || result.Repo == "" {
 		return remote.GitSource{}, fmt.Errorf("missing source repository for %s", result.Name)
@@ -1667,6 +1668,7 @@ func (m Model) gitSourceForInstall(result remote.SearchResult) (remote.GitSource
 		Owner:    result.Owner,
 		Repo:     result.Repo,
 		CloneURL: "https://github.com/" + result.Owner + "/" + result.Repo + ".git",
+		Ref:      result.Ref,
 	}, nil
 }
 
@@ -1716,6 +1718,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 	if len(stateCheckResults) == 0 {
 		return nil
 	}
+	m.ensureInstallCheckoutCache()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), installArchiveTimeout)
 		defer cancel()
@@ -1759,7 +1762,7 @@ func (m Model) checkInstallArchiveStates(
 	if limit <= 0 {
 		limit = 1
 	}
-	checkouts := m.ensureInstallCheckoutCache()
+	checkouts := m.install.checkouts
 	if checkouts == nil {
 		for i := range msg.results {
 			if msg.results[i].Err == nil {
@@ -2253,12 +2256,13 @@ func installArchiveIdentityFromResult(result remote.SearchResult) installArchive
 		owner: result.Owner,
 		repo:  result.Repo,
 		path:  result.Path,
+		ref:   result.Ref,
 	}
 }
 
 func installAuditKey(result remote.SearchResult) string {
 	identity := installArchiveIdentityFromResult(result)
-	return identity.owner + "/" + identity.repo + "@" + identity.path + "@" + identity.name
+	return identity.owner + "/" + identity.repo + "@" + identity.ref + "@" + identity.path + "@" + identity.name
 }
 
 func installAuditPill(audit remote.AuditSummary, opts Options) string {
@@ -2296,6 +2300,7 @@ func (m Model) installSourceMetadata(result remote.SearchResult) remote.SourceMe
 		Owner:      result.Owner,
 		Repo:       result.Repo,
 		SkillPath:  result.Path,
+		Ref:        result.Ref,
 	}
 	if m.install.testCloneURL != "" {
 		meta.SourceType = remote.SourceTypeGit

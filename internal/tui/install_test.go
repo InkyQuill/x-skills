@@ -85,8 +85,11 @@ func TestInstallArchiveStateChecksAreBoundedAndCoalesced(t *testing.T) {
 	if maxActive.Load() > 3 {
 		t.Fatalf("max concurrent checks = %d, want <= 3", maxActive.Load())
 	}
-	if got := calls["https://github.com/acme/skills-0.git@"]; got != 1 {
-		t.Fatalf("checkout calls = %d, want 1", got)
+	for repoIndex := range 6 {
+		key := fmt.Sprintf("https://github.com/acme/skills-%d.git@", repoIndex)
+		if got := calls[key]; got != 1 {
+			t.Fatalf("checkout calls for %q = %d, want 1", key, got)
+		}
 	}
 	if len(msg.results) != len(results) {
 		t.Fatalf("state results = %d, want %d", len(msg.results), len(results))
@@ -95,6 +98,143 @@ func TestInstallArchiveStateChecksAreBoundedAndCoalesced(t *testing.T) {
 		if result.Identity != installArchiveIdentityFromResult(results[i]) {
 			t.Fatalf("result %d identity = %#v, want input order %#v", i, result.Identity, installArchiveIdentityFromResult(results[i]))
 		}
+		if result.Err != nil || result.State == "" {
+			t.Fatalf("result %d = %#v, want successful state for matching input", i, result)
+		}
+	}
+}
+
+func TestInstallArchiveStateChecksDistinguishSourceRefs(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	checkoutPaths := map[string]string{}
+	results := []remote.SearchResult{}
+	for _, ref := range []string{"main", "next"} {
+		checkoutPath := t.TempDir()
+		name := "skill-" + ref
+		path := "skills/" + name
+		writeTUITestRemoteSkill(t, checkoutPath, path, name, "Incoming.")
+		checkoutPaths[ref] = checkoutPath
+		results = append(results, remote.SearchResult{
+			Name:  name,
+			Owner: "acme",
+			Repo:  "skills",
+			Path:  path,
+			Ref:   ref,
+		})
+	}
+
+	var mu sync.Mutex
+	calls := map[string]int{}
+	previousCheckout := installArchiveStateCheckout
+	installArchiveStateCheckout = func(_ context.Context, _ *remote.CheckoutCache, source remote.GitSource) (remote.Checkout, error) {
+		mu.Lock()
+		calls[source.CloneURL+"@"+source.Ref]++
+		mu.Unlock()
+		return remote.Checkout{Path: checkoutPaths[source.Ref], Source: source}, nil
+	}
+	t.Cleanup(func() { installArchiveStateCheckout = previousCheckout })
+
+	m := New(cfg)
+	m.install.checkouts = remote.NewCheckoutCache(t.TempDir())
+	msg := m.checkInstallArchiveStates(t.Context(), 1, results, 3)
+
+	for _, key := range []string{
+		"https://github.com/acme/skills.git@main",
+		"https://github.com/acme/skills.git@next",
+	} {
+		if got := calls[key]; got != 1 {
+			t.Fatalf("checkout calls for %q = %d, want 1", key, got)
+		}
+	}
+	if len(msg.results) != 2 || msg.results[0].Err != nil || msg.results[1].Err != nil {
+		t.Fatalf("state results = %#v, want two successful checks", msg.results)
+	}
+}
+
+func TestInstallSearchRetainsInitializedCheckoutCache(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "skill", "Archived.")
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "acme",
+		Repo:       "skills",
+		SkillPath:  "skills/skill",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.install.searchToken = 1
+	if m.install.checkouts != nil {
+		t.Fatal("checkout cache initialized before search result")
+	}
+
+	updated, cmd := m.Update(installSearchResultMsg{
+		token: 1,
+		query: "skill",
+		results: []remote.SearchResult{{
+			Name:  "skill",
+			Owner: "acme",
+			Repo:  "skills",
+			Path:  "skills/skill",
+		}},
+	})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("archive state command is nil")
+	}
+	if m.install.checkouts == nil {
+		t.Fatal("checkout cache was not retained on model")
+	}
+	retained := m.install.checkouts
+
+	updated, _ = m.Update(installSearchResultMsg{
+		token: 1,
+		query: "skill",
+		results: []remote.SearchResult{{
+			Name:  "skill",
+			Owner: "acme",
+			Repo:  "skills",
+			Path:  "skills/skill",
+		}},
+	})
+	m = mustModel(t, updated)
+	if m.install.checkouts != retained {
+		t.Fatal("later search replaced retained checkout cache")
+	}
+}
+
+func TestInstallArchiveStateResultsRejectStaleTokenAndIdentity(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.install.searchToken = 2
+	current := remote.SearchResult{Name: "current", Owner: "acme", Repo: "skills", Path: "skills/current", Ref: "main"}
+	m.install.Results = []installResultView{{Result: current, ArchiveState: remote.ArchiveStateArchived}}
+
+	m.applyInstallArchiveStateResults(installArchiveStatesMsg{
+		token: 1,
+		results: []installArchiveStateResult{{
+			Identity: installArchiveIdentityFromResult(current),
+			State:    remote.ArchiveStateUpdateAvailable,
+		}},
+	})
+	m.applyInstallArchiveStateResults(installArchiveStatesMsg{
+		token: 2,
+		results: []installArchiveStateResult{{
+			Identity: installArchiveIdentityFromResult(remote.SearchResult{Name: "other"}),
+			State:    remote.ArchiveStateUpdateAvailable,
+		}},
+	})
+	m.applyInstallArchiveStateResults(installArchiveStatesMsg{
+		token: 2,
+		results: []installArchiveStateResult{{
+			Identity: installArchiveIdentityFromResult(remote.SearchResult{
+				Name: "current", Owner: "acme", Repo: "skills", Path: "skills/current", Ref: "next",
+			}),
+			State: remote.ArchiveStateUpdateAvailable,
+		}},
+	})
+
+	if got := m.install.Results[0].ArchiveState; got != remote.ArchiveStateArchived {
+		t.Fatalf("archive state = %q, want stale results rejected", got)
 	}
 }
 

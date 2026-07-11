@@ -19,7 +19,9 @@ import (
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type installInputMode int
@@ -1536,10 +1538,15 @@ func (d installDestinationModal) View(width, height int, m Model) string {
 		body = append(body, row)
 	}
 	return renderConstrainedModal(width, height, constrainedModalOptions{
-		Title:  d.Title(),
-		Body:   body,
-		Footer: []string{mutedStyle.Render("up/down move  space toggle  enter install  esc cancel")},
-		Focus:  d.cursor,
+		Title: d.Title(),
+		Body:  body,
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, lipgloss.NewStyle(), mutedStyle, []tuiui.Shortcut{
+			{ASCII: "up/down", Label: "move"},
+			{ASCII: "space", Label: "toggle"},
+			{ASCII: "enter", Label: "install"},
+			{ASCII: "esc", Label: "cancel"},
+		})},
+		Focus: d.cursor,
 	})
 }
 
@@ -1611,10 +1618,15 @@ func (d installBatchDestinationModal) View(width, height int, m Model) string {
 		body = append(body, row)
 	}
 	return renderConstrainedModal(width, height, constrainedModalOptions{
-		Title:  d.Title(),
-		Body:   body,
-		Footer: []string{mutedStyle.Render("up/down move  space toggle  enter install  esc cancel")},
-		Focus:  focus,
+		Title: d.Title(),
+		Body:  body,
+		Footer: []string{tuiui.FooterLine(m.opts.ASCII, lipgloss.NewStyle(), mutedStyle, []tuiui.Shortcut{
+			{ASCII: "up/down", Label: "move"},
+			{ASCII: "space", Label: "toggle"},
+			{ASCII: "enter", Label: "install"},
+			{ASCII: "esc", Label: "cancel"},
+		})},
+		Focus: focus,
 	})
 }
 

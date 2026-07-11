@@ -91,6 +91,45 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 	}
 }
 
+func TestStatusRenderersUseExactSymbolsIndependentlyOfRowState(t *testing.T) {
+	tests := []struct {
+		name       string
+		ascii      bool
+		status     string
+		wantChip   string
+		wantMarker string
+	}{
+		{name: "unicode managed", status: actions.StatusManaged, wantChip: "✓ managed", wantMarker: "✓"},
+		{name: "unicode unmanaged", status: actions.StatusUnmanaged, wantChip: "◇ unmanaged", wantMarker: "◇"},
+		{name: "unicode broken", status: actions.StatusBroken, wantChip: "× broken", wantMarker: "×"},
+		{name: "ASCII managed", ascii: true, status: actions.StatusManaged, wantChip: "+ managed", wantMarker: "+"},
+		{name: "ASCII unmanaged", ascii: true, status: actions.StatusUnmanaged, wantChip: "? unmanaged", wantMarker: "?"},
+		{name: "ASCII broken", ascii: true, status: actions.StatusBroken, wantChip: "x broken", wantMarker: "x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, cursor := range []int{0, 1} {
+				for _, selected := range []bool{false, true} {
+					m := Model{
+						symbols: symbolsFor(Options{ASCII: tt.ascii}),
+						cursor:  cursor,
+						selected: map[ViewName]map[string]bool{
+							ViewActive: {"active:one": selected},
+						},
+					}
+					if got := plain(renderStatusChip(m, tt.status)); got != tt.wantChip {
+						t.Errorf("renderStatusChip(cursor=%d, selected=%t) = %q, want %q", cursor, selected, got, tt.wantChip)
+					}
+					if got := plain(renderStatusDotWithBackground(m, tt.status, lipgloss.NoColor{})); got != tt.wantMarker {
+						t.Errorf("renderStatusDotWithBackground(cursor=%d, selected=%t) = %q, want %q", cursor, selected, got, tt.wantMarker)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 	m := Model{
 		symbols: symbolsFor(Options{}),

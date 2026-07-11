@@ -86,6 +86,7 @@ func TestStatusRowsDistinguishableWithoutColor(t *testing.T) {
 					Name:        "same-skill",
 					Status:      status,
 					Description: "Same description.",
+					Reason:      "Same description.",
 					Chips:       []string{".Ag"},
 				}}
 				rendered := renderActiveRows(m, 80)

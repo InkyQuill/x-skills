@@ -17,12 +17,12 @@ func TestEffectiveMergesCommittedAndLocalIntent(t *testing.T) {
 		},
 	}}
 	local := Manifest{Version: 1, Skills: []Skill{
-		{Name: "local-only", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:local"},
+		{Name: "local-only", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA},
 		{
 			Name:          "shared",
 			Source:        Source{Type: SourceGit, Repository: "https://example.test/local.git", Path: "shared"},
 			Compatibility: &remote.CompatibilityProfile{Agnostic: true},
-			Fingerprint:   "sha256:machine-local",
+			Fingerprint:   testFingerprintA,
 		},
 	}}
 
@@ -55,7 +55,7 @@ func TestEffectiveDoesNotNoticeMatchingIdentity(t *testing.T) {
 		Name:          "shared",
 		Source:        Source{Type: SourceGitHub, Repository: "owner/repo", Path: "skills/shared", Ref: "main"},
 		Compatibility: &remote.CompatibilityProfile{Agents: []string{"claude", "codex"}},
-		Fingerprint:   "sha256:same",
+		Fingerprint:   testFingerprintA,
 	}
 
 	got, notices := Effective(
@@ -77,7 +77,7 @@ func TestEffectiveDoesNotMutateInputsOrAliasCompatibility(t *testing.T) {
 		Compatibility: &remote.CompatibilityProfile{Agents: []string{"codex", "claude"}},
 	}}}
 	local := Manifest{Version: 1, Skills: []Skill{{
-		Name: "alpha", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:alpha",
+		Name: "alpha", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA,
 		Compatibility: &remote.CompatibilityProfile{Agents: []string{"gemini"}},
 	}}}
 	wantRecommended := cloneManifest(recommended)
@@ -100,7 +100,7 @@ func TestEffectiveKeepsExactCaseVariantsInDeterministicOrder(t *testing.T) {
 		{Name: "alpha", Source: Source{Type: SourceGitHub, Repository: "owner/repo", Path: "skills/lower"}},
 	}}
 	local := Manifest{Version: 1, Skills: []Skill{
-		{Name: "Alpha", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:upper"},
+		{Name: "Alpha", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintB},
 	}}
 
 	for range 20 {

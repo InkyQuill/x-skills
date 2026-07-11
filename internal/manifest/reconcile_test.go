@@ -43,7 +43,7 @@ func TestReconcileLocalRemovesPresentArchiveAfterLastProjectOccurrence(t *testin
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
 	makeReconcileArchive(t, cfg, "gone", nil)
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "gone", Source: Source{Type: SourceArchive}, Fingerprint: "old"}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "gone", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ReconcileLocal(cfg); err != nil {
@@ -61,7 +61,7 @@ func TestReconcileLocalRemovesPresentArchiveAfterLastProjectOccurrence(t *testin
 func TestReconcileLocalRetainsUnavailableArchiveOnlyEntry(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
-	want := Skill{Name: "elsewhere", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:missing"}
+	want := Skill{Name: "elsewhere", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}
 	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{want}}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestReconcileLocalRetainsUnavailableArchiveOnlyEntry(t *testing.T) {
 func TestReconcileLocalRemovesUnavailableEntryOwnedByRecommendedManifest(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceArchive}, Fingerprint: "missing"}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteRecommended(project, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceGit, Repository: "git://example/repo", Path: "skills/shared"}}}}); err != nil {
@@ -95,7 +95,7 @@ func TestReconcileLocalRemovesUnavailableEntryOwnedByRecommendedManifest(t *test
 func TestReconcileLocalRejectsDivergentSameNameOccurrencesWithoutWriting(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
-	want := Manifest{Version: 1, Skills: []Skill{{Name: "same", Source: Source{Type: SourceArchive}, Fingerprint: "previous"}}}
+	want := Manifest{Version: 1, Skills: []Skill{{Name: "same", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}
 	if err := WriteLocal(project, want); err != nil {
 		t.Fatal(err)
 	}

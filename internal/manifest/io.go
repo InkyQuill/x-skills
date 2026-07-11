@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -136,6 +137,11 @@ func normalizeAndValidateSkill(skill *Skill, allowArchive bool) error {
 		if skill.Source.Repository != "" || skill.Source.Path != "" || skill.Source.Ref != "" {
 			return errors.New("archive source cannot contain repository, path, or ref")
 		}
+		fingerprint, err := normalizeContentFingerprint(skill.Fingerprint)
+		if err != nil {
+			return err
+		}
+		skill.Fingerprint = fingerprint
 	default:
 		return fmt.Errorf("unsupported source type %q", skill.Source.Type)
 	}
@@ -147,6 +153,22 @@ func normalizeAndValidateSkill(skill *Skill, allowArchive bool) error {
 		slices.Sort(profile.Agents)
 	}
 	return nil
+}
+
+func normalizeContentFingerprint(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("archive source requires a content fingerprint")
+	}
+	if len(value) >= len("sha256:") && strings.EqualFold(value[:len("sha256:")], "sha256:") {
+		value = value[len("sha256:"):]
+	}
+	value = strings.ToLower(value)
+	decoded, err := hex.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		return "", errors.New("invalid content fingerprint: expected a SHA-256 digest")
+	}
+	return value, nil
 }
 
 func normalizeGitPath(value string) string {

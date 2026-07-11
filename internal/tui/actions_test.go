@@ -1352,7 +1352,7 @@ func TestRepoDeleteReconcilesSuccessfulProjectUnlinkWhenLaterUnlinkFails(t *test
 	if err := os.Symlink(archived, projectPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.WriteLocal(project, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "zen-of-go", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: "old"}}}); err != nil {
+	if err := manifest.WriteLocal(project, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "zen-of-go", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: strings.Repeat("a", 64)}}}); err != nil {
 		t.Fatal(err)
 	}
 	m := New(cfg)

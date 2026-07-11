@@ -7,6 +7,11 @@ import (
 	"testing"
 )
 
+const (
+	testFingerprintA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testFingerprintB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
 const recommendedFixture = `version: 1
 skills:
   - name: using-svelte-5
@@ -22,7 +27,7 @@ skills:
   - name: private-review
     source:
       type: archive
-    fingerprint: sha256:abc
+    fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 `
 
 func TestLoadRecommended(t *testing.T) {
@@ -51,7 +56,7 @@ func TestLoadLocal(t *testing.T) {
 		t.Fatalf("LoadLocal() error = %v", err)
 	}
 	if len(got.Skills) != 1 || got.Skills[0].Source.Type != SourceArchive ||
-		got.Skills[0].Fingerprint != "sha256:abc" {
+		got.Skills[0].Fingerprint != testFingerprintA {
 		t.Fatalf("LoadLocal() = %#v", got)
 	}
 }
@@ -64,10 +69,12 @@ func TestLoadRejectsInvalidManifest(t *testing.T) {
 		want        string
 	}{
 		{name: "unknown field", contents: "version: 1\nunknown: true\nskills: []\n", want: "field unknown not found"},
-		{name: "duplicate names", contents: "version: 1\nskills:\n  - name: same\n    source: {type: archive}\n  - name: same\n    source: {type: archive}\n", want: "duplicate skill name"},
+		{name: "duplicate names", contents: "version: 1\nskills:\n  - name: same\n    source: {type: archive}\n    fingerprint: " + testFingerprintA + "\n  - name: same\n    source: {type: archive}\n    fingerprint: " + testFingerprintA + "\n", want: "duplicate skill name"},
 		{name: "invalid name", contents: "version: 1\nskills:\n  - name: ../escape\n    source: {type: archive}\n", want: "invalid skill name"},
 		{name: "unsupported version", contents: "version: 2\nskills: []\n", want: "unsupported manifest version"},
 		{name: "archive recommended", recommended: true, contents: localFixture, want: "archive source"},
+		{name: "archive fingerprint missing", contents: "version: 1\nskills:\n  - name: local\n    source: {type: archive}\n", want: "archive source requires a content fingerprint"},
+		{name: "archive fingerprint malformed", contents: "version: 1\nskills:\n  - name: local\n    source: {type: archive}\n    fingerprint: not-a-fingerprint\n", want: "invalid content fingerprint"},
 	}
 
 	for _, tt := range tests {
@@ -82,6 +89,39 @@ func TestLoadRejectsInvalidManifest(t *testing.T) {
 			_, err := load(root)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("load error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadLocalNormalizesArchiveFingerprint(t *testing.T) {
+	root := writeFixture(t, LocalFilename, "version: 1\nskills:\n  - name: local\n    source: {type: archive}\n    fingerprint: SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n")
+
+	got, err := LoadLocal(root)
+	if err != nil {
+		t.Fatalf("LoadLocal() error = %v", err)
+	}
+	if got.Skills[0].Fingerprint != strings.Repeat("a", 64) {
+		t.Fatalf("fingerprint = %q, want normalized digest", got.Skills[0].Fingerprint)
+	}
+}
+
+func TestWriteLocalRejectsInvalidArchiveFingerprint(t *testing.T) {
+	tests := []struct {
+		name        string
+		fingerprint string
+	}{
+		{name: "missing"},
+		{name: "malformed", fingerprint: "sha256:abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := WriteLocal(t.TempDir(), Manifest{Version: 1, Skills: []Skill{{
+				Name: "local", Source: Source{Type: SourceArchive}, Fingerprint: tt.fingerprint,
+			}}})
+			if err == nil || !strings.Contains(err.Error(), "fingerprint") {
+				t.Fatalf("WriteLocal() error = %v, want fingerprint validation error", err)
 			}
 		})
 	}
@@ -131,7 +171,7 @@ func TestWriteRecommendedIsDeterministicAndNormalizesPaths(t *testing.T) {
 func TestWriteLocalRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	want := Manifest{Version: 1, Skills: []Skill{{
-		Name: "private-review", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:abc",
+		Name: "private-review", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA,
 	}}}
 	if err := WriteLocal(root, want); err != nil {
 		t.Fatalf("WriteLocal() error = %v", err)

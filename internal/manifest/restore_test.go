@@ -41,7 +41,7 @@ func TestPlanRestoreRejectsArchiveFingerprintMismatch(t *testing.T) {
 	cfg := config.Default(project, home)
 	root := restoreRoot(t, cfg, config.TargetAgents)
 	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"), "wanted")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:wrong"}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}})
@@ -51,6 +51,21 @@ func TestPlanRestoreRejectsArchiveFingerprintMismatch(t *testing.T) {
 	defer plan.Close()
 	if len(plan.Unavailable) != 1 || !strings.Contains(plan.Unavailable[0].Reason, "fingerprint") {
 		t.Fatalf("unavailable = %#v", plan.Unavailable)
+	}
+}
+
+func TestPlanRestoreRejectsArchiveSourceWithoutFingerprint(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+	contents := "version: 1\nskills:\n  - name: wanted\n    source: {type: archive}\n"
+	if err := os.WriteFile(filepath.Join(project, LocalFilename), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}})
+	if err == nil || !strings.Contains(err.Error(), "archive source requires a content fingerprint") {
+		t.Fatalf("PlanRestore() error = %v, want missing fingerprint rejection", err)
 	}
 }
 
@@ -118,7 +133,7 @@ func TestPlanRestoreNormalizesDivergentDesiredDestination(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root.Path, "wanted", "local"), []byte("preserve"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "wanted")}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}})
@@ -193,7 +208,7 @@ func TestApplyRestoreKeepsSafeAdditionsWhenRemovalsBlocked(t *testing.T) {
 	root := restoreRoot(t, cfg, config.TargetAgents)
 	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "available"), "available")
 	makeRestoreSkill(t, filepath.Join(root.Path, "extra"), "extra")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "available", Source: Source{Type: SourceArchive}}, {Name: "missing", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "available", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "available")}, {Name: "missing", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
@@ -218,7 +233,7 @@ func TestApplyRestoreReconcilesAfterPartialMutationFailure(t *testing.T) {
 	agents := restoreRoot(t, cfg, config.TargetAgents)
 	codex := restoreRoot(t, cfg, config.TargetCodex)
 	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"), "wanted")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "wanted")}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{agents, codex}})
@@ -245,7 +260,7 @@ func TestApplyRestoreRejectsChangedPlannedPath(t *testing.T) {
 	cfg := config.Default(project, home)
 	root := restoreRoot(t, cfg, config.TargetAgents)
 	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"), "wanted")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "wanted")}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}})
@@ -273,7 +288,7 @@ func TestApplyRestoreUnavailableBlocksDesiredNormalization(t *testing.T) {
 	if err := os.Symlink(filepath.Join(project, "gone"), broken); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "available", Source: Source{Type: SourceArchive}}, {Name: "missing", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "available", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "available")}, {Name: "missing", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
@@ -303,9 +318,9 @@ func TestApplyRestoreUnavailableIgnoresBlockedConflictAndAppliesUnrelatedAdditio
 		t.Fatal(err)
 	}
 	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{
-		{Name: "divergent", Source: Source{Type: SourceArchive}},
-		{Name: "missing", Source: Source{Type: SourceArchive}},
-		{Name: "safe", Source: Source{Type: SourceArchive}},
+		{Name: "divergent", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "divergent")},
+		{Name: "missing", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA},
+		{Name: "safe", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "safe")},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +360,7 @@ func TestPlanRestoreUsesManagedOccurrenceNameInsteadOfFrontmatterName(t *testing
 	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), "custom-name"), filepath.Join(root.Path, "custom-name")); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "custom-name", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "custom-name", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "custom-name")}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
@@ -415,7 +430,7 @@ func TestApplyRestoreReportsSuccessfulNormalizationBeforeLaterFailure(t *testing
 	codex := restoreRoot(t, cfg, config.TargetCodex)
 	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"), "wanted")
 	makeRestoreSkill(t, filepath.Join(agents.Path, "wanted"), "wanted")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "wanted")}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{agents, codex}})
@@ -437,7 +452,7 @@ func TestPlanRestoreBlocksFullRemovalsWhenDesiredSkillUnavailable(t *testing.T) 
 	cfg := config.Default(project, home)
 	root := restoreRoot(t, cfg, config.TargetAgents)
 	makeRestoreSkill(t, filepath.Join(root.Path, "extra"), "extra")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "missing", Source: Source{Type: SourceArchive}, Fingerprint: "sha256:missing"}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "missing", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -466,7 +481,7 @@ func TestPlanRestoreScopesAdditionsAndFullRemovalsToExplicitProjectRoots(t *test
 	makeRestoreSkill(t, filepath.Join(agents.Path, "extra"), "extra")
 	makeRestoreSkill(t, filepath.Join(codex.Path, "untouched"), "untouched")
 	makeRestoreSkill(t, filepath.Join(global.Path, "global-untouched"), "global-untouched")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "wanted")}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -488,7 +503,7 @@ func TestApplyRestoreAddsLinksAndMigratesUnmanagedExtrasWithoutDeletingArchives(
 	root := restoreRoot(t, cfg, config.TargetAgents)
 	makeRestoreSkill(t, filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"), "wanted")
 	makeRestoreSkill(t, filepath.Join(root.Path, "extra"), "extra")
-	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}}}}); err != nil {
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "wanted", Source: Source{Type: SourceArchive}, Fingerprint: restoreArchiveFingerprint(t, cfg, "wanted")}}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}, Full: true})
@@ -520,6 +535,15 @@ func restoreRoot(t *testing.T, cfg config.Config, target string) roots.ActiveRoo
 	}
 	t.Fatal("project root not found")
 	return roots.ActiveRoot{}
+}
+
+func restoreArchiveFingerprint(t *testing.T, cfg config.Config, name string) string {
+	t.Helper()
+	fp, err := fingerprint.Directory(filepath.Join(cfg.ArchiveSkillsRoot(), name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fp
 }
 
 func makeRestoreSkill(t *testing.T, dir, name string) {

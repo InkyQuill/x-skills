@@ -23,8 +23,8 @@ func TestRecommendMovesSourcedArchiveSkillsToRecommended(t *testing.T) {
 		Compatibility: &remote.CompatibilityProfile{Agnostic: true},
 	})
 	if err := WriteLocal(cfg.ProjectRoot, Manifest{Version: 1, Skills: []Skill{
-		{Name: "github-skill", Source: Source{Type: SourceArchive}, Fingerprint: "local"},
-		{Name: "keep-local", Source: Source{Type: SourceArchive}, Fingerprint: "keep"},
+		{Name: "github-skill", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintA},
+		{Name: "keep-local", Source: Source{Type: SourceArchive}, Fingerprint: testFingerprintB},
 	}}); err != nil {
 		t.Fatal(err)
 	}

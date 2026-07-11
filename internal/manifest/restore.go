@@ -70,6 +70,15 @@ type MigrationConflict struct {
 	SuggestedName   string
 }
 
+// StagingRoot reports the temporary checkout directory backing the plan's
+// resolved skills; it is empty once Close has released it.
+func (plan *RestorePlan) StagingRoot() string {
+	if plan == nil {
+		return ""
+	}
+	return plan.checkoutRoot
+}
+
 func (plan *RestorePlan) Close() error {
 	if plan == nil || plan.checkoutRoot == "" {
 		return nil

@@ -14,6 +14,33 @@ import (
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
 
+func TestPlanRestoreExposesStagingRootUntilClosed(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	root := restoreRoot(t, cfg, config.TargetAgents)
+
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := plan.StagingRoot()
+	if staging == "" {
+		t.Fatal("StagingRoot() is empty after planning")
+	}
+	if info, err := os.Stat(staging); err != nil || !info.IsDir() {
+		t.Fatalf("staging root is not a directory: info=%v err=%v", info, err)
+	}
+	if err := plan.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Fatalf("staging root still exists after Close: %v", err)
+	}
+	if got := plan.StagingRoot(); got != "" {
+		t.Fatalf("StagingRoot() after Close = %q, want empty", got)
+	}
+}
+
 func TestPlanRestoreRejectsExistingArchiveWithWrongIdentity(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

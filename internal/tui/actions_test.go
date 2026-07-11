@@ -184,14 +184,13 @@ func TestRestoreDestructiveConfirmationShowsChosenArchiveName(t *testing.T) {
 func TestRestoreNestedModalsNavigateBackAndFinalCancelClosesStaging(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
-	before := restoreStagingRoots(t)
 	plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{
 		Destinations: roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[:1],
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	staging := addedRestoreStagingRoot(t, before)
+	staging := requireRestoreStagingRoot(t, plan)
 
 	m := New(cfg)
 	setup := newRestoreWorkbenchModal(cfg)
@@ -234,12 +233,11 @@ func TestRestoreQuitClosesStagingFromEveryNestedModal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			before := restoreStagingRoots(t)
 			plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{Destinations: destination})
 			if err != nil {
 				t.Fatal(err)
 			}
-			staging := addedRestoreStagingRoot(t, before)
+			staging := requireRestoreStagingRoot(t, plan)
 			m := New(cfg)
 			m.modal = tt.modal(plan)
 			_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -282,28 +280,16 @@ func TestRestoreMultipleConflictsAreNavigableAndRenameBackPreservesPreview(t *te
 	}
 }
 
-func restoreStagingRoots(t *testing.T) []string {
+func requireRestoreStagingRoot(t *testing.T, plan manifest.RestorePlan) string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(os.TempDir(), "x-skills-restore-*"))
-	if err != nil {
-		t.Fatal(err)
+	staging := plan.StagingRoot()
+	if staging == "" {
+		t.Fatal("restore planning did not create a staging root")
 	}
-	return paths
-}
-
-func addedRestoreStagingRoot(t *testing.T, before []string) string {
-	t.Helper()
-	known := make(map[string]struct{}, len(before))
-	for _, path := range before {
-		known[path] = struct{}{}
+	if _, err := os.Stat(staging); err != nil {
+		t.Fatalf("staging root is not usable: %v", err)
 	}
-	for _, path := range restoreStagingRoots(t) {
-		if _, ok := known[path]; !ok {
-			return path
-		}
-	}
-	t.Fatal("restore planning did not create a staging root")
-	return ""
+	return staging
 }
 
 func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) {

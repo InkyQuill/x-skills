@@ -74,6 +74,73 @@ func TestReconcileLocalRetainsUnavailableArchiveOnlyEntry(t *testing.T) {
 	}
 }
 
+func TestReconcileLocalRemovesUnavailableEntryOwnedByRecommendedManifest(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	if err := WriteLocal(project, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceArchive}, Fingerprint: "missing"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRecommended(project, Manifest{Version: 1, Skills: []Skill{{Name: "shared", Source: Source{Type: SourceGit, Repository: "git://example/repo", Path: "skills/shared"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReconcileLocal(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadLocal(project)
+	if len(got.Skills) != 0 {
+		t.Fatalf("skills = %#v, want recommended name excluded", got.Skills)
+	}
+}
+
+func TestReconcileLocalRejectsDivergentSameNameOccurrencesWithoutWriting(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	want := Manifest{Version: 1, Skills: []Skill{{Name: "same", Source: Source{Type: SourceArchive}, Fingerprint: "previous"}}}
+	if err := WriteLocal(project, want); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{config.TargetAgents, config.TargetCodex} {
+		root, _ := cfg.ActiveRoot(config.ScopeProject, target)
+		dir := filepath.Join(root, "same")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := []byte("---\nname: same\ndescription: " + target + "\n---\n")
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ReconcileLocal(cfg); err == nil {
+		t.Fatal("ReconcileLocal error = nil, want divergent identity conflict")
+	}
+	got, _ := LoadLocal(project)
+	if !sameIdentity(got.Skills[0], want.Skills[0]) {
+		t.Fatalf("manifest changed after conflict: %#v", got)
+	}
+}
+
+func TestReconcileLocalAcceptsIdenticalSameNameOccurrences(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	for _, target := range []string{config.TargetAgents, config.TargetCodex} {
+		root, _ := cfg.ActiveRoot(config.ScopeProject, target)
+		dir := filepath.Join(root, "same")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: same\ndescription: same\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ReconcileLocal(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadLocal(project)
+	if len(got.Skills) != 1 || got.Skills[0].Name != "same" {
+		t.Fatalf("skills = %#v, want one same", got.Skills)
+	}
+}
+
 func TestReconcileLocalDoesNotWriteUnchangedNormalizedManifest(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

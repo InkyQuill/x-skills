@@ -20,3 +20,12 @@ Implemented automatic Local Skill Manifest reconciliation after successful proje
 - GREEN: the focused reconciliation suite passed after the minimal implementation.
 - Full affected-package verification: `go test ./internal/manifest ./internal/cli ./internal/tui -count=1` passed.
 - `git diff --check` passed.
+
+## Review remediation
+
+- Recommended names now remove same-name unavailable archive-only local entries.
+- Identical same-name occurrences across project Skills Folders collapse to one entry; divergent identities return an actionable conflict before any manifest write.
+- Repository deletion reconciles every successful project unlink, including partial-success paths where a later unlink or archive deletion fails.
+- TUI action reconciliation is queued as serialized Bubble Tea commands. Results carry generation tokens, stale results are ignored, and filesystem scanning/fingerprinting plus snapshot reload run outside direct update/modal callbacks.
+- Added focused tests for recommended/unavailable exclusion, identical and divergent duplicate identities, manifest preservation on conflict, and repository-delete partial success.
+- Fresh verification passed: `go test`, `go vet`, `staticcheck`, and `go test -race` for `internal/manifest`, `internal/cli`, and `internal/tui`, plus `git diff --check`.

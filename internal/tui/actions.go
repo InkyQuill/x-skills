@@ -18,6 +18,57 @@ import (
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
+type mutationReconcileMsg struct {
+	token     uint64
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
+	err       error
+}
+
+func (m *Model) queueProjectReconciliation() bool {
+	if !m.mutationProjectTouched {
+		return false
+	}
+	m.mutationProjectTouched = false
+	m.mutationToken++
+	token := m.mutationToken
+	m.mutationInFlight = true
+	cfg := m.cfg
+	m.pendingMutationCmd = func() tea.Msg {
+		_, err := manifest.ReconcileLocal(cfg)
+		active, repoSkills, issues, repoUsage, reloadErr := loadTUIData(cfg)
+		if err == nil {
+			err = reloadErr
+		}
+		return mutationReconcileMsg{token: token, active: active, repo: repoSkills, issues: issues, repoUsage: repoUsage, err: err}
+	}
+	return true
+}
+
+func (m *Model) applyMutationReconcileResult(msg mutationReconcileMsg) tea.Cmd {
+	if msg.token != m.mutationToken {
+		return nil
+	}
+	m.mutationInFlight = false
+	m.active = msg.active
+	m.repo = msg.repo
+	m.issues = msg.issues
+	m.repoUsage = msg.repoUsage
+	m.clampCursor()
+	if msg.err != nil {
+		line := "x skill mutation succeeded but local manifest reconciliation failed: " + msg.err.Error()
+		if result, ok := m.modal.(resultModal); ok {
+			result.lines = append(result.lines, line)
+			m.modal = result
+		} else {
+			m.status = strings.TrimPrefix(line, "x ")
+		}
+	}
+	return nil
+}
+
 func (m *Model) activeTargets() []actions.ActiveSkill {
 	return m.selectedActiveSkills("migrate")
 }
@@ -61,11 +112,7 @@ func (m *Model) applyMigrateTargetsWithResults(targets []actions.ActiveSkill, re
 			continue
 		}
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
-		if skill.Root.Scope == config.ScopeProject {
-			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
-				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
-			}
-		}
+		m.mutationProjectTouched = m.mutationProjectTouched || skill.Root.Scope == config.ScopeProject
 	}
 	m.finishMigrateTargets(successes, failures)
 }
@@ -82,11 +129,7 @@ func (m *Model) applyResolvedMigrateConflict(skill actions.ActiveSkill, remainin
 		failures = append(failures, "x "+filepath.Base(skill.Path)+"  "+err.Error())
 	} else {
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
-		if skill.Root.Scope == config.ScopeProject {
-			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
-				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
-			}
-		}
+		m.mutationProjectTouched = m.mutationProjectTouched || skill.Root.Scope == config.ScopeProject
 	}
 	m.applyMigrateTargetsWithResults(remaining, actions.ConflictResolutionAsk, successes, failures)
 }
@@ -101,7 +144,9 @@ func (m *Model) openArchiveConflictModal(conflict *actions.ArchiveConflictError,
 }
 
 func (m *Model) finishMigrateTargets(successes, failures []string) {
-	m.reload()
+	if !m.queueProjectReconciliation() {
+		m.reload()
+	}
 	if len(failures) == 0 {
 		m.modal = nil
 		m.status = mutationSuccessStatus(successes, "migrated")
@@ -435,11 +480,12 @@ func (r repoLinkModal) apply(m *Model) {
 		successes = append(successes, "✓ "+result.Name+" linked")
 	}
 	if len(successes) > 0 && location.Scope == config.ScopeProject {
-		if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
-			lines = append(lines, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
-		}
+		m.mutationProjectTouched = true
+		m.queueProjectReconciliation()
 	}
-	m.reload()
+	if !m.mutationInFlight {
+		m.reload()
+	}
 	lines = append(successes, lines...)
 	m.modal = newResultModal("Link Results", lines)
 }
@@ -624,11 +670,7 @@ func (m *Model) applyUsageTargetsWithResults(targets []repoUsageTarget, deleteUn
 			continue
 		}
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
-		if target.Scope == config.ScopeProject {
-			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
-				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
-			}
-		}
+		m.mutationProjectTouched = m.mutationProjectTouched || target.Scope == config.ScopeProject
 	}
 	m.finishUsageTargets(successes, failures)
 }
@@ -646,17 +688,15 @@ func (m *Model) applyResolvedUsageConflict(target repoUsageTarget, remaining []r
 		failures = append(failures, "x "+target.Path+": "+err.Error())
 	} else {
 		successes = append(successes, "✓ "+result.Name+"  "+result.Status)
-		if target.Scope == config.ScopeProject {
-			if _, err := manifest.ReconcileLocal(m.cfg); err != nil {
-				failures = append(failures, "x skill mutation succeeded but local manifest reconciliation failed: "+err.Error())
-			}
-		}
+		m.mutationProjectTouched = m.mutationProjectTouched || target.Scope == config.ScopeProject
 	}
 	m.applyUsageTargetsWithResults(remaining, deleteUnmanaged, actions.ConflictResolutionAsk, successes, failures)
 }
 
 func (m *Model) finishUsageTargets(successes, failures []string) {
-	m.reload()
+	if !m.queueProjectReconciliation() {
+		m.reload()
+	}
 	if len(failures) == 0 {
 		m.modal = nil
 		m.status = unlinkSuccessStatus(successes)
@@ -751,19 +791,28 @@ func (m *Model) applyRepoDeleteNames(names []string) {
 	for _, name := range names {
 		lines = append(lines, m.applySingleRepoDelete(name)...)
 	}
-	m.reload()
+	if !m.mutationInFlight {
+		m.reload()
+	}
 	m.modal = newResultModal("Delete Results", lines)
 }
 
 func (m *Model) applySingleRepoDelete(name string) []string {
 	var lines []string
 	hasUnlinkError := false
+	projectUnlinked := false
+	defer func() {
+		m.mutationProjectTouched = m.mutationProjectTouched || projectUnlinked
+		m.queueProjectReconciliation()
+	}()
 	for _, target := range m.repoUsageTargets(name) {
 		_, err := actions.Unlink(m.cfg, actions.UnlinkRequest{Name: target.Name, Scope: target.Scope, Target: target.Target, Confirmed: true})
 		if err != nil {
 			hasUnlinkError = true
 			lines = append(lines, "x unlink "+target.Path+": "+err.Error())
+			continue
 		}
+		projectUnlinked = projectUnlinked || target.Scope == config.ScopeProject
 	}
 	if hasUnlinkError {
 		lines = append(lines, "x delete "+name+": skipped because unlink failed")

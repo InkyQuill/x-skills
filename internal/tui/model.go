@@ -44,13 +44,17 @@ type Model struct {
 	status string
 	err    error
 
-	reloadToken         int
-	reloadInFlight      bool
-	reloadPending       tea.Cmd
-	reloadReportsStatus bool
-	updating            bool
-	doctorFixToken      int
-	doctorFixInFlight   bool
+	reloadToken            int
+	reloadInFlight         bool
+	reloadPending          tea.Cmd
+	reloadReportsStatus    bool
+	updating               bool
+	doctorFixToken         int
+	doctorFixInFlight      bool
+	mutationToken          uint64
+	mutationInFlight       bool
+	mutationProjectTouched bool
+	pendingMutationCmd     tea.Cmd
 }
 
 type reloadResultMsg struct {
@@ -162,6 +166,8 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, m.applyInstallUseResult(msg)
 	case doctorFixResultMsg:
 		return m, m.applyDoctorFixResult(msg)
+	case mutationReconcileMsg:
+		return m, m.applyMutationReconcileResult(msg)
 	case reloadResultMsg:
 		if msg.token != m.reloadToken {
 			return m, nil
@@ -195,6 +201,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.modal != nil {
 		closedModal := m.modal
 		modalClosed, cmd := m.modal.Update(msg, &m)
+		if m.pendingMutationCmd != nil {
+			cmd = tea.Batch(cmd, m.pendingMutationCmd)
+			m.pendingMutationCmd = nil
+		}
 		if modalClosed {
 			m.clearPendingInstallUseOnModalClose(closedModal)
 			m.modal = nil

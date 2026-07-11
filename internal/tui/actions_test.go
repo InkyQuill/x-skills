@@ -12,6 +12,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
@@ -974,6 +975,46 @@ func TestRepoDeleteSkipsArchiveDeletionWhenUnlinkFails(t *testing.T) {
 	view := plain(m.modal.View(120, 30, m))
 	if !strings.Contains(view, "skipped because unlink failed") {
 		t.Fatalf("delete result missing skip message:\n%s", view)
+	}
+}
+
+func TestRepoDeleteReconcilesSuccessfulProjectUnlinkWhenLaterUnlinkFails(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	projectPath := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "zen-of-go")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, projectPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.WriteLocal(project, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "zen-of-go", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: "old"}}}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.active = []ActiveGroup{{Name: "zen-of-go", Members: []actions.ActiveSkill{
+		{Name: "zen-of-go", Path: projectPath, Root: roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents}, Status: actions.StatusManaged},
+		{Name: "zen-of-go", Path: filepath.Join(cfg.GlobalAgentsRoot, "missing"), Root: roots.ActiveRoot{Scope: config.ScopeGlobal, Target: config.TargetAgents}, Status: actions.StatusManaged},
+	}}}
+
+	m.applyRepoDelete("zen-of-go")
+	if m.pendingMutationCmd == nil {
+		t.Fatal("reconciliation command = nil after partial project success")
+	}
+	msg := m.pendingMutationCmd()
+	if _, cmd := m.Update(msg); cmd != nil {
+		t.Fatal("unexpected follow-up command")
+	}
+	got, err := manifest.LoadLocal(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skills) != 0 {
+		t.Fatalf("local skills = %#v, want reconciled empty overlay", got.Skills)
+	}
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("archive removed despite later unlink failure: %v", err)
 	}
 }
 

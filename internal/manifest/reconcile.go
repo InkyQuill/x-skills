@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -13,12 +14,16 @@ import (
 	"github.com/InkyQuill/x-skills/internal/remote"
 )
 
+var reconcileMu sync.Mutex
+
 type Result struct {
 	Changed bool
 	Skills  []Skill
 }
 
 func ReconcileLocal(cfg config.Config) (Result, error) {
+	reconcileMu.Lock()
+	defer reconcileMu.Unlock()
 	old, err := LoadLocal(cfg.ProjectRoot)
 	if err != nil {
 		return Result{}, err
@@ -34,6 +39,9 @@ func ReconcileLocal(cfg config.Config) (Result, error) {
 
 	retained := make(map[string]Skill)
 	for _, skill := range old.Skills {
+		if _, excluded := recommendedNames[skill.Name]; excluded {
+			continue
+		}
 		if skill.Source.Type != SourceArchive {
 			continue
 		}
@@ -60,6 +68,9 @@ func ReconcileLocal(cfg config.Config) (Result, error) {
 		skill, err := reconciledSkill(cfg, name, occurrence.Path, occurrence.Status)
 		if err != nil {
 			return Result{}, err
+		}
+		if previous, exists := observed[name]; exists && !sameIdentity(previous, skill) {
+			return Result{}, fmt.Errorf("project skill %q has divergent identities across Skills Folders; reconcile the active copies before retrying", name)
 		}
 		observed[name] = skill
 	}

@@ -19,7 +19,7 @@ func TestAssess(t *testing.T) {
 		wantState    compatibility.State
 		wantConf     compatibility.Confidence
 		wantAgents   []string
-		wantReason   bool
+		wantReasons  []string
 		wantExplicit bool
 	}{
 		{
@@ -65,21 +65,21 @@ func TestAssess(t *testing.T) {
 			wantExplicit: true,
 		},
 		{
-			name:       "ordinary agent mention remains unknown",
-			skillDir:   "testdata/mentions-claude",
-			consumers:  []string{"codex"},
-			wantState:  compatibility.StateUnknown,
-			wantConf:   compatibility.ConfidenceLow,
-			wantReason: true,
+			name:        "ordinary agent mention remains unknown",
+			skillDir:    "testdata/mentions-claude",
+			consumers:   []string{"codex"},
+			wantState:   compatibility.StateUnknown,
+			wantConf:    compatibility.ConfidenceLow,
+			wantReasons: []string{"mentions an agent without exclusive executable semantics"},
 		},
 		{
-			name:       "strong claude-only instruction is incompatible with codex",
-			skillDir:   "testdata/claude-only",
-			consumers:  []string{"codex"},
-			wantState:  compatibility.StateIncompatible,
-			wantConf:   compatibility.ConfidenceHigh,
-			wantAgents: []string{"claude"},
-			wantReason: true,
+			name:        "strong claude-only instruction is incompatible with codex",
+			skillDir:    "testdata/claude-only",
+			consumers:   []string{"codex"},
+			wantState:   compatibility.StateIncompatible,
+			wantConf:    compatibility.ConfidenceHigh,
+			wantAgents:  []string{"claude"},
+			wantReasons: []string{"uses the Claude-only $CLAUDE_PROJECT_DIR runtime variable"},
 		},
 	}
 
@@ -96,8 +96,8 @@ func TestAssess(t *testing.T) {
 			if !reflect.DeepEqual(got.Agents, tt.wantAgents) {
 				t.Fatalf("agents = %#v, want %#v", got.Agents, tt.wantAgents)
 			}
-			if (len(got.Reasons) > 0) != tt.wantReason {
-				t.Fatalf("reasons = %#v, want present=%v", got.Reasons, tt.wantReason)
+			if !reflect.DeepEqual(got.Reasons, tt.wantReasons) {
+				t.Fatalf("reasons = %#v, want %#v", got.Reasons, tt.wantReasons)
 			}
 		})
 	}

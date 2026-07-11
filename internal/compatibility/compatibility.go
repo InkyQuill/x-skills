@@ -2,6 +2,7 @@ package compatibility
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/remote"
 )
@@ -39,6 +40,9 @@ func Assess(
 	if explicit != nil {
 		return assessExplicit(explicit, consumers), nil
 	}
+	if len(normalizeAgentIDs(consumers)) == 0 {
+		return Assessment{State: StateUnknown, Confidence: ConfidenceUnknown}, nil
+	}
 
 	inferred, err := infer(skillDir)
 	if err != nil {
@@ -65,7 +69,7 @@ func assessExplicit(profile *remote.CompatibilityProfile, consumers []string) As
 		Explicit:   true,
 	}
 	if profile.Agnostic {
-		if len(consumers) > 0 {
+		if len(normalizeAgentIDs(consumers)) > 0 {
 			assessment.State = StateCompatible
 		}
 		return assessment
@@ -78,14 +82,15 @@ func assessExplicit(profile *remote.CompatibilityProfile, consumers []string) As
 }
 
 func assessAgents(agents, consumers []string) Assessment {
-	knownAgents := sortedUnique(agents)
+	knownAgents := normalizeAgentIDs(agents)
+	knownConsumers := normalizeAgentIDs(consumers)
 	assessment := Assessment{State: StateUnknown, Agents: knownAgents}
-	if len(consumers) == 0 {
+	if len(knownAgents) == 0 || len(knownConsumers) == 0 {
 		return assessment
 	}
 
 	matches := 0
-	for _, consumer := range sortedUnique(consumers) {
+	for _, consumer := range knownConsumers {
 		if slices.Contains(knownAgents, consumer) {
 			matches++
 		}
@@ -93,7 +98,7 @@ func assessAgents(agents, consumers []string) Assessment {
 	switch {
 	case matches == 0:
 		assessment.State = StateIncompatible
-	case matches == len(sortedUnique(consumers)):
+	case matches == len(knownConsumers):
 		assessment.State = StateCompatible
 	default:
 		assessment.State = StatePartial
@@ -101,11 +106,20 @@ func assessAgents(agents, consumers []string) Assessment {
 	return assessment
 }
 
-func sortedUnique(values []string) []string {
+func normalizeAgentIDs(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
-	result := slices.Clone(values)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
 	slices.Sort(result)
 	return slices.Compact(result)
 }

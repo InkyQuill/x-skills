@@ -1,20 +1,28 @@
 package compatibility
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 )
 
 var (
-	agentMentionPattern = regexp.MustCompile(`(?i)\b(claude|codex|opencode|crush|pi)\b`)
-	claudeToolPattern   = regexp.MustCompile(`(?i)\b(?:must|always|required to)\s+(?:use|call|invoke)\s+(?:the\s+)?(?:AskUserQuestion|EnterPlanMode|ExitPlanMode|Task tool)\b`)
-	hookKeyPattern      = regexp.MustCompile(`(?im)^\s*hooks?\s*:`)
+	agentMentionPattern   = regexp.MustCompile(`(?i)\b(claude|codex|opencode|crush|pi)\b`)
+	claudeVariablePattern = regexp.MustCompile(`(?i)\b(?:read|use|set|export|run|open|resolve|inspect|load|write|change|cd)\b[^\n]*\$CLAUDE_PROJECT_DIR\b`)
+	claudeToolPattern     = regexp.MustCompile("(?i)\\b(?:must(?:\\s+\\w+){0,3}|always|required\\s*:?)\\s+(?:use|call|invoke)\\s+(?:the\\s+)?`?(?:AskUserQuestion|EnterPlanMode|ExitPlanMode|Task tool)`?\\b")
+	hookKeyPattern        = regexp.MustCompile(`(?i)^\s*hooks?\s*:`)
+	negationPattern       = regexp.MustCompile(`(?i)\b(?:do not|don't|never|avoid|must not|not required)\b`)
+	nonExecutablePattern  = regexp.MustCompile(`(?i)\b(?:example|counterexample|comparison|migration note)\s*:`)
+	quotedTextPattern     = regexp.MustCompile(`"[^"]*"|'[^']*'`)
+)
+
+const (
+	variableReason = "uses the Claude-only $CLAUDE_PROJECT_DIR runtime variable"
+	toolReason     = "mandates a Claude-only tool"
+	hookReason     = "declares Claude-only hook configuration"
+	mentionReason  = "mentions an agent without exclusive executable semantics"
 )
 
 type inference struct {
@@ -29,79 +37,100 @@ func infer(skillDir string) (inference, error) {
 		return inference{}, err
 	}
 
-	result := inference{Confidence: ConfidenceUnknown}
+	var variableSignal bool
+	var toolSignal bool
+	var hookSignal bool
+	var mentionSignal bool
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return inference{}, fmt.Errorf("read compatibility input %s: %w", path, err)
 		}
 		content := string(data)
-		if strings.Contains(content, "$CLAUDE_PROJECT_DIR") {
-			result.Confidence = ConfidenceHigh
-			result.Agents = []string{"claude"}
-			result.Reasons = append(result.Reasons, "uses the Claude-only $CLAUDE_PROJECT_DIR runtime variable")
+		for _, line := range executableLines(content) {
+			variableSignal = variableSignal || claudeVariablePattern.MatchString(line)
+			toolSignal = toolSignal || claudeToolPattern.MatchString(line)
+			if isClaudeHookMetadata(skillDir, path) {
+				hookSignal = hookSignal || hookKeyPattern.MatchString(line)
+			}
 		}
-		if claudeToolPattern.MatchString(content) {
-			result.Confidence = ConfidenceHigh
-			result.Agents = []string{"claude"}
-			result.Reasons = append(result.Reasons, "mandates a Claude-only tool")
-		}
-		if isClaudeHookMetadata(skillDir, path, content) {
-			result.Confidence = ConfidenceHigh
-			result.Agents = []string{"claude"}
-			result.Reasons = append(result.Reasons, "declares Claude-only hook configuration")
-		}
-		if result.Confidence != ConfidenceHigh && agentMentionPattern.MatchString(content) {
-			result.Confidence = ConfidenceLow
-			result.Reasons = append(result.Reasons, "mentions an agent without exclusive executable semantics")
-		}
+		mentionSignal = mentionSignal || agentMentionPattern.MatchString(content)
 	}
-	result.Agents = sortedUnique(result.Agents)
-	result.Reasons = unique(result.Reasons)
+
+	result := inference{Confidence: ConfidenceUnknown}
+	if variableSignal || toolSignal || hookSignal {
+		result.Confidence = ConfidenceHigh
+		result.Agents = []string{"claude"}
+		if variableSignal {
+			result.Reasons = append(result.Reasons, variableReason)
+		}
+		if toolSignal {
+			result.Reasons = append(result.Reasons, toolReason)
+		}
+		if hookSignal {
+			result.Reasons = append(result.Reasons, hookReason)
+		}
+	} else if mentionSignal {
+		result.Confidence = ConfidenceLow
+		result.Reasons = []string{mentionReason}
+	}
 	return result, nil
 }
 
 func inferenceFiles(skillDir string) ([]string, error) {
 	files := []string{filepath.Join(skillDir, "SKILL.md")}
 	agentsDir := filepath.Join(skillDir, "agents")
-	err := filepath.WalkDir(agentsDir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	dirInfo, err := os.Lstat(agentsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return files, nil
 		}
-		if entry.IsDir() {
-			return nil
-		}
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".json", ".yaml", ".yml":
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("scan agent metadata: %w", err)
+		return nil, fmt.Errorf("inspect agent metadata directory: %w", err)
 	}
-	slices.Sort(files)
+	if !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
+		return files, nil
+	}
+	for _, name := range []string{"claude.yaml", "openai.yaml"} {
+		path := filepath.Join(agentsDir, name)
+		info, err := os.Lstat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("inspect agent metadata %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		files = append(files, path)
+	}
 	return files, nil
 }
 
-func isClaudeHookMetadata(skillDir, path, content string) bool {
+func isClaudeHookMetadata(skillDir, path string) bool {
 	relative, err := filepath.Rel(filepath.Join(skillDir, "agents"), path)
 	if err != nil || strings.HasPrefix(relative, "..") {
 		return false
 	}
-	name := strings.ToLower(filepath.ToSlash(relative))
-	return strings.Contains(name, "claude") && hookKeyPattern.MatchString(content)
+	return strings.EqualFold(filepath.ToSlash(relative), "claude.yaml")
 }
 
-func unique(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if !slices.Contains(result, value) {
-			result = append(result, value)
+func executableLines(content string) []string {
+	lines := make([]string, 0)
+	inFence := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
 		}
+		if inFence || trimmed == "" || strings.HasPrefix(trimmed, "#") ||
+			strings.HasPrefix(trimmed, ">") || strings.HasPrefix(trimmed, "|") ||
+			strings.HasPrefix(trimmed, `"`) || strings.Contains(trimmed, "://") ||
+			nonExecutablePattern.MatchString(trimmed) || negationPattern.MatchString(trimmed) {
+			continue
+		}
+		lines = append(lines, quotedTextPattern.ReplaceAllString(trimmed, ""))
 	}
-	return result
+	return lines
 }

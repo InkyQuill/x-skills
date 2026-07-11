@@ -119,6 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		m.cleanupInstallCheckoutCache()
 		return m, tea.Quit
 	}
 
@@ -152,6 +153,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q":
+		m.cleanupInstallCheckoutCache()
 		return m, tea.Quit
 	case keyActive:
 		m.setView(ViewActive)

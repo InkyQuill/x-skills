@@ -47,6 +47,7 @@ type installState struct {
 	useInFlightToken     int
 	searchClient         remote.SearchClient
 	checkouts            *remote.CheckoutCache
+	checkoutCacheRoot    string
 	testCloneURL         string
 	pendingUse           *pendingInstallUseIntent
 	pendingArchiveBatch  *installArchiveBatchContinuation
@@ -1464,8 +1465,17 @@ func (m *Model) ensureInstallCheckoutCache() *remote.CheckoutCache {
 			return nil
 		}
 		m.install.checkouts = remote.NewCheckoutCache(root)
+		m.install.checkoutCacheRoot = root
 	}
 	return m.install.checkouts
+}
+
+func (m *Model) cleanupInstallCheckoutCache() {
+	if m.install.checkoutCacheRoot != "" {
+		_ = os.RemoveAll(m.install.checkoutCacheRoot)
+		m.install.checkoutCacheRoot = ""
+		m.install.checkouts = nil
+	}
 }
 
 func (m Model) gitSourceForInstall(result remote.SearchResult) (remote.GitSource, error) {

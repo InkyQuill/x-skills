@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -48,7 +49,7 @@ func TestInspectorRendersRichValue(t *testing.T) {
 		Rows: []inspectorRow{{
 			Key: "Usages",
 			Render: func(width int) string {
-				return truncate(
+				return tuiui.TruncateANSI(
 					installSourceStyle.Render("vercel-labs/skills")+" "+
 						installCountStyle.Render("812 installs"),
 					width,
@@ -108,7 +109,7 @@ func TestInspectorPadsUnicodeKeysByDisplayWidth(t *testing.T) {
 			{
 				Key: combiningKey,
 				Render: func(width int) string {
-					return installSourceStyle.Render(truncate("styled値値値", width))
+					return installSourceStyle.Render(tuiui.TruncateANSI("styled値値値", width))
 				},
 			},
 		},
@@ -121,7 +122,7 @@ func TestInspectorPadsUnicodeKeysByDisplayWidth(t *testing.T) {
 		t.Fatalf("line count = %d, want 4:\n%s", len(lines), plain(got))
 	}
 	for _, line := range lines[2:] {
-		keyColumn := truncate(line, inspectorKeyWidth)
+		keyColumn := tuiui.TruncateANSI(line, inspectorKeyWidth)
 		if gotWidth := lipgloss.Width(keyColumn); gotWidth != inspectorKeyWidth {
 			t.Fatalf("key column width = %d, want %d for %q:\n%s", gotWidth, inspectorKeyWidth, line, plain(got))
 		}
@@ -144,7 +145,7 @@ func TestInspectorTruncatesToWidth(t *testing.T) {
 			{
 				Key: "Rich",
 				Render: func(width int) string {
-					return installSourceStyle.Render(truncate(richValue, width))
+					return installSourceStyle.Render(tuiui.TruncateANSI(richValue, width))
 				},
 			},
 		},

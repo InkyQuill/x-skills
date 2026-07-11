@@ -316,7 +316,7 @@ func (c migrateConfirmModal) targetRows(width int, m Model) []string {
 	rows := make([]string, 0, len(c.targets)+1)
 	for _, target := range c.targets {
 		chip := rootLabel(target.Root)
-		rows = append(rows, truncate("  "+filepath.Base(target.Path)+"  "+renderRootChip(m.symbols, chip, lipgloss.NoColor{}), width-16))
+		rows = append(rows, tuiui.TruncateANSI("  "+filepath.Base(target.Path)+"  "+renderRootChip(m.symbols, chip, lipgloss.NoColor{}), width-16))
 	}
 	return rows
 }
@@ -588,7 +588,7 @@ func (r repoLinkModal) View(width, height int, m Model) string {
 				cursor = m.symbols.Cursor
 			}
 			line := "  " + cursor + " " + linkChoice(i == r.index, rootLabel(location)+"  "+location.Scope+":"+location.Target)
-			lines = append(lines, truncate(line, width-10))
+			lines = append(lines, tuiui.TruncateANSI(line, width-10))
 		}
 	}
 	lines = append(lines, "", "Will create")

@@ -70,9 +70,9 @@ func (p previewModal) View(width, height int, m Model) string {
 	p.viewport.Width = bodyWidth
 	p.viewport.Height = bodyHeight
 	skillFile := filepath.Base(filepath.Dir(p.path)) + "/" + filepath.Base(p.path)
-	detail := truncate(fmt.Sprintf("%s  |  %s", skillFile, mode), bodyWidth)
+	detail := tuiui.TruncateANSI(fmt.Sprintf("%s  |  %s", skillFile, mode), bodyWidth)
 	lines := []string{
-		accentStyle.Render(truncate(p.title, bodyWidth)),
+		accentStyle.Render(tuiui.TruncateANSI(p.title, bodyWidth)),
 		mutedStyle.Render(detail),
 		strings.Repeat("-", bodyWidth),
 		p.viewport.View(),

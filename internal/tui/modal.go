@@ -62,7 +62,7 @@ func renderConstrainedModal(width, height int, opts constrainedModalOptions) str
 	contentWidth := modalContentWidth(width)
 	maxContentHeight := modalContentHeight(height)
 
-	header := []string{accentStyle.Render(truncate(opts.Title, contentWidth))}
+	header := []string{accentStyle.Render(tuiui.TruncateANSI(opts.Title, contentWidth))}
 	footer := truncateModalLines(opts.Footer, contentWidth)
 	footerHeight := len(footer)
 	if footerHeight > 0 {
@@ -129,7 +129,7 @@ func constrainedModalBodyHeight(height, footerLines int) int {
 func truncateModalLines(lines []string, width int) []string {
 	truncated := make([]string, 0, len(lines))
 	for _, line := range lines {
-		truncated = append(truncated, truncate(line, width))
+		truncated = append(truncated, tuiui.TruncateANSI(line, width))
 	}
 	return truncated
 }

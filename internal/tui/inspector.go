@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -24,7 +25,7 @@ type inspectorSection struct {
 
 func textInspectorValue(value string) inspectorValue {
 	return func(width int) string {
-		return inspectorValueStyle.Render(truncate(value, width))
+		return inspectorValueStyle.Render(tuiui.TruncateANSI(value, width))
 	}
 }
 
@@ -61,7 +62,7 @@ func renderInspectorDocument(title string, sections []inspectorSection, width, h
 		lines = lines[:height]
 	}
 	for i, line := range lines {
-		lines[i] = truncate(line, width)
+		lines[i] = tuiui.TruncateANSI(line, width)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -98,8 +99,8 @@ func renderInspectorRow(row inspectorRow, width int) []string {
 			key = row.Key
 		}
 		key = padInspectorKey(key, keyWidth)
-		valueLine = truncate(valueLine, valueWidth)
-		lines = append(lines, truncate(inspectorKeyStyle.Render(key)+valueLine, width))
+		valueLine = tuiui.TruncateANSI(valueLine, valueWidth)
+		lines = append(lines, tuiui.TruncateANSI(inspectorKeyStyle.Render(key)+valueLine, width))
 	}
 	return lines
 }
@@ -109,9 +110,9 @@ func renderInspectorBlockRow(row inspectorRow, width int) []string {
 	if render == nil {
 		render = blockInspectorValue(row.Value)
 	}
-	lines := []string{truncate(inspectorKeyStyle.Render(row.Key), width)}
+	lines := []string{tuiui.TruncateANSI(inspectorKeyStyle.Render(row.Key), width)}
 	for _, valueLine := range strings.Split(render(width), "\n") {
-		lines = append(lines, truncate(valueLine, width))
+		lines = append(lines, tuiui.TruncateANSI(valueLine, width))
 	}
 	return lines
 }
@@ -165,7 +166,7 @@ func inspectorWrapCut(value string, width int) int {
 }
 
 func padInspectorKey(key string, width int) string {
-	key = truncate(key, width)
+	key = tuiui.TruncateANSI(key, width)
 	padding := width - lipgloss.Width(key)
 	if padding <= 0 {
 		return key

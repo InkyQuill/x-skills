@@ -51,7 +51,7 @@ func renderHeader(m Model, width int) string {
 		tabLabel(false, "S", "Sync"),
 	}
 	title := titleStyle.Render(m.pulseDiamond()+" x-skills") + "  " + strings.Join(tabs, " ")
-	return truncate(title, width)
+	return tuiui.TruncateANSI(title, width)
 }
 
 func renderBody(m Model, width, height int) string {
@@ -134,7 +134,7 @@ func activeInspectorSections(m Model) []inspectorSection {
 		{
 			Key: "Repo/Status",
 			Render: func(width int) string {
-				return truncate(renderStatusChip(m, group.Status), width)
+				return tuiui.TruncateANSI(renderStatusChip(m, group.Status), width)
 			},
 		},
 		{Key: "Description", Value: group.Description, Block: true},
@@ -143,7 +143,7 @@ func activeInspectorSections(m Model) []inspectorSection {
 		rows = append(rows, inspectorRow{
 			Key: "Locations",
 			Render: func(width int) string {
-				return truncate(renderRootChips(m.symbols, group.Chips, lipgloss.NoColor{}), width)
+				return tuiui.TruncateANSI(renderRootChips(m.symbols, group.Chips, lipgloss.NoColor{}), width)
 			},
 		})
 	}
@@ -170,7 +170,7 @@ func repoInspectorSections(m Model) []inspectorSection {
 		{
 			Key: "Usages",
 			Render: func(width int) string {
-				return truncate(renderRootChips(m.symbols, usages, lipgloss.NoColor{}), width)
+				return tuiui.TruncateANSI(renderRootChips(m.symbols, usages, lipgloss.NoColor{}), width)
 			},
 		},
 	}
@@ -251,7 +251,7 @@ func appendRichTextInspectorRow(rows []inspectorRow, key, value string, style li
 	return append(rows, inspectorRow{
 		Key: key,
 		Render: func(width int) string {
-			return style.Render(truncate(value, width))
+			return style.Render(tuiui.TruncateANSI(value, width))
 		},
 	})
 }
@@ -270,7 +270,7 @@ func appendInstallArchiveInspectorRow(rows []inspectorRow, state string) []inspe
 	return append(rows, inspectorRow{
 		Key: "Archive",
 		Render: func(width int) string {
-			return truncate(renderInstallArchiveState(state), width)
+			return tuiui.TruncateANSI(renderInstallArchiveState(state), width)
 		},
 	})
 }
@@ -282,7 +282,7 @@ func appendInstallAuditInspectorRow(rows []inspectorRow, audit string) []inspect
 	return append(rows, inspectorRow{
 		Key: "Audit",
 		Render: func(width int) string {
-			return truncate(renderInstallAuditState(audit), width)
+			return tuiui.TruncateANSI(renderInstallAuditState(audit), width)
 		},
 	})
 }
@@ -294,13 +294,13 @@ func renderInstallArchiveState(state string) string {
 func renderInstallArchiveStateWithBackground(state string, background lipgloss.TerminalColor) string {
 	switch state {
 	case remote.ArchiveStateArchived:
-		return renderWithOptionalBackground(okStyle, state, background)
+		return tuiui.RenderWithBackground(okStyle, background, state)
 	case remote.ArchiveStateUpdateAvailable:
-		return renderWithOptionalBackground(incomingStyle, state, background)
+		return tuiui.RenderWithBackground(incomingStyle, background, state)
 	case remote.ArchiveStateNameConflict:
-		return renderWithOptionalBackground(dangerStyle, state, background)
+		return tuiui.RenderWithBackground(dangerStyle, background, state)
 	default:
-		return renderWithOptionalBackground(mutedStyle, state, background)
+		return tuiui.RenderWithBackground(mutedStyle, background, state)
 	}
 }
 
@@ -311,13 +311,13 @@ func renderInstallAuditState(audit string) string {
 func renderInstallAuditStateWithBackground(audit string, background lipgloss.TerminalColor) string {
 	switch {
 	case strings.Contains(audit, "risky"):
-		return renderWithOptionalBackground(dangerStyle, audit, background)
+		return tuiui.RenderWithBackground(dangerStyle, background, audit)
 	case strings.Contains(audit, "warn"):
-		return renderWithOptionalBackground(archiveStyle, audit, background)
+		return tuiui.RenderWithBackground(archiveStyle, background, audit)
 	case strings.Contains(audit, "safe"):
-		return renderWithOptionalBackground(okStyle, audit, background)
+		return tuiui.RenderWithBackground(okStyle, background, audit)
 	default:
-		return renderWithOptionalBackground(inspectorValueStyle, audit, background)
+		return tuiui.RenderWithBackground(inspectorValueStyle, background, audit)
 	}
 }
 
@@ -457,7 +457,7 @@ func renderInstallRows(m Model, width int) []string {
 				text: "  ",
 			}, rowSegment{
 				render: func(background lipgloss.TerminalColor) string {
-					return renderWithOptionalBackground(installSourceStyle, source, background)
+					return tuiui.RenderWithBackground(installSourceStyle, background, source)
 				},
 			})
 		}
@@ -484,7 +484,7 @@ func renderInstallRows(m Model, width int) []string {
 				text: "  ",
 			}, rowSegment{
 				render: func(background lipgloss.TerminalColor) string {
-					return renderWithOptionalBackground(mutedStyle, "check failed", background)
+					return tuiui.RenderWithBackground(mutedStyle, background, "check failed")
 				},
 			})
 		}
@@ -504,7 +504,7 @@ func renderInstallRows(m Model, width int) []string {
 				text: "  ",
 			}, rowSegment{
 				render: func(background lipgloss.TerminalColor) string {
-					return renderWithOptionalBackground(mutedStyle, description, background)
+					return tuiui.RenderWithBackground(mutedStyle, background, description)
 				},
 			})
 		}
@@ -542,18 +542,7 @@ func renderInstallCountWithBackground(count int, background lipgloss.TerminalCol
 	if count <= 0 {
 		return ""
 	}
-	return renderWithOptionalBackground(installCountStyle, fmt.Sprintf("%d installs", count), background)
-}
-
-func renderWithOptionalBackground(
-	style lipgloss.Style,
-	text string,
-	background lipgloss.TerminalColor,
-) string {
-	if _, noColor := background.(lipgloss.NoColor); noColor {
-		return style.Render(text)
-	}
-	return style.Background(background).Render(text)
+	return tuiui.RenderWithBackground(installCountStyle, background, fmt.Sprintf("%d installs", count))
 }
 
 func renderRootChips(symbols symbols, chips []string, background lipgloss.TerminalColor) string {
@@ -588,7 +577,7 @@ type rowSegment struct {
 
 func selectableRow(segments []rowSegment, focused bool, selected bool, width int) string {
 	if !focused && !selected {
-		return truncate(joinRowSegments(segments, lipgloss.NoColor{}), width)
+		return tuiui.TruncateANSI(joinRowSegments(segments, lipgloss.NoColor{}), width)
 	}
 
 	rowStyle := selectedBg
@@ -610,7 +599,7 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 			text = ansi.Strip(text)
 		}
 		if lipgloss.Width(text) > remaining {
-			text = truncate(text, remaining)
+			text = tuiui.TruncateANSI(text, remaining)
 		}
 		if segment.render != nil {
 			rendered.WriteString(text)
@@ -678,7 +667,7 @@ func renderStatus(m Model, width int) string {
 	}
 	lines = append(lines, mutedStyle.Render(commandPalette(m)))
 	for i, line := range lines {
-		lines[i] = truncate(line, width)
+		lines[i] = tuiui.TruncateANSI(line, width)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -748,7 +737,7 @@ func normalizeViewHeight(view string, width, height int) string {
 		lines = append(lines, "")
 	}
 	for i, line := range lines {
-		lines[i] = truncate(line, width)
+		lines[i] = tuiui.TruncateANSI(line, width)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -781,7 +770,7 @@ func renderOverlay(base, layer string, width, height int) string {
 			right = 0
 		}
 		lines[row] = strings.Repeat(" ", left) + line + strings.Repeat(" ", right)
-		lines[row] = truncate(lines[row], width)
+		lines[row] = tuiui.TruncateANSI(lines[row], width)
 	}
 	return strings.Join(lines, "\n")
 }

@@ -3,8 +3,8 @@ package tui
 import (
 	"os"
 
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -106,22 +106,12 @@ func renderStatusChip(m Model, status string) string {
 func renderStatusDotWithBackground(m Model, status string, background lipgloss.TerminalColor) string {
 	switch status {
 	case "managed":
-		return renderWithOptionalBackground(managedStyle, m.symbols.Managed, background)
+		return tuiui.RenderWithBackground(managedStyle, background, m.symbols.Managed)
 	case "unmanaged":
-		return renderWithOptionalBackground(unmanaged, m.symbols.Unmanaged, background)
+		return tuiui.RenderWithBackground(unmanaged, background, m.symbols.Unmanaged)
 	case "broken":
-		return renderWithOptionalBackground(dangerStyle, m.symbols.Broken, background)
+		return tuiui.RenderWithBackground(dangerStyle, background, m.symbols.Broken)
 	default:
-		return renderWithOptionalBackground(mutedStyle, m.symbols.Unmanaged, background)
+		return tuiui.RenderWithBackground(mutedStyle, background, m.symbols.Unmanaged)
 	}
-}
-
-func truncate(value string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if lipgloss.Width(value) <= width {
-		return value
-	}
-	return ansi.Truncate(value, width, "...")
 }

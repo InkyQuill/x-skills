@@ -319,7 +319,7 @@ func acknowledgeIncompatibleSelection(cmd *cobra.Command, groups []syncer.NameGr
 			}
 			printCompatibilityWarning(cmd.OutOrStdout(), candidate)
 			if !interactive {
-				return false, fmt.Errorf("skill %q is incompatible with the selected destinations; choose it from an interactive terminal after reviewing the warning", candidate.Name)
+				continue
 			}
 			confirmed, err := runSyncCompatibilityPrompt(cmd.InOrStdin(), cmd.OutOrStdout(), candidate)
 			if err != nil {

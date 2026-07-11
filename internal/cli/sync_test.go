@@ -131,14 +131,30 @@ func TestSyncDivergentChecklistDefaultsReflectVariantCompatibility(t *testing.T)
 	}
 }
 
-func TestSyncExplicitIncompatibleSkillRequiresInteractiveAcknowledgement(t *testing.T) {
+func TestSyncExplicitIncompatibleSkillWarnsAndYesConfirmsNonTTY(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only", "Must use $CLAUDE_PROJECT_DIR.")
 
-	err := Execute([]string{"--home", home, "--project-root", project, "-y", "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "incompatible") || !strings.Contains(err.Error(), "interactive terminal") {
-		t.Fatalf("non-TTY incompatible error = %v", err)
+	var nonTTYOut bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &nonTTYOut, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("non-TTY incompatible sync: %v", err)
+	}
+	if !strings.Contains(nonTTYOut.String(), "incompatible") || !strings.Contains(nonTTYOut.String(), "$CLAUDE_PROJECT_DIR") {
+		t.Fatalf("non-TTY warning output = %q", nonTTYOut.String())
+	}
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "claude-only")
+	if info, err := os.Lstat(active); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("confirmed incompatible skill is not linked: info=%v err=%v", info, err)
+	}
+
+	home, project = t.TempDir(), t.TempDir()
+	cfg = config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "claude-only", "Must use $CLAUDE_PROJECT_DIR.")
+	err = Execute([]string{"--home", home, "--project-root", project, "sync", "--at", ".Ag", "--skill", "claude-only"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "requires confirmation; rerun with -y") {
+		t.Fatalf("unconfirmed incompatible error = %v", err)
 	}
 
 	previousTTY := syncInputIsTerminal

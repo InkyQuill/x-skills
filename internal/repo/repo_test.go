@@ -137,14 +137,15 @@ func TestListRepoSkillsIncludesSourceMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := remote.SourceMetadata{
-		SourceType:   remote.SourceTypeGitHub,
-		Owner:        "vercel-labs",
-		Repo:         "skills",
-		CloneURL:     "https://github.com/vercel-labs/skills.git",
-		Ref:          "main",
-		Commit:       "abc123",
-		SkillPath:    "skills/svelte-coder",
-		UpstreamName: "svelte-coder",
+		SchemaVersion: 2,
+		SourceType:    remote.SourceTypeGitHub,
+		Owner:         "vercel-labs",
+		Repo:          "skills",
+		CloneURL:      "https://github.com/vercel-labs/skills.git",
+		Ref:           "main",
+		Commit:        "abc123",
+		SkillPath:     "skills/svelte-coder",
+		UpstreamName:  "svelte-coder",
 	}
 	if err := remote.WriteSourceMetadata(skill, want); err != nil {
 		t.Fatal(err)

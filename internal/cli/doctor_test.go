@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,70 @@ import (
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
 )
+
+func TestDoctorReportsGitHygieneAndOnlyFixesGitignore(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	runDoctorGit(t, project, "init", "--quiet")
+	runDoctorGit(t, project, "config", "user.name", "Test User")
+	runDoctorGit(t, project, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".x-skills.local.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skill := filepath.Join(project, ".agents", "skills", "tracked", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("---\nname: tracked\ndescription: test\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDoctorGit(t, project, "add", "--", ".x-skills.local.yaml", ".agents/skills/tracked/SKILL.md")
+
+	var out bytes.Buffer
+	if err := Execute([]string{"--home", home, "--project-root", project, "doctor"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"git add -- .x-skills.yaml",
+		"git rm --cached -- .x-skills.local.yaml",
+		"git rm -r --cached -- .agents/skills",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, out.String())
+		}
+	}
+
+	out.Reset()
+	if err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"run: git add -- .x-skills.yaml",
+		"git rm --cached -- .x-skills.local.yaml",
+		"git rm -r --cached -- .agents/skills",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("doctor fix output missing %q:\n%s", want, out.String())
+		}
+	}
+	tracked := runDoctorGit(t, project, "ls-files")
+	if !strings.Contains(tracked, ".x-skills.local.yaml") || !strings.Contains(tracked, ".agents/skills/tracked/SKILL.md") {
+		t.Fatalf("doctor changed Git index:\n%s", tracked)
+	}
+}
+
+func runDoctorGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 func TestDoctorFixBuiltInsNonInteractiveDoesNotGuessDestination(t *testing.T) {
 	home := t.TempDir()

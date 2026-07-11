@@ -176,6 +176,10 @@ func filterDoctorIssuesByLocations(issues []doctor.Issue, locations []roots.Acti
 	allowed := pathPrefixSet(locations)
 	filtered := make([]doctor.Issue, 0, len(issues))
 	for _, issue := range issues {
+		if issue.Kind == doctor.KindRecommendedManifestUntracked || issue.Kind == doctor.KindLocalManifestTracked || issue.Kind == doctor.KindSkillsFolderTracked {
+			filtered = append(filtered, issue)
+			continue
+		}
 		for prefix := range allowed {
 			if issue.Path == prefix || strings.HasPrefix(issue.Path, prefix+string(filepath.Separator)) {
 				filtered = append(filtered, issue)

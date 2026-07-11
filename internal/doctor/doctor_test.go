@@ -1,7 +1,10 @@
 package doctor
 
 import (
+	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +14,186 @@ import (
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out.String())
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	project := t.TempDir()
+	runGit(t, project, "init", "--quiet")
+	runGit(t, project, "config", "user.name", "Test User")
+	runGit(t, project, "config", "user.email", "test@example.com")
+	return project
+}
+
+func issueByKind(t *testing.T, issues []Issue, kind string) Issue {
+	t.Helper()
+	for _, issue := range issues {
+		if issue.Kind == kind {
+			return issue
+		}
+	}
+	t.Fatalf("issue kind %q not found in %#v", kind, issues)
+	return Issue{}
+}
+
+func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
+	t.Run("untracked recommended manifest", func(t *testing.T) {
+		project := initGitRepo(t)
+		if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		issue := issueByKind(t, issues, KindRecommendedManifestUntracked)
+		if issue.SafeFix != "git add -- .x-skills.yaml" {
+			t.Fatalf("SafeFix = %q", issue.SafeFix)
+		}
+	})
+
+	t.Run("tracked local manifest", func(t *testing.T) {
+		project := initGitRepo(t)
+		path := filepath.Join(project, ".x-skills.local.yaml")
+		if err := os.WriteFile(path, []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, project, "add", "--", ".x-skills.local.yaml")
+
+		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		issue := issueByKind(t, issues, KindLocalManifestTracked)
+		if issue.SafeFix != "git rm --cached -- .x-skills.local.yaml" {
+			t.Fatalf("SafeFix = %q", issue.SafeFix)
+		}
+	})
+
+	t.Run("tracked file in project Skills Folder", func(t *testing.T) {
+		project := initGitRepo(t)
+		makeSkill(t, filepath.Join(project, ".agents", "skills"), "tracked-skill")
+		runGit(t, project, "add", "--", ".agents/skills/tracked-skill/SKILL.md")
+
+		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		issue := issueByKind(t, issues, KindSkillsFolderTracked)
+		if issue.SafeFix != "git rm -r --cached -- .agents/skills" {
+			t.Fatalf("SafeFix = %q", issue.SafeFix)
+		}
+	})
+
+	t.Run("outside Git", func(t *testing.T) {
+		project := t.TempDir()
+		if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, issue := range issues {
+			if issue.Kind == KindRecommendedManifestUntracked {
+				t.Fatalf("Git hygiene issue outside repository: %#v", issue)
+			}
+		}
+	})
+
+	t.Run("ignored untracked local files", func(t *testing.T) {
+		project := initGitRepo(t)
+		if err := os.WriteFile(filepath.Join(project, ".gitignore"), []byte(".x-skills.local.yaml\n.agents/\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(project, ".x-skills.local.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		makeSkill(t, filepath.Join(project, ".agents", "skills"), "local-skill")
+
+		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, issue := range issues {
+			if issue.Kind == KindLocalManifestTracked || issue.Kind == KindSkillsFolderTracked {
+				t.Fatalf("untracked local file diagnosed: %#v", issue)
+			}
+		}
+	})
+}
+
+func TestFixGitHygieneOnlyEditsGitignore(t *testing.T) {
+	project := initGitRepo(t)
+	local := filepath.Join(project, ".x-skills.local.yaml")
+	if err := os.WriteFile(local, []byte("version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeSkill(t, filepath.Join(project, ".agents", "skills"), "tracked-skill")
+	runGit(t, project, "add", "--", ".x-skills.local.yaml", ".agents/skills/tracked-skill/SKILL.md")
+
+	cfg := config.Default(project, t.TempDir())
+	issues, err := Diagnose(cfg, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := FixIssues(issues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(project, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".x-skills.local.yaml", ".agents/skills/"} {
+		if !strings.Contains(string(ignore), want) {
+			t.Fatalf(".gitignore missing %q:\n%s", want, ignore)
+		}
+	}
+	tracked := runGit(t, project, "ls-files")
+	for _, want := range []string{".x-skills.local.yaml", ".agents/skills/tracked-skill/SKILL.md"} {
+		if !strings.Contains(tracked, want) {
+			t.Fatalf("Doctor changed Git index; missing %q from:\n%s", want, tracked)
+		}
+	}
+	joined := fmt.Sprint(results)
+	for _, want := range []string{"git rm --cached -- .x-skills.local.yaml", "git rm -r --cached -- .agents/skills"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("results missing %q: %#v", want, results)
+		}
+	}
+}
+
+func TestFixGitHygieneAppendsNormalizedIgnoreEntryOnce(t *testing.T) {
+	project := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(project, ".gitignore"), []byte(".env\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issue := Issue{Kind: KindLocalManifestTracked, Name: ".x-skills.local.yaml", Path: filepath.Join(project, ".x-skills.local.yaml"), ProjectRoot: project, SafeFix: "git rm --cached -- .x-skills.local.yaml"}
+	if _, err := FixIssues([]Issue{issue, issue}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(project, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ".env\n.x-skills.local.yaml\n"
+	if string(got) != want {
+		t.Fatalf(".gitignore = %q, want %q", got, want)
+	}
+}
 
 func makeSkill(t *testing.T, root, name string) string {
 	t.Helper()

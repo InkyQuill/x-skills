@@ -1,9 +1,13 @@
 package doctor
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/builtin"
@@ -18,6 +22,10 @@ const (
 	KindBrokenSymlink   = "broken-symlink"
 	KindMissingBuiltIn  = "missing-builtin"
 	KindInactiveBuiltIn = "inactive-builtin"
+
+	KindRecommendedManifestUntracked = "recommended-manifest-untracked"
+	KindLocalManifestTracked         = "local-manifest-tracked"
+	KindSkillsFolderTracked          = "skills-folder-tracked"
 )
 
 type Filter struct {
@@ -26,13 +34,14 @@ type Filter struct {
 }
 
 type Issue struct {
-	Kind       string
-	Name       string
-	Location   string
-	Path       string
-	Reason     string
-	SafeFix    string
-	RepoTarget string
+	Kind        string
+	Name        string
+	Location    string
+	Path        string
+	Reason      string
+	SafeFix     string
+	RepoTarget  string
+	ProjectRoot string
 }
 
 type FixOptions struct {
@@ -67,6 +76,13 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 		return nil, err
 	}
 	issues = append(issues, builtInIssues...)
+	if filter.Scope == "" || filter.Scope == config.ScopeProject {
+		gitIssues, err := diagnoseGitHygiene(cfg)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, gitIssues...)
+	}
 
 	return issues, nil
 }
@@ -171,18 +187,154 @@ func ValidateBuiltInDestinations(destinations []roots.ActiveRoot) error {
 func FixIssues(issues []Issue) ([]FixResult, error) {
 	var results []FixResult
 	for _, issue := range issues {
-		if issue.Kind != KindBrokenSymlink {
-			continue
+		switch issue.Kind {
+		case KindBrokenSymlink:
+			result, err := fixBrokenSymlink(issue)
+			if err != nil {
+				return results, err
+			}
+			results = append(results, result)
+		case KindRecommendedManifestUntracked:
+			results = append(results, FixResult{Name: issue.Name, Action: "run: " + issue.SafeFix, Path: issue.Path})
+		case KindLocalManifestTracked, KindSkillsFolderTracked:
+			entry, err := gitignoreEntry(issue)
+			if err != nil {
+				return results, err
+			}
+			if err := appendGitignoreEntry(issue.ProjectRoot, entry); err != nil {
+				return results, err
+			}
+			results = append(results, FixResult{Name: issue.Name, Action: "ignored; run: " + issue.SafeFix, Path: issue.Path})
 		}
-
-		result, err := fixBrokenSymlink(issue)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+func diagnoseGitHygiene(cfg config.Config) ([]Issue, error) {
+	inside, err := gitInsideWorkTree(cfg.ProjectRoot)
+	if err != nil || !inside {
+		return nil, err
+	}
+
+	var issues []Issue
+	recommended := filepath.Join(cfg.ProjectRoot, ".x-skills.yaml")
+	if _, err := os.Stat(recommended); err == nil {
+		tracked, trackErr := gitPathTracked(cfg.ProjectRoot, ".x-skills.yaml")
+		if trackErr != nil {
+			return nil, trackErr
+		}
+		if !tracked {
+			issues = append(issues, Issue{Kind: KindRecommendedManifestUntracked, Name: ".x-skills.yaml", Location: "project", Path: recommended, Reason: "recommended manifest exists but is not tracked by Git", SafeFix: "git add -- .x-skills.yaml", ProjectRoot: cfg.ProjectRoot})
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("inspect recommended manifest: %w", err)
+	}
+
+	local := filepath.Join(cfg.ProjectRoot, ".x-skills.local.yaml")
+	tracked, err := gitPathTracked(cfg.ProjectRoot, ".x-skills.local.yaml")
+	if err != nil {
+		return nil, err
+	}
+	if tracked {
+		issues = append(issues, Issue{Kind: KindLocalManifestTracked, Name: ".x-skills.local.yaml", Location: "project", Path: local, Reason: "local manifest is tracked by Git", SafeFix: "git rm --cached -- .x-skills.local.yaml", ProjectRoot: cfg.ProjectRoot})
+	}
+
+	for _, root := range roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject}) {
+		rel, err := filepath.Rel(cfg.ProjectRoot, root.Path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		tracked, err := gitFolderTracked(cfg.ProjectRoot, rel)
+		if err != nil {
+			return nil, err
+		}
+		if tracked {
+			issues = append(issues, Issue{Kind: KindSkillsFolderTracked, Name: root.Label, Location: root.Label, Path: root.Path, Reason: "configured project Skills Folder contains files tracked by Git", SafeFix: "git rm -r --cached -- " + rel, ProjectRoot: cfg.ProjectRoot})
+		}
+	}
+	return issues, nil
+}
+
+func gitInsideWorkTree(projectRoot string) (bool, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "rev-parse", "--is-inside-work-tree")
+	out, err := cmd.Output()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect Git work tree: %w", err)
+	}
+	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+func gitPathTracked(projectRoot, path string) (bool, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--error-unmatch", "--", path)
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect tracked path %q: %w", path, err)
+	}
+	return true, nil
+}
+
+func gitFolderTracked(projectRoot, path string) (bool, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--", path+"/**")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("inspect tracked Skills Folder %q: %w", path, err)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
+func gitignoreEntry(issue Issue) (string, error) {
+	if issue.Kind == KindLocalManifestTracked {
+		return ".x-skills.local.yaml", nil
+	}
+	rel, err := filepath.Rel(issue.ProjectRoot, issue.Path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("skills folder is outside project root: %s", issue.Path)
+	}
+	return strings.TrimSuffix(filepath.ToSlash(rel), "/") + "/", nil
+}
+
+func appendGitignoreEntry(projectRoot, entry string) error {
+	path := filepath.Join(projectRoot, ".gitignore")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open .gitignore: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) == entry {
+			return nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read .gitignore: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat .gitignore: %w", err)
+	}
+	prefix := ""
+	if info.Size() > 0 {
+		last := []byte{0}
+		if _, err := file.ReadAt(last, info.Size()-1); err != nil {
+			return fmt.Errorf("inspect .gitignore ending: %w", err)
+		}
+		if last[0] != '\n' {
+			prefix = "\n"
+		}
+	}
+	if _, err := file.WriteString(prefix + entry + "\n"); err != nil {
+		return fmt.Errorf("append .gitignore: %w", err)
+	}
+	return nil
 }
 
 func diagnoseRoot(cfg config.Config, root roots.ActiveRoot) ([]Issue, error) {

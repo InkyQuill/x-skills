@@ -31,8 +31,9 @@ directory SHA fingerprint so identical linked copies appear as one item while
 changed copies remain separate; the fingerprint is internal and not shown in
 the UI.
 
-Repo update checks, updates, removal, and archive rename are available from the
-Repo TUI page; they are not separate CLI subcommands.
+Archive removal and rename are available from the Repo TUI page; they are not
+separate CLI subcommands. Remote comparisons and same-source updates currently
+belong to Install discovery and conflict handling, not Repo maintenance.
 
 Maintained behavior references: [CLI guide](docs/cli.md), [TUI guide](docs/tui.md),
 [Remote skills guide](docs/remote-skills.md), and [domain vocabulary](CONTEXT.md).

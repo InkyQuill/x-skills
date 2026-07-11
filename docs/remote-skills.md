@@ -30,7 +30,7 @@ Incoming results have one archive state:
 
 An update may replace content only after the same-source comparison and confirmation/diff workflow. A name conflict instead offers keeping the archive, renaming the incoming skill, renaming the existing archive, or explicit replacement; it is not mislabeled as an update. Rename preserves archive content identity and rewrites managed usages and manifest names.
 
-Repo update checks use stored provenance and distinguish up to date, update available, missing upstream, and unknown. GitHub and generic Git sources are checked at their recorded ref when present. Missing upstream means the repository is reachable but the recorded skill path no longer contains a valid `SKILL.md`. Network, metadata, or unsupported-source failures remain unknown rather than authorizing replacement.
+During Install discovery, stored provenance lets x-skills compare a discovered skill with its archive at the recorded ref when present. The resulting archive state drives same-source update and conflict handling in Install. The Repo page does not currently check remotes, expose update status, or update archives; those maintenance workflows remain future work.
 
 Search/install audit status is advisory. Safe, warning, or risky summaries and partner details report upstream service data; they are neither a security guarantee nor an install blocker. Compatibility profiles likewise produce warnings against destination consumer metadata rather than silently changing destinations.
 

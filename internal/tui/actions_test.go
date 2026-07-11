@@ -998,7 +998,7 @@ func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
 		t.Fatal("doctor fix modal is nil")
 	}
 	view := m.modal.View(100, 30, m)
-	for _, want := range []string{"Confirm", "Apply", "Doctor fixes", "broken symlink"} {
+	for _, want := range []string{"Doctor fixes", "broken symlink", "Built-in skills", "~Ag", "Archive only"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("doctor fix modal missing %q:\n%s", want, view)
 		}
@@ -1008,5 +1008,32 @@ func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
 	m = mustModel(t, updated)
 	if _, err := os.Lstat(broken); !os.IsNotExist(err) {
 		t.Fatalf("broken symlink still exists or unexpected error: %v", err)
+	}
+}
+
+func TestDoctorBuiltInFixModalDefaultsToGlobalAgentsAndCanChooseArchiveOnly(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reload()
+	m.view = ViewDoctor
+	m.openDoctorFixModal()
+
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "[x] ~Ag") || !strings.Contains(view, "[ ] Archive only") {
+		t.Fatalf("unexpected defaults:\n%s", view)
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	view = plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "[x] Archive only") {
+		t.Fatalf("archive-only option not selected:\n%s", view)
 	}
 }

@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
@@ -31,10 +33,18 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 			}
 			filter := doctorFilterForLocations(locations)
 			if opts.fix {
+				archiveOnlyBuiltIns := len(opts.at) == 0
 				if !rootOptions.yes {
-					return fmt.Errorf("doctor fix requires confirmation; rerun with -y")
+					if len(opts.at) > 0 || rootOptions.noInput || rootOptions.no {
+						return fmt.Errorf("doctor fix requires confirmation; rerun with -y")
+					}
+					locations, archiveOnlyBuiltIns, err = promptDoctorBuiltInDestinations(cmd, cfg)
+					if err != nil {
+						return fmt.Errorf("doctor fix requires confirmation; rerun with -y")
+					}
+					filter = doctorFilterForLocations(locations)
 				}
-				results, err := fixDoctorLocations(cfg, filter, locations)
+				results, err := fixDoctorLocations(cfg, filter, locations, archiveOnlyBuiltIns)
 				if err != nil && len(results) > 0 {
 					writeDoctorFixResults(cmd.OutOrStdout(), results)
 					return err
@@ -60,6 +70,45 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 	return cmd
 }
 
+func promptDoctorBuiltInDestinations(cmd *cobra.Command, cfg config.Config) ([]roots.ActiveRoot, bool, error) {
+	globalRoots := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal})
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Select global Skills Folders for built-in skills (comma-separated):")
+	defaultIndex := 0
+	for i, root := range globalRoots {
+		checked := " "
+		if root.Target == config.TargetAgents {
+			checked = "x"
+			defaultIndex = i
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %d. [%s] %s\n", i+1, checked, root.Label)
+	}
+	archiveIndex := len(globalRoots) + 1
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %d. [ ] Archive only\nChoice [default %d]: ", archiveIndex, defaultIndex+1)
+	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+	if err != nil {
+		return nil, false, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return []roots.ActiveRoot{globalRoots[defaultIndex]}, false, nil
+	}
+	var selected []roots.ActiveRoot
+	for _, field := range strings.Split(line, ",") {
+		index, parseErr := strconv.Atoi(strings.TrimSpace(field))
+		if parseErr != nil || index < 1 || index > archiveIndex {
+			return nil, false, fmt.Errorf("invalid destination choice %q", field)
+		}
+		if index == archiveIndex {
+			if len(strings.Split(line, ",")) != 1 {
+				return nil, false, fmt.Errorf("archive only cannot be combined with Skills Folders")
+			}
+			return nil, true, nil
+		}
+		selected = append(selected, globalRoots[index-1])
+	}
+	return selected, false, nil
+}
+
 func doctorFilterForLocations(locations []roots.ActiveRoot) doctor.Filter {
 	if len(locations) != 1 {
 		return doctor.Filter{}
@@ -70,15 +119,44 @@ func doctorFilterForLocations(locations []roots.ActiveRoot) doctor.Filter {
 	}
 }
 
-func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roots.ActiveRoot) ([]doctor.FixResult, error) {
-	if len(locations) <= 1 {
-		return doctor.Fix(cfg, doctor.FixOptions{Yes: true, Filter: filter})
-	}
+func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roots.ActiveRoot, archiveOnlyBuiltIns bool) ([]doctor.FixResult, error) {
 	issues, err := doctor.Diagnose(cfg, filter)
 	if err != nil {
 		return nil, err
 	}
-	return doctor.FixIssues(filterDoctorIssuesByLocations(issues, locations))
+	filtered := issues
+	if len(locations) > 1 {
+		filtered = filterDoctorIssuesByLocations(issues, locations)
+	}
+	results, err := doctor.FixIssues(filtered)
+	if err != nil {
+		return results, err
+	}
+	destinations := locations
+	if archiveOnlyBuiltIns {
+		destinations = nil
+	}
+	for _, destination := range destinations {
+		if destination.Scope != config.ScopeProject {
+			continue
+		}
+		hasBrokenFix := false
+		for _, issue := range filtered {
+			if issue.Kind == doctor.KindBrokenSymlink {
+				hasBrokenFix = true
+				break
+			}
+		}
+		if hasBrokenFix {
+			destinations = nil
+			break
+		}
+	}
+	builtInResults, err := doctor.FixBuiltIns(cfg, issues, doctor.FixOptions{
+		BuiltInDestinations: destinations,
+		ArchiveOnlyBuiltIns: archiveOnlyBuiltIns,
+	})
+	return append(results, builtInResults...), err
 }
 
 func filterDoctorIssuesByLocations(issues []doctor.Issue, locations []roots.ActiveRoot) []doctor.Issue {

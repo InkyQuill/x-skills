@@ -179,6 +179,12 @@ func TestEnterOpensDoctorDetailModal(t *testing.T) {
 	m := New(cfg)
 	updated, _ := m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
+	for i, issue := range m.issues {
+		if issue.Name == "zen-of-go" {
+			m.cursor = i
+			break
+		}
+	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)

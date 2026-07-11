@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
@@ -12,7 +14,11 @@ import (
 	"github.com/InkyQuill/x-skills/internal/symlinkcheck"
 )
 
-const KindBrokenSymlink = "broken-symlink"
+const (
+	KindBrokenSymlink   = "broken-symlink"
+	KindMissingBuiltIn  = "missing-builtin"
+	KindInactiveBuiltIn = "inactive-builtin"
+)
 
 type Filter struct {
 	Scope  string
@@ -30,8 +36,10 @@ type Issue struct {
 }
 
 type FixOptions struct {
-	Yes    bool
-	Filter Filter
+	Yes                 bool
+	Filter              Filter
+	BuiltInDestinations []roots.ActiveRoot
+	ArchiveOnlyBuiltIns bool
 }
 
 type FixResult struct {
@@ -54,8 +62,47 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 		}
 		issues = append(issues, rootIssues...)
 	}
+	builtInIssues, err := diagnoseBuiltIns(cfg)
+	if err != nil {
+		return nil, err
+	}
+	issues = append(issues, builtInIssues...)
 
 	return issues, nil
+}
+
+func diagnoseBuiltIns(cfg config.Config) ([]Issue, error) {
+	catalog, err := builtin.List()
+	if err != nil {
+		return nil, err
+	}
+	globalRoots := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal})
+	issues := make([]Issue, 0, len(catalog))
+	for _, skill := range catalog {
+		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), skill.Name)
+		if !skills.IsDir(archivePath) {
+			issues = append(issues, Issue{Kind: KindMissingBuiltIn, Name: skill.Name, Location: "repo", Path: archivePath, Reason: "built-in skill is missing from the archive", SafeFix: "archive"})
+			continue
+		}
+		if !builtInActiveGlobally(archivePath, skill.Name, globalRoots) {
+			issues = append(issues, Issue{Kind: KindInactiveBuiltIn, Name: skill.Name, Location: "global", Path: archivePath, Reason: "built-in skill is archived but inactive in global Skills Folders", SafeFix: "link"})
+		}
+	}
+	return issues, nil
+}
+
+func builtInActiveGlobally(archivePath, name string, globalRoots []roots.ActiveRoot) bool {
+	resolvedArchive, err := filepath.EvalSymlinks(archivePath)
+	if err != nil {
+		return false
+	}
+	for _, root := range globalRoots {
+		resolved, err := filepath.EvalSymlinks(filepath.Join(root.Path, name))
+		if err == nil && resolved == resolvedArchive {
+			return true
+		}
+	}
+	return false
 }
 
 func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
@@ -68,7 +115,48 @@ func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
 		return nil, err
 	}
 
-	return FixIssues(issues)
+	results, err := FixIssues(issues)
+	if err != nil {
+		return results, err
+	}
+	builtInResults, err := FixBuiltIns(cfg, issues, opts)
+	return append(results, builtInResults...), err
+}
+
+func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResult, error) {
+	for _, destination := range opts.BuiltInDestinations {
+		if destination.Scope != config.ScopeGlobal {
+			return nil, fmt.Errorf("built-in fixes require global Skills Folder destinations; got %s:%s", destination.Scope, destination.Target)
+		}
+	}
+	if !opts.ArchiveOnlyBuiltIns && len(opts.BuiltInDestinations) == 0 {
+		return nil, nil
+	}
+	var results []FixResult
+	for _, issue := range issues {
+		if issue.Kind != KindMissingBuiltIn && issue.Kind != KindInactiveBuiltIn {
+			continue
+		}
+		if issue.Kind == KindMissingBuiltIn {
+			if _, archiveErr := builtin.Archive(cfg, []string{issue.Name}); archiveErr != nil {
+				return results, archiveErr
+			}
+			if opts.ArchiveOnlyBuiltIns {
+				results = append(results, FixResult{Name: issue.Name, Action: "archived but inactive", Path: issue.Path})
+			}
+		}
+		if issue.Kind == KindInactiveBuiltIn && opts.ArchiveOnlyBuiltIns {
+			results = append(results, FixResult{Name: issue.Name, Action: "archived but inactive", Path: issue.Path})
+		}
+		for _, destination := range opts.BuiltInDestinations {
+			linked, linkErr := actions.Link(cfg, actions.LinkRequest{Name: issue.Name, Scope: destination.Scope, Target: destination.Target})
+			if linkErr != nil {
+				return results, linkErr
+			}
+			results = append(results, FixResult{Name: issue.Name, Action: "archived and linked", Path: linked.Path})
+		}
+	}
+	return results, nil
 }
 
 func FixIssues(issues []Issue) ([]FixResult, error) {

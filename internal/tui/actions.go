@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
@@ -761,10 +762,17 @@ func (m *Model) openDoctorFixModal() {
 		return
 	}
 	brokenCount := 0
+	builtInCount := 0
 	for _, issue := range m.issues {
 		if issue.Kind == doctor.KindBrokenSymlink {
 			brokenCount++
+		} else if issue.Kind == doctor.KindMissingBuiltIn || issue.Kind == doctor.KindInactiveBuiltIn {
+			builtInCount++
 		}
+	}
+	if builtInCount > 0 {
+		m.modal = newDoctorBuiltInFixModal(m.cfg, brokenCount, builtInCount)
+		return
 	}
 	lines := []string{
 		fmt.Sprintf("Apply %d Doctor fixes?", len(m.issues)),
@@ -783,4 +791,112 @@ func (m *Model) openDoctorFixModal() {
 		current.reload()
 		current.modal = newResultModal("Doctor Results", output)
 	})
+}
+
+type doctorBuiltInFixModal struct {
+	destinations []roots.ActiveRoot
+	checked      map[int]bool
+	cursor       int
+	brokenCount  int
+	builtInCount int
+}
+
+func newDoctorBuiltInFixModal(cfg config.Config, brokenCount, builtInCount int) modal {
+	destinations := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal})
+	checked := map[int]bool{}
+	for i, destination := range destinations {
+		if destination.Target == config.TargetAgents {
+			checked[i] = true
+			break
+		}
+	}
+	return doctorBuiltInFixModal{destinations: destinations, checked: checked, brokenCount: brokenCount, builtInCount: builtInCount}
+}
+
+func (d doctorBuiltInFixModal) Title() string { return "Doctor fixes" }
+
+func (d doctorBuiltInFixModal) View(width, height int, m Model) string {
+	lines := []string{
+		fmt.Sprintf("  - %d broken symlink issues", d.brokenCount),
+		fmt.Sprintf("  - %d built-in skill issues", d.builtInCount),
+		"",
+		"Built-in skills",
+	}
+	for i, destination := range d.destinations {
+		lines = append(lines, d.checkboxLine(i, rootLabel(destination), m))
+	}
+	lines = append(lines, d.checkboxLine(len(d.destinations), "Archive only", m), "", "Press Enter to apply")
+	return renderConstrainedModal(width, height, constrainedModalOptions{Title: d.Title(), Body: lines})
+}
+
+func (d doctorBuiltInFixModal) checkboxLine(index int, label string, m Model) string {
+	cursor := "  "
+	if index == d.cursor {
+		cursor = m.symbols.Cursor + " "
+	}
+	mark := "[ ]"
+	if d.checked[index] {
+		mark = "[x]"
+	}
+	return cursor + mark + " " + label
+}
+
+func (d doctorBuiltInFixModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
+	if delta := modalMoveDelta(msg); delta != 0 {
+		d.cursor = clampModalIndex(d.cursor+delta, len(d.destinations)+1)
+		m.modal = d
+		return false, nil
+	}
+	switch msg.String() {
+	case "esc", "q":
+		return true, nil
+	case " ":
+		d.toggle()
+		m.modal = d
+	case "enter":
+		d.apply(m)
+	}
+	return false, nil
+}
+
+func (d *doctorBuiltInFixModal) toggle() {
+	archiveOnly := len(d.destinations)
+	if d.cursor == archiveOnly {
+		d.checked = map[int]bool{archiveOnly: !d.checked[archiveOnly]}
+		return
+	}
+	delete(d.checked, archiveOnly)
+	d.checked[d.cursor] = !d.checked[d.cursor]
+}
+
+func (d doctorBuiltInFixModal) apply(m *Model) {
+	destinations := make([]roots.ActiveRoot, 0, len(d.destinations))
+	for i, destination := range d.destinations {
+		if d.checked[i] {
+			destinations = append(destinations, destination)
+		}
+	}
+	if len(destinations) == 0 && !d.checked[len(d.destinations)] {
+		m.status = "select at least one global Skills Folder or Archive only"
+		m.modal = d
+		return
+	}
+	results, err := doctor.FixIssues(m.issues)
+	builtInResults, builtInErr := doctor.FixBuiltIns(m.cfg, m.issues, doctor.FixOptions{
+		BuiltInDestinations: destinations,
+		ArchiveOnlyBuiltIns: d.checked[len(d.destinations)],
+	})
+	results = append(results, builtInResults...)
+	if err == nil {
+		err = builtInErr
+	}
+	output := make([]string, 0, len(results)+1)
+	for _, result := range results {
+		output = append(output, "✓ "+result.Name+"  "+result.Action)
+	}
+	if err != nil {
+		output = append(output, "x "+err.Error())
+	}
+	m.reload()
+	m.modal = newResultModal("Doctor Results", output)
 }

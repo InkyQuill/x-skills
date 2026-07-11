@@ -403,7 +403,13 @@ func TestDoctorViewSortsIssuesAlphabeticallyByName(t *testing.T) {
 	if len(m.issues) < 2 {
 		t.Fatalf("doctor issues = %#v, want at least 2", m.issues)
 	}
-	if m.issues[0].Name != "alpha-skill" || m.issues[1].Name != "zeta-skill" {
-		t.Fatalf("doctor issue order = %#v, want alphabetical by name", []string{m.issues[0].Name, m.issues[1].Name})
+	names := make([]string, 0, len(m.issues))
+	for _, issue := range m.issues {
+		names = append(names, issue.Name)
+	}
+	alpha := slices.Index(names, "alpha-skill")
+	zeta := slices.Index(names, "zeta-skill")
+	if alpha < 0 || zeta < 0 || alpha >= zeta {
+		t.Fatalf("doctor issue order = %#v, want alpha before zeta", names)
 	}
 }

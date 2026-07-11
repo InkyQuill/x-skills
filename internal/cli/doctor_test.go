@@ -6,7 +6,69 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/InkyQuill/x-skills/internal/builtin"
+	"github.com/InkyQuill/x-skills/internal/config"
 )
+
+func TestDoctorFixBuiltInsNonInteractiveDoesNotGuessDestination(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	var out bytes.Buffer
+	if err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "archived but inactive") {
+		t.Fatalf("output missing archive-only status:\n%s", out.String())
+	}
+	catalog, _ := builtin.List()
+	cfg := config.Default(project, home)
+	for _, skill := range catalog {
+		if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), skill.Name)); err != nil {
+			t.Fatalf("archive %s: %v", skill.Name, err)
+		}
+		for _, target := range []string{config.TargetAgents, config.TargetClaude, config.TargetCodex} {
+			if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot(config.ScopeGlobal, target), skill.Name)); !os.IsNotExist(err) {
+				t.Fatalf("doctor guessed %s destination for %s: %v", target, skill.Name, err)
+			}
+		}
+	}
+}
+
+func TestDoctorFixBuiltInsLinksOnlyExplicitGlobalDestination(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix", "--at", "global:agents"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "archived and linked") {
+		t.Fatalf("output missing linked status:\n%s", out.String())
+	}
+}
+
+func TestDoctorFixBuiltInsRejectsProjectDestination(t *testing.T) {
+	err := Execute([]string{"--home", t.TempDir(), "--project-root", t.TempDir(), "-y", "doctor", "--fix", "--at", "project:agents"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "global") {
+		t.Fatalf("error = %v, want global destination rejection", err)
+	}
+}
+
+func TestDoctorFixBuiltInsInteractiveShowsGlobalChecklistWithAgentsPreselected(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "doctor", "--fix"}, strings.NewReader("\n"), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"[x] ~Ag", "[ ] ~Cl", "[ ] ~Cd", "Archive only"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("interactive checklist missing %q:\n%s", want, out.String())
+		}
+	}
+}
 
 func TestDoctorReportsAndFixesBrokenSymlink(t *testing.T) {
 	home := t.TempDir()

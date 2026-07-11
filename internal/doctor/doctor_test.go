@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/roots"
 )
 
 func makeSkill(t *testing.T, root, name string) string {
@@ -19,6 +21,84 @@ func makeSkill(t *testing.T, root, name string) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func TestDiagnoseBuiltInsReportsMissingInactiveAndActive(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	catalog, err := builtin.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) < 3 {
+		t.Fatalf("catalog has %d skills, want at least 3", len(catalog))
+	}
+
+	if _, err := builtin.Archive(cfg, []string{catalog[1].Name, catalog[2].Name}); err != nil {
+		t.Fatal(err)
+	}
+	global := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal})[0]
+	if err := os.MkdirAll(global.Path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), catalog[2].Name), filepath.Join(global.Path, catalog[2].Name)); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := Diagnose(cfg, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, issue := range issues {
+		kinds[issue.Name] = issue.Kind
+	}
+	if kinds[catalog[0].Name] != KindMissingBuiltIn {
+		t.Fatalf("missing kind = %q, want %q", kinds[catalog[0].Name], KindMissingBuiltIn)
+	}
+	if kinds[catalog[1].Name] != KindInactiveBuiltIn {
+		t.Fatalf("inactive kind = %q, want %q", kinds[catalog[1].Name], KindInactiveBuiltIn)
+	}
+	if _, found := kinds[catalog[2].Name]; found {
+		t.Fatalf("active built-in unexpectedly diagnosed: %#v", issues)
+	}
+}
+
+func TestFixBuiltInsArchivesOnlyOrLinksToExplicitGlobalDestinations(t *testing.T) {
+	t.Run("archive only", func(t *testing.T) {
+		cfg := config.Default(t.TempDir(), t.TempDir())
+		results, err := Fix(cfg, FixOptions{Yes: true, ArchiveOnlyBuiltIns: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) == 0 || results[0].Action != "archived but inactive" {
+			t.Fatalf("results = %#v, want archived but inactive", results)
+		}
+	})
+
+	t.Run("global destination", func(t *testing.T) {
+		cfg := config.Default(t.TempDir(), t.TempDir())
+		destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal, Target: config.TargetAgents})[0]
+		results, err := Fix(cfg, FixOptions{Yes: true, BuiltInDestinations: []roots.ActiveRoot{destination}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, _ := builtin.List()
+		for _, skill := range catalog {
+			if _, err := filepath.EvalSymlinks(filepath.Join(destination.Path, skill.Name)); err != nil {
+				t.Fatalf("%s not linked: %v; results=%#v", skill.Name, err, results)
+			}
+		}
+	})
+
+	t.Run("project rejected", func(t *testing.T) {
+		cfg := config.Default(t.TempDir(), t.TempDir())
+		destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[0]
+		_, err := Fix(cfg, FixOptions{Yes: true, BuiltInDestinations: []roots.ActiveRoot{destination}})
+		if err == nil || !strings.Contains(err.Error(), "global") {
+			t.Fatalf("error = %v, want global destination rejection", err)
+		}
+	})
 }
 
 func TestDiagnoseReportsBrokenSymlink(t *testing.T) {
@@ -37,11 +117,9 @@ func TestDiagnoseReportsBrokenSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 1 {
-		t.Fatalf("len(issues) = %d, want 1", len(issues))
-	}
-	if issues[0].Kind != KindBrokenSymlink {
-		t.Fatalf("Kind = %q", issues[0].Kind)
+	issue := issueByName(t, issues, "chapter-drafter")
+	if issue.Kind != KindBrokenSymlink {
+		t.Fatalf("Kind = %q", issue.Kind)
 	}
 }
 
@@ -65,11 +143,9 @@ func TestDiagnoseReportsSymlinkToFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 1 {
-		t.Fatalf("len(issues) = %d, want 1", len(issues))
-	}
-	if !strings.Contains(issues[0].Reason, "not a directory") {
-		t.Fatalf("Reason = %q, want not a directory", issues[0].Reason)
+	issue := issueByName(t, issues, "chapter-drafter")
+	if !strings.Contains(issue.Reason, "not a directory") {
+		t.Fatalf("Reason = %q, want not a directory", issue.Reason)
 	}
 }
 
@@ -93,12 +169,21 @@ func TestDiagnoseReportsSymlinkToNonSkillDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 1 {
-		t.Fatalf("len(issues) = %d, want 1", len(issues))
+	issue := issueByName(t, issues, "chapter-drafter")
+	if !strings.Contains(issue.Reason, "not a skill directory") {
+		t.Fatalf("Reason = %q, want not a skill directory", issue.Reason)
 	}
-	if !strings.Contains(issues[0].Reason, "not a skill directory") {
-		t.Fatalf("Reason = %q, want not a skill directory", issues[0].Reason)
+}
+
+func issueByName(t *testing.T, issues []Issue, name string) Issue {
+	t.Helper()
+	for _, issue := range issues {
+		if issue.Name == name {
+			return issue
+		}
 	}
+	t.Fatalf("issue %q not found in %#v", name, issues)
+	return Issue{}
 }
 
 func TestFixBrokenSymlinkRelinksWhenRepoSkillExists(t *testing.T) {
@@ -236,8 +321,10 @@ func TestDoctorIgnoresUnmanagedDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 0 {
-		t.Fatalf("issues = %#v, want none", issues)
+	for _, issue := range issues {
+		if issue.Name == "local-skill" {
+			t.Fatalf("unmanaged skill diagnosed: %#v", issue)
+		}
 	}
 
 	results, err := Fix(cfg, FixOptions{Yes: true})

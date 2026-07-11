@@ -234,6 +234,9 @@ func Preflight(
 						SuggestedPreserveAs: suggestion, Resolution: resolution,
 					}
 					plan.Conflicts = append(plan.Conflicts, conflict)
+					if resolution.Action == ConflictReplace {
+						plan.Links = append(plan.Links, linkChange(candidate, archivePath, destinationPath, LinkNormalize))
+					}
 				default:
 					return Plan{}, fmt.Errorf("unknown conflict action %q", resolution.Action)
 				}

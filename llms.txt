@@ -34,9 +34,8 @@ go run ./cmd/x-skills tui
 bin/              built binaries (gitignored)
 cmd/x-skills/     main entrypoint
 internal/         application packages (cli, tui, repo, actions, symlinkcheck, ...)
-docs/adr/         architecture decision records (0001-0018)
+docs/adr/         four thematic architecture decision records
 docs/backlog.md   planned work
-docs/superpowers/ plans and specs
 .agents/skills/   active project skill symlinks
 skills/           project-owned x-skills workflow skills
 CONTEXT.md        project terminology glossary

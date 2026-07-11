@@ -2,7 +2,6 @@
 
 ## Planned implementation slices
 
-- [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md): committed recommendations, local overlay, recommend/unrecommend, safe restore/full restore, automatic reconciliation, and Git hygiene Doctor checks.
 - [Interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md): aggregate project candidates, compatibility-aware defaults, conflict preservation, CLI/TUI sync, and general archive rename.
 - [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md): shared footer/layout/text/pill helpers and color-independent statuses.
 

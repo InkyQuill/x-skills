@@ -2,9 +2,11 @@ package builtin
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -92,6 +94,67 @@ func TestArchiveRejectsDivergentArchiveWithoutReplacingIt(t *testing.T) {
 	}
 	if string(got) != "local content" {
 		t.Fatalf("divergent archive was replaced: %q", got)
+	}
+}
+
+func TestArchivePublishDoesNotReplaceConcurrentDestination(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	original := publishArchive
+	publishArchive = func(staged, destination string) error {
+		if err := os.Mkdir(destination, 0o755); err != nil {
+			return err
+		}
+		return original(staged, destination)
+	}
+	t.Cleanup(func() { publishArchive = original })
+
+	_, err := Archive(cfg, []string{"x-find-skills"})
+	if !errors.Is(err, ErrArchiveConflict) {
+		t.Fatalf("Archive() error = %v, want ErrArchiveConflict", err)
+	}
+	entries, readErr := os.ReadDir(filepath.Join(cfg.ArchiveSkillsRoot(), "x-find-skills"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("concurrent destination was replaced with %d entries", len(entries))
+	}
+}
+
+func TestArchiveCleansTempAndPreservesPartialSuccessAfterCopyFailure(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	original := copyBuiltIn
+	calls := 0
+	copyBuiltIn = func(source, destination string) error {
+		calls++
+		if calls == 2 {
+			if err := os.WriteFile(filepath.Join(destination, "partial"), []byte("partial"), 0o644); err != nil {
+				return err
+			}
+			return fmt.Errorf("injected copy failure")
+		}
+		return original(source, destination)
+	}
+	t.Cleanup(func() { copyBuiltIn = original })
+
+	archived, err := Archive(cfg, []string{"x-find-skills", "x-manage-skills"})
+	if err == nil || !strings.Contains(err.Error(), "injected copy failure") {
+		t.Fatalf("Archive() error = %v, want injected copy failure", err)
+	}
+	if want := []string{"x-find-skills"}; !reflect.DeepEqual(archived, want) {
+		t.Fatalf("Archive() = %v, want %v", archived, want)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "x-find-skills", "SKILL.md")); err != nil {
+		t.Fatalf("first archive was not preserved: %v", err)
+	}
+	entries, err := os.ReadDir(cfg.ArchiveSkillsRoot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".x-manage-skills-") {
+			t.Fatalf("temporary directory was not cleaned up: %s", entry.Name())
+		}
 	}
 }
 

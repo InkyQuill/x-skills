@@ -23,6 +23,8 @@ type Skill struct {
 }
 
 var builtInSkills fs.FS = xskills.BuiltInSkills
+var copyBuiltIn = copyEmbeddedDir
+var publishArchive = publishArchiveNoReplace
 
 func List() ([]Skill, error) {
 	entries, err := fs.ReadDir(builtInSkills, "skills")
@@ -94,7 +96,7 @@ func archiveOne(cfg config.Config, name string) (bool, error) {
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
-	if err := copyEmbeddedDir(path.Join("skills", name), tempDir); err != nil {
+	if err := copyBuiltIn(path.Join("skills", name), tempDir); err != nil {
 		return false, err
 	}
 
@@ -102,7 +104,10 @@ func archiveOne(cfg config.Config, name string) (bool, error) {
 	_, err = os.Lstat(destination)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		if err := os.Rename(tempDir, destination); err != nil {
+		if err := publishArchive(tempDir, destination); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return false, fmt.Errorf("%w: %s", ErrArchiveConflict, name)
+			}
 			return false, fmt.Errorf("install built-in archive %q: %w", name, err)
 		}
 		return true, nil

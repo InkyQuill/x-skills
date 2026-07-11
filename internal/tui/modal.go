@@ -73,7 +73,7 @@ func renderConstrainedModal(width, height int, opts constrainedModalOptions) str
 		bodyHeight = 1
 	}
 
-	body := visibleModalBody(truncateModalLines(opts.Body, contentWidth), bodyHeight, opts.Focus, opts.Scroll, opts.UseScroll)
+	body := presentModalBody(truncateModalLines(opts.Body, contentWidth), bodyHeight, opts.Focus, opts.Scroll, opts.UseScroll)
 	lines := make([]string, 0, len(header)+len(body)+footerHeight)
 	lines = append(lines, header...)
 	lines = append(lines, body...)
@@ -134,7 +134,7 @@ func truncateModalLines(lines []string, width int) []string {
 	return truncated
 }
 
-func visibleModalBody(lines []string, height int, focus int, scroll int, useScroll bool) []string {
+func presentModalBody(lines []string, height int, focus int, scroll int, useScroll bool) []string {
 	if height <= 0 || len(lines) == 0 {
 		return nil
 	}

@@ -86,10 +86,10 @@ func TestConstrainedModalKeepsFooterVisibleWithLongBody(t *testing.T) {
 	}
 }
 
-func TestVisibleModalBodyClampsNegativeScroll(t *testing.T) {
-	got := visibleModalBody([]string{"one", "two", "three"}, 2, 0, -1, true)
+func TestPresentModalBodyClampsNegativeScroll(t *testing.T) {
+	got := presentModalBody([]string{"one", "two", "three"}, 2, 0, -1, true)
 	if len(got) != 2 {
-		t.Fatalf("visibleModalBody() returned %d lines, want 2", len(got))
+		t.Fatalf("presentModalBody() returned %d lines, want 2", len(got))
 	}
 }
 
@@ -135,6 +135,28 @@ func TestConflictDiffModalClampsScrollDuringUpdate(t *testing.T) {
 	modal := m.modal.(conflictDiffModal)
 	if modal.scroll != 0 {
 		t.Fatalf("conflict diff scroll = %d, want 0 for body shorter than viewport", modal.scroll)
+	}
+}
+
+func TestConflictDiffModalClampsStaleScrollWhileTerminalIsTooSmall(t *testing.T) {
+	diff := directoryDiff{Files: []diffFile{{Path: "SKILL.md", Text: "line one\nline two"}}}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 50
+	m.height = 12
+	m.modal = conflictDiffModal{
+		name:          "zen-of-go",
+		diff:          diff,
+		scroll:        1000,
+		incomingLabel: "Incoming active",
+		apply:         func(*Model, string) tea.Cmd { return nil },
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+
+	modal := m.modal.(conflictDiffModal)
+	if modal.scroll != 0 {
+		t.Fatalf("small-terminal conflict diff scroll = %d, want 0", modal.scroll)
 	}
 }
 

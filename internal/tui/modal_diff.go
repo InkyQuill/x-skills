@@ -150,6 +150,8 @@ func (c conflictDiffModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	if closeOnEscapeOrQuit(msg) {
 		return true, nil
 	}
+	c.scroll = tuiui.ClampScroll(c.scroll, c.diffLineCount(), conflictDiffBodyHeight(m.height))
+	m.modal = c
 	if conflictDiffTooSmall(m.width, m.height) {
 		return false, nil
 	}

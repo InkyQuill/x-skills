@@ -57,3 +57,42 @@ Zen of Go review found no blocking issues after the verification chain. The impl
 ## Scope note
 
 The pre-existing untracked `x-skills` binary was not modified or staged.
+
+## Review remediation
+
+Addressed every High and Medium finding from `plan2-task6-review-report.md`:
+
+- Doctor TUI mutations and the subsequent filesystem rescan now run inside a `tea.Cmd`. A typed, tokened result message applies the immutable snapshot only when it matches the current Doctor fix generation.
+- A successful missing Built-In Skill archive is recorded as `archived` before link attempts, so a later destination conflict returns both the successful result and the error.
+- Project destinations are validated and rejected before any broken-symlink or Built-In Skill mutation, including mixed-issue runs.
+- README, terminology context, and backlog status now document archive-only automation, explicit global linking, interactive defaults, project rejection, and the responsive TUI workflow.
+
+Review TDD evidence:
+
+- `TestFixBuiltInsPreservesArchiveResultWhenLinkConflicts` initially failed with an empty result slice after the archive was created.
+- `TestDoctorFixBuiltInsRejectsProjectDestinationWithBrokenSymlink` initially failed because the command returned no error and removed the broken link.
+- `TestDoctorBuiltInFixRunsInCommandAndAppliesGenerationSafeResult` initially failed to compile because the model had no Doctor fix generation, reflecting the synchronous implementation.
+
+Fresh post-review verification:
+
+```text
+$ gofmt -l .
+(no output)
+
+$ go vet ./...
+(no output)
+
+$ staticcheck ./...
+(no output)
+
+$ go test -race -count=1 ./...
+all packages passed; internal/tui completed in 1.898s, with no race reports
+
+$ go test ./internal/doctor ./internal/cli ./internal/tui -count=1 -run 'BuiltIn|Builtin|DoctorFixModal'
+ok github.com/InkyQuill/x-skills/internal/doctor 0.002s
+ok github.com/InkyQuill/x-skills/internal/cli 0.010s
+ok github.com/InkyQuill/x-skills/internal/tui 0.011s
+
+$ git diff --check
+(no output)
+```

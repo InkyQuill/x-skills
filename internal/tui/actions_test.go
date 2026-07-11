@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
@@ -1004,7 +1005,12 @@ func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
 		}
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("doctor fix returned nil command")
+	}
+	updated, _ = m.Update(cmd())
 	m = mustModel(t, updated)
 	if _, err := os.Lstat(broken); !os.IsNotExist(err) {
 		t.Fatalf("broken symlink still exists or unexpected error: %v", err)
@@ -1035,5 +1041,35 @@ func TestDoctorBuiltInFixModalDefaultsToGlobalAgentsAndCanChooseArchiveOnly(t *t
 	view = plain(m.modal.View(100, 30, m))
 	if !strings.Contains(view, "[x] Archive only") {
 		t.Fatalf("archive-only option not selected:\n%s", view)
+	}
+}
+
+func TestDoctorBuiltInFixRunsInCommandAndAppliesGenerationSafeResult(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reload()
+	m.view = ViewDoctor
+	m.openDoctorFixModal()
+	catalog, _ := builtin.List()
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), catalog[0].Name)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("Enter returned nil command")
+	}
+	if _, err := os.Lstat(archive); !os.IsNotExist(err) {
+		t.Fatalf("filesystem mutated before command execution: %v", err)
+	}
+	msg := cmd()
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatalf("command did not archive built-in: %v", err)
+	}
+
+	m.doctorFixToken++
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal != nil || m.status == "" {
+		t.Fatalf("stale result applied: modal=%T status=%q", m.modal, m.status)
 	}
 }

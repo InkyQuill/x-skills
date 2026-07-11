@@ -9,6 +9,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/roots"
+	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
 func makeSkill(t *testing.T, root, name string) string {
@@ -99,6 +100,28 @@ func TestFixBuiltInsArchivesOnlyOrLinksToExplicitGlobalDestinations(t *testing.T
 			t.Fatalf("error = %v, want global destination rejection", err)
 		}
 	})
+}
+
+func TestFixBuiltInsPreservesArchiveResultWhenLinkConflicts(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal, Target: config.TargetAgents})[0]
+	catalog, _ := builtin.List()
+	name := catalog[0].Name
+	makeSkill(t, destination.Path, name)
+	issues, err := Diagnose(cfg, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := FixBuiltIns(cfg, issues, FixOptions{BuiltInDestinations: []roots.ActiveRoot{destination}})
+	if err == nil || !strings.Contains(err.Error(), "destination exists") {
+		t.Fatalf("error = %v, want destination conflict", err)
+	}
+	if !skills.IsDir(filepath.Join(cfg.ArchiveSkillsRoot(), name)) {
+		t.Fatal("archive was not preserved")
+	}
+	if len(results) == 0 || results[0].Name != name || results[0].Action != "archived" {
+		t.Fatalf("results = %#v, want preserved archive result", results)
+	}
 }
 
 func TestDiagnoseReportsBrokenSymlink(t *testing.T) {

@@ -21,6 +21,7 @@ go run ./cmd/x-skills list
 go run ./cmd/x-skills repo
 go run ./cmd/x-skills doctor
 go run ./cmd/x-skills doctor --fix -y
+go run ./cmd/x-skills doctor --fix -y --at global:agents
 go run ./cmd/x-skills tui
 ```
 
@@ -66,7 +67,16 @@ x-skills add owner/repo skill-name --at .Cd -y
 x-skills tui
 x-skills doctor
 x-skills doctor --fix -y
+x-skills doctor --fix -y --at global:agents
 ```
+
+Doctor also checks the shipped `x-` Built-In Skills. A non-interactive
+`doctor --fix -y` archives missing Built-In Skills but deliberately leaves them
+inactive: automation must not guess a Skills Folder. Pass one or more explicit
+global destinations, such as `--at global:agents`, to archive and link them.
+Project destinations are rejected for Built-In Skill repair. Without `-y`,
+`doctor --fix` shows the enabled global Skills Folders with `~Ag` preselected
+and an explicit `Archive only` choice.
 
 `x-skills list` answers "what am I currently working with?" It shows active
 skills from the current project and global managed roots, grouped by scope and
@@ -184,7 +194,9 @@ Use Active to inspect current project/global skills, preview `SKILL.md`, migrate
 unmanaged directories into the archive, and unlink active copies. Use Repo to
 preview archived skills, link them into a selected destination, unlink visible
 current usages, or delete archives after visible usages are removed. Use Doctor
-to review and fix current issues.
+to review and fix current issues. Built-In Skill repairs open a global Skills
+Folder checklist with `~Ag` preselected and an `Archive only` choice; the
+filesystem work runs in the background so the TUI remains responsive.
 
 ## Design Decisions
 

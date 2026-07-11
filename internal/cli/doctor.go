@@ -128,29 +128,22 @@ func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roo
 	if len(locations) > 1 {
 		filtered = filterDoctorIssuesByLocations(issues, locations)
 	}
-	results, err := doctor.FixIssues(filtered)
-	if err != nil {
-		return results, err
-	}
 	destinations := locations
 	if archiveOnlyBuiltIns {
 		destinations = nil
 	}
-	for _, destination := range destinations {
-		if destination.Scope != config.ScopeProject {
+	for _, issue := range issues {
+		if issue.Kind != doctor.KindMissingBuiltIn && issue.Kind != doctor.KindInactiveBuiltIn {
 			continue
 		}
-		hasBrokenFix := false
-		for _, issue := range filtered {
-			if issue.Kind == doctor.KindBrokenSymlink {
-				hasBrokenFix = true
-				break
-			}
+		if err := doctor.ValidateBuiltInDestinations(destinations); err != nil {
+			return nil, err
 		}
-		if hasBrokenFix {
-			destinations = nil
-			break
-		}
+		break
+	}
+	results, err := doctor.FixIssues(filtered)
+	if err != nil {
+		return results, err
 	}
 	builtInResults, err := doctor.FixBuiltIns(cfg, issues, doctor.FixOptions{
 		BuiltInDestinations: destinations,

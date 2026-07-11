@@ -55,6 +55,26 @@ func TestDoctorFixBuiltInsRejectsProjectDestination(t *testing.T) {
 	}
 }
 
+func TestDoctorFixBuiltInsRejectsProjectDestinationWithBrokenSymlink(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	root := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(root, "broken")
+	if err := os.Symlink(filepath.Join(home, "missing"), broken); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix", "--at", "project:agents"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "global") {
+		t.Fatalf("error = %v, want global destination rejection", err)
+	}
+	if _, statErr := os.Lstat(broken); statErr != nil {
+		t.Fatalf("broken symlink mutated before destination validation: %v", statErr)
+	}
+}
+
 func TestDoctorFixBuiltInsInteractiveShowsGlobalChecklistWithAgentsPreselected(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -107,7 +127,7 @@ func TestDoctorReportsAndFixesBrokenSymlink(t *testing.T) {
 	}
 }
 
-func TestDoctorFixRespectsScopeFilter(t *testing.T) {
+func TestDoctorFixRejectsProjectScopeBeforeMutatingBrokenLinks(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 
@@ -131,11 +151,11 @@ func TestDoctorFixRespectsScopeFilter(t *testing.T) {
 
 	var out bytes.Buffer
 	err := Execute([]string{"--home", home, "--project-root", project, "-y", "doctor", "--fix", "--at", ".Cl"}, strings.NewReader(""), &out, &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "global") {
+		t.Fatalf("error = %v, want global destination rejection", err)
 	}
-	if _, err := os.Lstat(projectLink); !os.IsNotExist(err) {
-		t.Fatalf("project link still exists or unexpected err: %v", err)
+	if _, err := os.Lstat(projectLink); err != nil {
+		t.Fatalf("project link changed: %v", err)
 	}
 	if _, err := os.Lstat(globalLink); err != nil {
 		t.Fatalf("global link was changed: %v", err)

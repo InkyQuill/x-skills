@@ -124,10 +124,8 @@ func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
 }
 
 func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResult, error) {
-	for _, destination := range opts.BuiltInDestinations {
-		if destination.Scope != config.ScopeGlobal {
-			return nil, fmt.Errorf("built-in fixes require global Skills Folder destinations; got %s:%s", destination.Scope, destination.Target)
-		}
+	if err := ValidateBuiltInDestinations(opts.BuiltInDestinations); err != nil {
+		return nil, err
 	}
 	if !opts.ArchiveOnlyBuiltIns && len(opts.BuiltInDestinations) == 0 {
 		return nil, nil
@@ -143,6 +141,8 @@ func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResul
 			}
 			if opts.ArchiveOnlyBuiltIns {
 				results = append(results, FixResult{Name: issue.Name, Action: "archived but inactive", Path: issue.Path})
+			} else {
+				results = append(results, FixResult{Name: issue.Name, Action: "archived", Path: issue.Path})
 			}
 		}
 		if issue.Kind == KindInactiveBuiltIn && opts.ArchiveOnlyBuiltIns {
@@ -157,6 +157,15 @@ func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResul
 		}
 	}
 	return results, nil
+}
+
+func ValidateBuiltInDestinations(destinations []roots.ActiveRoot) error {
+	for _, destination := range destinations {
+		if destination.Scope != config.ScopeGlobal {
+			return fmt.Errorf("built-in fixes require global Skills Folder destinations; got %s:%s", destination.Scope, destination.Target)
+		}
+	}
+	return nil
 }
 
 func FixIssues(issues []Issue) ([]FixResult, error) {

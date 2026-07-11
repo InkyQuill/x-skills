@@ -2,7 +2,7 @@
 
 ## Planned implementation slices
 
-- [Skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md): Skills Folder consumers, explicit and inferred Compatibility Profiles, `x-` Built-In Skill naming, `x-port-skill`, and Doctor installation/linking.
+- [Skill compatibility and Built-In Skills](superpowers/plans/2026-07-11-skill-compatibility-and-builtins.md): Skills Folder consumers, explicit and inferred Compatibility Profiles, and `x-` Built-In Skill naming are implemented, including `x-port-skill` and Doctor archive/global-link repair. Remaining work is tracked in the plan's later slices.
 - [Project Skill Manifests and restore](superpowers/plans/2026-07-11-project-skill-manifests-and-restore.md): committed recommendations, local overlay, recommend/unrecommend, safe restore/full restore, automatic reconciliation, and Git hygiene Doctor checks.
 - [Interactive skill sync and rename](superpowers/plans/2026-07-11-interactive-skill-sync-and-rename.md): aggregate project candidates, compatibility-aware defaults, conflict preservation, CLI/TUI sync, and general archive rename.
 - [TUI component standardization](superpowers/plans/2026-07-11-tui-component-standardization.md): shared footer/layout/text/pill helpers and color-independent statuses.

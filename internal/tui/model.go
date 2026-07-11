@@ -49,6 +49,8 @@ type Model struct {
 	reloadPending       tea.Cmd
 	reloadReportsStatus bool
 	updating            bool
+	doctorFixToken      int
+	doctorFixInFlight   bool
 }
 
 type reloadResultMsg struct {
@@ -158,6 +160,8 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, nil
 	case installUseMsg:
 		return m, m.applyInstallUseResult(msg)
+	case doctorFixResultMsg:
+		return m, m.applyDoctorFixResult(msg)
 	case reloadResultMsg:
 		if msg.token != m.reloadToken {
 			return m, nil

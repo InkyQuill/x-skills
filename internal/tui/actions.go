@@ -854,7 +854,7 @@ func (d doctorBuiltInFixModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) 
 		d.toggle()
 		m.modal = d
 	case "enter":
-		d.apply(m)
+		return false, d.apply(m)
 	}
 	return false, nil
 }
@@ -869,7 +869,17 @@ func (d *doctorBuiltInFixModal) toggle() {
 	d.checked[d.cursor] = !d.checked[d.cursor]
 }
 
-func (d doctorBuiltInFixModal) apply(m *Model) {
+type doctorFixResultMsg struct {
+	token     int
+	results   []doctor.FixResult
+	active    []ActiveGroup
+	repo      []repo.Skill
+	issues    []doctor.Issue
+	repoUsage map[string][]string
+	err       error
+}
+
+func (d doctorBuiltInFixModal) apply(m *Model) tea.Cmd {
 	destinations := make([]roots.ActiveRoot, 0, len(d.destinations))
 	for i, destination := range d.destinations {
 		if d.checked[i] {
@@ -879,24 +889,53 @@ func (d doctorBuiltInFixModal) apply(m *Model) {
 	if len(destinations) == 0 && !d.checked[len(d.destinations)] {
 		m.status = "select at least one global Skills Folder or Archive only"
 		m.modal = d
-		return
+		return nil
 	}
-	results, err := doctor.FixIssues(m.issues)
-	builtInResults, builtInErr := doctor.FixBuiltIns(m.cfg, m.issues, doctor.FixOptions{
-		BuiltInDestinations: destinations,
-		ArchiveOnlyBuiltIns: d.checked[len(d.destinations)],
-	})
-	results = append(results, builtInResults...)
-	if err == nil {
-		err = builtInErr
+	m.doctorFixToken++
+	token := m.doctorFixToken
+	m.doctorFixInFlight = true
+	m.status = "applying Doctor fixes..."
+	m.modal = nil
+	cfg := m.cfg
+	issues := append([]doctor.Issue(nil), m.issues...)
+	archiveOnly := d.checked[len(d.destinations)]
+	return func() tea.Msg {
+		results, err := doctor.FixIssues(issues)
+		builtInResults, builtInErr := doctor.FixBuiltIns(cfg, issues, doctor.FixOptions{
+			BuiltInDestinations: destinations,
+			ArchiveOnlyBuiltIns: archiveOnly,
+		})
+		results = append(results, builtInResults...)
+		if err == nil {
+			err = builtInErr
+		}
+		active, repoSkills, currentIssues, repoUsage, reloadErr := loadTUIData(cfg)
+		if err == nil {
+			err = reloadErr
+		}
+		return doctorFixResultMsg{token: token, results: results, active: active, repo: repoSkills, issues: currentIssues, repoUsage: repoUsage, err: err}
 	}
-	output := make([]string, 0, len(results)+1)
-	for _, result := range results {
+}
+
+func (m *Model) applyDoctorFixResult(msg doctorFixResultMsg) tea.Cmd {
+	if msg.token != m.doctorFixToken {
+		return nil
+	}
+	m.doctorFixInFlight = false
+	m.active = msg.active
+	m.repo = msg.repo
+	m.issues = msg.issues
+	m.repoUsage = msg.repoUsage
+	m.err = msg.err
+	m.clampCursor()
+	output := make([]string, 0, len(msg.results)+1)
+	for _, result := range msg.results {
 		output = append(output, "✓ "+result.Name+"  "+result.Action)
 	}
-	if err != nil {
-		output = append(output, "x "+err.Error())
+	if msg.err != nil {
+		output = append(output, "x "+msg.err.Error())
 	}
-	m.reload()
 	m.modal = newResultModal("Doctor Results", output)
+	m.status = "Doctor fixes complete"
+	return nil
 }

@@ -28,6 +28,10 @@ _Avoid_: Manually installed skill
 An `x-`-prefixed skill shipped under this repository's `skills/` directory to help agents use x-skills or prepare other skills for x-skills workflows.
 _Avoid_: Bundled helper, system skill
 
+**Built-In Skill Repair**:
+A Doctor fix that archives missing Built-In Skills and optionally links them only into explicitly selected global Skills Folders. Non-interactive repair without a destination is archive-only; project Skills Folders are never inferred or accepted.
+_Avoid_: Automatic global install, project built-in install
+
 **Agent-Agnostic Skill**:
 A skill whose instructions are usable by more than one agent application without depending on one agent's exclusive capabilities or conventions.
 _Avoid_: Generic skill, universal skill

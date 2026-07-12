@@ -3,7 +3,6 @@ package pathidentity
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -200,25 +199,4 @@ func TestWindowsCanonicalizationHandlesShortAndLongNames(t *testing.T) {
 	if !got {
 		t.Fatalf("EquivalentE(%q, %q) = false, want true", shortPath, longPath)
 	}
-}
-
-// windowsShortPath returns Windows' short-name spelling for path when available.
-func windowsShortPath(t *testing.T, path string) string {
-	t.Helper()
-	cmd := exec.Command("cmd", "/d", "/c", `for %I in ("%X_SKILLS_SHORT_PATH%") do @echo %~sI`)
-	cmd.Env = append(os.Environ(), "X_SKILLS_SHORT_PATH="+path)
-	out, err := cmd.Output()
-	if err != nil {
-		t.Skipf("could not query Windows short path for %q: %v", path, err)
-	}
-	short := strings.ReplaceAll(strings.TrimSpace(string(out)), `"`, "")
-	if drive := strings.Index(short, `:`); drive > 0 && isWindowsDriveLetter(short[drive-1]) {
-		short = short[drive-1:]
-	}
-	return short
-}
-
-// isWindowsDriveLetter reports whether b can start a Windows drive-qualified path.
-func isWindowsDriveLetter(b byte) bool {
-	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }

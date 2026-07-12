@@ -1,0 +1,169 @@
+package cli
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/spf13/cobra"
+)
+
+func TestRestoreRequiresExplicitProjectDestination(t *testing.T) {
+	err := Execute([]string{"restore"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "at least one --at") {
+		t.Fatalf("restore error = %v", err)
+	}
+
+	home, project := t.TempDir(), t.TempDir()
+	err = Execute([]string{"--home", home, "--project-root", project, "restore", "--at", "~Ag"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "project Skills Folder") {
+		t.Fatalf("global restore error = %v", err)
+	}
+}
+
+func TestRestoreAdditiveLeavesExtrasAndPrintsGroupedPlan(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	writeRestoreCLISkill(t, cfg, "wanted")
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "extra", "Extra.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "-y", "restore", "--at", ".Ag"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range []string{"available", "unavailable", "links", "migrations", "removals"} {
+		if !strings.Contains(out.String(), group) {
+			t.Fatalf("restore output missing %q:\n%s", group, out.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "extra")); err != nil {
+		t.Fatalf("additive restore removed extra: %v", err)
+	}
+}
+
+func TestRestoreFullPrintsPlanAndRequiresConfirmation(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "extra", "Extra.")
+
+	var out bytes.Buffer
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "restore", "--full", "--at", ".Ag"}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "requires confirmation") {
+		t.Fatalf("full restore error = %v", err)
+	}
+	if !strings.Contains(out.String(), "migrations\n  extra") {
+		t.Fatalf("full restore output = %q", out.String())
+	}
+}
+
+func TestRestoreFullSummaryCountsMigratedExtraByKind(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "extra", "Extra.")
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "-y", "restore", "--full", "--at", ".Ag"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "restored: 0 links, 1 migrations, 0 removals") {
+		t.Fatalf("full restore summary = %q", out.String())
+	}
+}
+
+func TestRestoreConflictRequiresExplicitRenameEvenWithYes(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	writeRestoreCLISkill(t, cfg, "wanted")
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "wanted", "Different.")
+
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "-y", "restore", "--at", ".Ag"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("restore conflict error = %v", err)
+	}
+}
+
+func TestResolveRestoreConflictsRejectsOriginalSkillName(t *testing.T) {
+	previous := restoreInputIsTerminal
+	restoreInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { restoreInputIsTerminal = previous })
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader("wanted\n"))
+	cmd.SetOut(&bytes.Buffer{})
+	plan := manifest.RestorePlan{
+		Conflicts:      []manifest.MigrationConflict{{Path: "/tmp/wanted", Name: "wanted", SuggestedName: "wanted-local"}},
+		Normalizations: []manifest.Change{{Path: "/tmp/wanted", Name: "wanted", Kind: manifest.ChangeMigrate}},
+	}
+	err := resolveRestoreConflicts(cmd, &options{}, &plan)
+	if err == nil || !strings.Contains(err.Error(), `preserve name must differ from "wanted"`) {
+		t.Fatalf("error = %v, want original-name rejection", err)
+	}
+}
+
+func TestRestoreConflictRejectsPipedSuggestionEvenWithYes(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	writeRestoreCLISkill(t, cfg, "wanted")
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "wanted", "Different.")
+
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "-y", "restore", "--at", ".Ag"},
+		strings.NewReader("wanted-preserved\n"),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("piped restore conflict error = %v", err)
+	}
+}
+
+func TestRestoreConfirmationShowsFinalMigrationSourceAndArchiveName(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	writeRestoreCLISkill(t, cfg, "wanted")
+	source := makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "wanted", "Different.")
+
+	previous := restoreInputIsTerminal
+	restoreInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { restoreInputIsTerminal = previous })
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "restore", "--at", ".Ag"},
+		strings.NewReader("wanted-local\nn\n"),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{source, "wanted-local", "Apply restore plan?"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("final restore confirmation missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func writeRestoreCLISkill(t *testing.T, cfg config.Config, name string) {
+	t.Helper()
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), name, "Archived.")
+	fp, err := fingerprint.Directory(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.WriteLocal(cfg.ProjectRoot, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: name, Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: fp}}}); err != nil {
+		t.Fatal(err)
+	}
+}

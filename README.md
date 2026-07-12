@@ -6,55 +6,90 @@ skills you currently need into project or global agent directories.
 The CLI is working-directory based: `x-skills list` inspects the current project
 plus global skill roots. To inspect another project, `cd` there first.
 
-## Install
+## Go Implementation
 
-Requires `uv` and `git`. Install `uv` from
-<https://docs.astral.sh/uv/> before running the one-liner.
+The Go CLI and TUI are the authoritative implementation of `x-skills`.
+
+Build or run the Go implementation from a source checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/InkyQuill/x-skills/main/install.sh | sh
+mkdir -p ~/bin
+go build -o ~/bin/x-skills ./cmd/x-skills
+go run ./cmd/x-skills list
+go run ./cmd/x-skills repo
+go run ./cmd/x-skills doctor
+go run ./cmd/x-skills doctor --fix -y
+go run ./cmd/x-skills doctor --fix -y --at global:agents
+go run ./cmd/x-skills tui
 ```
 
-The installer checks for `git` and `uv`, then installs the CLI from
-`https://github.com/InkyQuill/x-skills.git` with `uv tool install`.
+Shipped: cwd-based active scanning, local archive listing, remote search/add,
+link/migrate/unlink, recommend/unrecommend, manifest restore, interactive sync,
+Doctor repair, and the `x-skills tui` Bubble Tea guided manager (Active, Repo,
+Doctor, Install, and Sync workflows). Active rows are merged by
+directory SHA fingerprint so identical linked copies appear as one item while
+changed copies remain separate; the fingerprint is internal and not shown in
+the UI.
+
+Archive removal and rename are available from the Repo TUI page; they are not
+separate CLI subcommands. Remote comparisons and same-source updates currently
+belong to Install discovery and conflict handling, not Repo maintenance.
+
+Maintained behavior references: [CLI guide](docs/cli.md), [TUI guide](docs/tui.md),
+[Remote skills guide](docs/remote-skills.md), and [domain vocabulary](CONTEXT.md).
 
 ## Usage
 
 ```bash
 x-skills list
-x-skills list --target codex
-x-skills list --project
-x-skills list --global
+x-skills list --at project:codex
+x-skills list --at .Ag --at '~Cl'
+x-skills list-roots --json
 
 x-skills repo
-x-skills repo --used
-x-skills repo --unused
-x-skills repo --check-updates
 
-x-skills search svelte
-x-skills search react --owner vercel-labs
-x-skills search react --install 1 -y
+x-skills search next
+x-skills search next --owner vercel-labs --json
 
-x-skills link svelte-coder --target codex --project
-x-skills link typescript-expert --target codex --global
-x-skills link svelte-coder typescript-expert --target codex --project
+x-skills link svelte-coder --at project:codex
+x-skills link typescript-expert --at global:codex
+x-skills link svelte-coder typescript-expert --at project:codex
 
-x-skills migrate next-best-practices --target codex --project
-x-skills unlink opentui-react --target agents --global
-x-skills unlink supergoal --target claude --global --delete-unmanaged
+x-skills migrate next-best-practices --at project:codex
+x-skills unlink opentui-react --at global:agents
+x-skills unlink supergoal --at global:claude --delete-unmanaged
 
-x-skills repo add-github owner/repo path/to/skill
-x-skills repo add-github https://github.com/owner/repo/tree/main/skills/foo
-x-skills repo add-url https://example.com/skill.zip
-x-skills repo remove old-skill
+x-skills add owner/repo@skill
+x-skills add owner/repo@skill --no-link -y
+x-skills add owner/repo --all --at .Ag --at '~Cl'
+x-skills add owner/repo skill-name --at .Cd -y
 
-x-skills interactive
+x-skills tui
 x-skills doctor
+x-skills doctor --fix -y
+x-skills doctor --fix -y --at global:agents
 ```
 
+Doctor also checks the shipped `x-` Built-In Skills. A non-interactive
+`doctor --fix -y` archives missing Built-In Skills but deliberately leaves them
+inactive: automation must not guess a Skills Folder. Pass one or more explicit
+global destinations, such as `--at global:agents`, to archive and link them.
+Project destinations are rejected for Built-In Skill repair. Without `-y`,
+`doctor --fix` shows the enabled global Skills Folders with `~Ag` preselected
+and an explicit `Archive only` choice.
+
+Doctor also audits project Git hygiene. It reports an untracked recommended
+manifest (`.x-skills.yaml`), a tracked local manifest
+(`.x-skills.local.yaml`), and tracked files inside configured project Skills
+Folders. Both the CLI and the TUI show shell-quoted `git add` or
+`git rm --cached` commands for the user to run manually. `doctor --fix` never
+changes or stages the Git index; it only appends literal ignore rules for the
+local manifest and project Skills Folders to `.gitignore`. An ignored
+recommended manifest is reported with an explicit `git add -f` suggestion.
+
 `x-skills list` answers "what am I currently working with?" It shows active
-skills from the current project and global roots across `agents`, `claude`, and
-`codex`, grouped by scope and target. Each active skill is marked:
+skills from the current project and global managed roots, grouped by scope and
+target. Each active skill is marked:
 
 - `managed`: symlinked to the same-named repo skill in `~/.x-skills/skills`;
 - `unmanaged`: a real skill directory or symlink outside the repo;
@@ -67,17 +102,8 @@ directory without `SKILL.md`.
 
 `x-skills repo` answers "what do I have saved?" It lists archived skills in
 `~/.x-skills/skills` with descriptions from `SKILL.md` frontmatter.
-`--check-updates` checks archived skills installed from GitHub and shows whether
-the upstream default branch has moved since the stored commit.
 
-`x-skills search` answers "what can I install?" It lists local repo matches
-first, then queries the official `skills.sh` search API and prints installable
-`owner/repo@skill` packages. Use `--install <name-or-index> -y` to install a
-selected result. Local repo results are linked into an active root, defaulting
-to project `agents`; remote `skills.sh` results are copied into the local repo
-archive first.
-
-`link`, `migrate`, `unlink`, and `repo remove` accept multiple skill names and
+`add`, `link`, `migrate`, and `unlink` accept multiple skill names and
 print a summary for batch runs. Batch operations run in order and do not roll
 back earlier successful changes if a later item fails.
 
@@ -104,8 +130,40 @@ Default global active roots:
 - `~/.claude/skills`
 - `~/.codex/skills`
 
-Use `--target agents`, `--target claude`, or `--target codex` to narrow active
-commands. Use `--project` or `--global` to select a scope when needed.
+Use repeatable `--at` selectors to narrow active commands. Selectors can be
+canonical locations such as `project:agents` or `global:codex`, root labels such
+as `.Ag` or `~Cl`, or configured custom labels such as `.Oc`. Ambiguous labels
+fail with guidance to use the canonical `scope:target` form.
+
+Custom managed roots live in `~/.x-skills/config.yaml`:
+
+```yaml
+version: 1
+active_roots:
+  - scope: project
+    target: agents
+    path: .agents/skills
+    label: .Ag
+    consumers: [codex, pi, opencode, crush]
+  - scope: global
+    target: hermes
+    path: ~/.config/hermes/skills
+    label: ~Hm
+  - scope: global
+    target: claude
+    enabled: false
+```
+
+Config entries add or override roots by `scope` and `target`. `enabled: false`
+disables a root and does not require `path`. Relative project paths are resolved
+from the current project root; relative global paths and `~/` paths are resolved
+from the home directory. Target and consumer ids must match
+`^[a-z][a-z0-9-]*$`. Omitted consumers on a custom root mean that its consumer
+set is unknown.
+
+Use `x-skills list-roots` to inspect enabled managed roots and discover
+available `--at` selectors. Use `x-skills list-roots --json` for
+agent-readable root discovery, including each root's canonical `consumers` IDs.
 
 ## Prompts
 
@@ -120,52 +178,45 @@ Global prompt flags:
 
 - `-y`, `--yes`: answer yes to yes/no confirmations;
 - `-n`, `--no`: answer no to yes/no confirmations;
-- `--no-input`: never prompt;
-- `--json`: machine-readable output for data commands.
+- `--no-input`: never prompt.
 
-`-y` and `-n` do not choose among ambiguous locations. Use explicit flags such as
-`--target codex --project` or answer the interactive selection prompt.
+`-y` and `-n` do not choose among ambiguous locations. Use explicit selectors
+such as `--at project:codex` or answer the interactive selection prompt.
 
 For unmanaged active directories, `unlink` asks whether to migrate first, remove
 the active directory without migration, or cancel. For automation, use
 `--delete-unmanaged -y` to remove an unmanaged active directory without adding it
 to the repo.
 
-## Interactive Mode
+## TUI Mode
 
-`x-skills interactive` opens a Textual-based manager for longer maintenance
-sessions. It has active and repo views: press `a` for active skills and `l` for
-local repo skills. Active skills are grouped by directory SHA fingerprint, not
-name, so identical linked copies collapse into one row while changed copies stay
-separate. Use Space for multi-select. In active view, `m` migrates, `u` unlinks,
-and `x` cleans broken links; when nothing is selected, `x` cleans all broken
-links.
+`x-skills tui` opens the Bubble Tea maintenance manager for longer maintenance
+sessions. The TUI has Active, Repo, Doctor, and Install pages plus the Sync
+workflow: press `A` for
+Active, `R` for Repo, `D` for Doctor, and `I` for Install. Refresh is `ctrl+r`.
 
-In repo view, select saved skills and press `i` to link them into the chosen
-destination. The default destination is project `agents`; press `p`/`g` for
-project/global and `1`/`2`/`3` for agents/claude/codex. Press `s` to search;
-local repo matches appear before `skills.sh` results.
+Use Install to search `skills.sh`, preview remote `SKILL.md`, archive a skill,
+or install and link it into the current project. Audit risk pills (safe/warn/risky)
+and source badges are shown alongside each result. Manual generic Git installs
+remain CLI-first through `x-skills add --git`.
 
-## Install Sources
+Use Active to inspect current project/global skills, preview `SKILL.md`, migrate
+unmanaged directories into the archive, and unlink active copies. Use Repo to
+preview archived skills, link them into a selected destination, unlink visible
+current usages, or delete archives after visible usages are removed. Use Doctor
+to review and fix current issues. Built-In Skill repairs open a global Skills
+Folder checklist with `~Ag` preselected and an `Archive only` choice; the
+filesystem work runs in the background so the TUI remains responsive.
 
-`x-skills repo add-github` clones a GitHub repository and copies one skill into
-the repo. Pass `path/to/skill` when the repository contains more than one
-`SKILL.md`. GitHub installs store source metadata in `.x-skills.json` inside the
-archived skill, including source repo, skill path, and installed commit.
+## Design Decisions
 
-`x-skills repo add-url` accepts:
-
-- a `.zip` archive containing exactly one skill;
-- a `.tar`/`.tar.gz` archive containing exactly one skill;
-- a direct `SKILL.md` URL with a `name:` frontmatter field.
-
-Install community skills only from trusted sources. Skills can contain scripts
-and instructions that affect future agent behavior.
+Significant, non-obvious decisions are recorded as ADRs in `docs/adr/`. When a
+choice needs weighing trade-offs (not just implementing an agreed spec), write
+or update an ADR rather than only changing code/docs.
 
 ## Development
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+go build ./...
+go test ./...
 ```

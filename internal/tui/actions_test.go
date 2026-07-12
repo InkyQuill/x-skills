@@ -1,0 +1,1603 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/builtin"
+	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/InkyQuill/x-skills/internal/remote"
+	"github.com/InkyQuill/x-skills/internal/roots"
+	"github.com/InkyQuill/x-skills/internal/skills"
+)
+
+func requireRestorePlanModal(t *testing.T, value modal) restorePlanModal {
+	t.Helper()
+	preview, ok := value.(restorePlanModal)
+	if !ok {
+		t.Fatalf("modal = %T, want restorePlanModal", value)
+	}
+	return preview
+}
+
+func TestRestoreWorkbenchUsesProjectDestinationsAndPlansAsynchronously(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	m := New(cfg)
+
+	updated, cmd := m.Update(keyRunes("s"))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("opening restore workbench returned a command")
+	}
+	workbench, ok := m.modal.(restoreWorkbenchModal)
+	if !ok {
+		t.Fatalf("modal = %T, want restoreWorkbenchModal", m.modal)
+	}
+	if workbench.full {
+		t.Fatal("restore workbench Full defaulted on")
+	}
+	if len(workbench.destinations) != 3 {
+		t.Fatalf("destinations = %#v, want three project Skills Folders", workbench.destinations)
+	}
+	for _, destination := range workbench.destinations {
+		if destination.root.Scope != config.ScopeProject {
+			t.Fatalf("global destination exposed: %#v", destination)
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil || !m.restoreInFlight {
+		t.Fatal("restore planning was not staged asynchronously")
+	}
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
+	if _, ok := m.modal.(restorePlanModal); !ok {
+		t.Fatalf("modal = %T, want restorePlanModal", m.modal)
+	}
+}
+
+func TestRestorePlanStaleDeliveryCleansStaging(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "wanted", "Wanted.")
+	fp, err := fingerprint.Directory(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.WriteLocal(cfg.ProjectRoot, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "wanted", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: fp}}}); err != nil {
+		t.Fatal(err)
+	}
+	root := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject, Target: config.TargetAgents})[0]
+	plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{Destinations: []roots.ActiveRoot{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := plan.StagingRootForTest()
+	if staging == "" {
+		t.Fatal("PlanRestore returned empty staging root")
+	}
+	m := New(cfg)
+	m.restoreToken = 2
+	updated, _ := m.Update(restorePlanMsg{token: 1, plan: plan})
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("stale restore plan opened modal: %T", m.modal)
+	}
+	if _, err := os.Lstat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale restore staging remains: %v", err)
+	}
+}
+
+func TestRestoreConflictRenameIsEditableBeforeApply(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{{Kind: manifest.ChangeMigrate, Name: "wanted", Path: "/project/.agents/skills/wanted"}},
+		Conflicts:      []manifest.MigrationConflict{{Name: "wanted", Path: "/project/.agents/skills/wanted", SuggestedName: "wanted-preserved"}},
+	}
+	m.openRestorePlan(plan)
+	preview := requireRestorePlanModal(t, m.modal)
+	preview.editConflict(&m, 0)
+	rename, ok := m.modal.(restoreRenameModal)
+	if !ok {
+		t.Fatalf("modal = %T, want restoreRenameModal", m.modal)
+	}
+	rename.input.SetValue("wanted-local")
+	m.modal = rename
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("editing restore archive name started mutation")
+	}
+	preview = requireRestorePlanModal(t, m.modal)
+	if got := preview.plan.Normalizations[0].ArchiveName; got != "wanted-local" {
+		t.Fatalf("archive name = %q, want wanted-local", got)
+	}
+}
+
+func TestRestoreNormalizationOnlyRequiresDestructiveConfirmation(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{{
+			Kind: manifest.ChangeRemove,
+			Name: "broken",
+			Path: "/project/.agents/skills/broken",
+		}},
+	}
+	m.openRestorePlan(plan)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("destructive normalization started without confirmation")
+	}
+	if _, ok := m.modal.(restoreConfirmModal); !ok {
+		t.Fatalf("modal = %T, want restoreConfirmModal", m.modal)
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, "/project/.agents/skills/broken") {
+		t.Fatalf("confirmation missing exact normalization path:\n%s", view)
+	}
+}
+
+func TestRestoreBlockedNormalizationsDoNotRequireDestructiveConfirmation(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Unavailable: []manifest.UnavailableSkill{{Name: "missing", Reason: "unavailable"}},
+		Normalizations: []manifest.Change{{
+			Kind: manifest.ChangeRemove,
+			Name: "blocked",
+			Path: "/project/.agents/skills/blocked",
+		}},
+		RemovalsBlocked: true,
+	}
+	m.openRestorePlan(plan)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("safe restore apply command is nil")
+	}
+	if _, ok := m.modal.(restoreConfirmModal); ok {
+		t.Fatal("blocked normalization opened destructive confirmation")
+	}
+}
+
+func TestRestoreCompletionSummaryCountsChangesByKind(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.restoreToken = 1
+	result := manifest.RestoreResult{
+		Normalizations: []manifest.Change{
+			{Kind: manifest.ChangeMigrate},
+			{Kind: manifest.ChangeRemove},
+		},
+		Removals: []manifest.Change{
+			{Kind: manifest.ChangeMigrate},
+			{Kind: manifest.ChangeRemove},
+		},
+	}
+	m.applyRestoreResult(restoreApplyMsg{token: 1, result: result})
+	if m.status != "restored 0 links, 2 migrations, 2 removals" {
+		t.Fatalf("restore status = %q", m.status)
+	}
+}
+
+func TestRestoreDestructiveConfirmationShowsChosenArchiveName(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{{
+			Kind:        manifest.ChangeMigrate,
+			Name:        "wanted",
+			Path:        "/project/.agents/skills/wanted",
+			ArchiveName: "wanted-local",
+		}},
+	}
+	parent := restorePlanModal{plan: plan}
+	m.modal = restoreConfirmModal{parent: parent, choice: 1}
+	view := plain(m.modal.View(120, 40, m))
+	for _, want := range []string{"/project/.agents/skills/wanted", "archive:wanted-local"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("confirmation missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRestoreNestedModalsNavigateBackAndFinalCancelClosesStaging(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{
+		Destinations: roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[:1],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := requireRestoreStagingRoot(t, plan)
+
+	m := New(cfg)
+	setup := newRestoreWorkbenchModal(cfg)
+	m.modal = restorePlanModal{plan: plan, setup: setup}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	if _, ok := m.modal.(restoreWorkbenchModal); !ok {
+		t.Fatalf("preview back modal = %T, want restoreWorkbenchModal", m.modal)
+	}
+	if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging root still exists after final cancel: %s", staging)
+	}
+}
+
+func TestRestoreQuitClosesStagingFromEveryNestedModal(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[:1]
+
+	tests := []struct {
+		name  string
+		modal func(manifest.RestorePlan) modal
+	}{
+		{
+			name: "rename",
+			modal: func(plan manifest.RestorePlan) modal {
+				parent := restorePlanModal{
+					plan: plan,
+				}
+				input := textinput.New()
+				return restoreRenameModal{parent: parent, input: input}
+			},
+		},
+		{
+			name: "confirmation",
+			modal: func(plan manifest.RestorePlan) modal {
+				return restoreConfirmModal{parent: restorePlanModal{plan: plan}, choice: 1}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, err := manifest.PlanRestore(context.Background(), cfg, manifest.RestoreRequest{Destinations: destination})
+			if err != nil {
+				t.Fatal(err)
+			}
+			staging := requireRestoreStagingRoot(t, plan)
+			m := New(cfg)
+			m.modal = tt.modal(plan)
+			_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("staging root still exists after quit: %s", staging)
+			}
+		})
+	}
+}
+
+func TestRestoreMultipleConflictsAreNavigableAndRenameBackPreservesPreview(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	plan := manifest.RestorePlan{
+		Normalizations: []manifest.Change{
+			{Kind: manifest.ChangeMigrate, Name: "alpha", Path: "/skills/alpha"},
+			{Kind: manifest.ChangeMigrate, Name: "bravo", Path: "/skills/bravo"},
+		},
+		Conflicts: []manifest.MigrationConflict{
+			{Name: "alpha", Path: "/skills/alpha", SuggestedName: "alpha-preserved"},
+			{Name: "bravo", Path: "/skills/bravo", SuggestedName: "bravo-preserved"},
+		},
+	}
+	m.openRestorePlan(plan)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	preview := requireRestorePlanModal(t, m.modal)
+	if preview.conflictIndex != 1 {
+		t.Fatalf("conflict index = %d, want 1", preview.conflictIndex)
+	}
+	updated, _ = m.Update(keyRunes("e"))
+	m = mustModel(t, updated)
+	if rename := m.modal.(restoreRenameModal); rename.conflictIndex != 1 {
+		t.Fatalf("rename conflict index = %d, want 1", rename.conflictIndex)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	preview = requireRestorePlanModal(t, m.modal)
+	if preview.conflictIndex != 1 {
+		t.Fatalf("preview conflict index after back = %d, want 1", preview.conflictIndex)
+	}
+}
+
+func requireRestoreStagingRoot(t *testing.T, plan manifest.RestorePlan) string {
+	t.Helper()
+	staging := plan.StagingRootForTest()
+	if staging == "" {
+		t.Fatal("restore planning did not create a staging root")
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Fatalf("staging root is not usable: %v", err)
+	}
+	return staging
+}
+
+func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Zen.")
+	if err := remote.WriteSourceMetadata(archive, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "skills", SkillPath: "skills/zen-of-go"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewRepo)
+
+	updated, cmd := m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("recommendation key command = nil, want asynchronous command")
+	}
+	if m.view != ViewRepo {
+		t.Fatalf("view = %s, want Repo", m.view)
+	}
+	recommended, err := manifest.LoadRecommended(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommended.Skills) != 0 {
+		t.Fatalf("recommended changed before command delivery: %#v", recommended.Skills)
+	}
+	if _, duplicate := m.Update(keyRunes("r")); duplicate != nil {
+		t.Fatal("second recommendation command started while first is in flight")
+	}
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
+	recommended, err = manifest.LoadRecommended(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommended.Skills) != 1 || recommended.Skills[0].Name != "zen-of-go" {
+		t.Fatalf("recommended = %#v, want zen-of-go", recommended.Skills)
+	}
+	if !strings.Contains(m.status, "Promoted") {
+		t.Fatalf("status = %q, want promotion result", m.status)
+	}
+
+	updated, cmd = m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("unrecommendation key command = nil, want asynchronous command")
+	}
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
+	recommended, err = manifest.LoadRecommended(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommended.Skills) != 0 {
+		t.Fatalf("recommended = %#v, want empty after second toggle", recommended.Skills)
+	}
+	if !strings.Contains(m.status, "Removed") {
+		t.Fatalf("status = %q, want removal result", m.status)
+	}
+}
+
+func TestStaleRecommendationResultDoesNotMutateCurrentGeneration(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.recommendationToken = 2
+	m.recommendationInFlight = true
+	m.status = "current operation"
+
+	updated, _ := m.Update(recommendationResultMsg{token: 1, names: []string{"stale"}, promote: true})
+	m = mustModel(t, updated)
+	if !m.recommendationInFlight || m.status != "current operation" {
+		t.Fatalf("stale result mutated model: inFlight=%v status=%q", m.recommendationInFlight, m.status)
+	}
+}
+
+func TestActiveMigrateSameSHAArchivesRelinkWithoutConflict(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	active := makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Same.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Same.")
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("migrate modal did not open")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after successful migrate", m.modal)
+	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != archived {
+		t.Fatalf("active resolved to %q, want %q", resolved, archived)
+	}
+	if !strings.Contains(m.status, "relinked") {
+		t.Fatalf("status = %q, want relinked", m.status)
+	}
+}
+
+func TestActiveMigrateDivergentArchiveOpensConflictModal(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Active.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Archived.")
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if m.modal == nil {
+		t.Fatal("modal is nil")
+	}
+	view := m.modal.View(120, 40, m)
+	if !strings.Contains(view, "Archive conflict: zen-of-go") {
+		t.Fatalf("expected conflict modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("k"))
+	mustModel(t, updated)
+	info, err := skills.Read(archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Archived." {
+		t.Fatalf("archive description = %q, want Archived.", info.Description)
+	}
+}
+
+func TestActiveMigrateModalKeepsFooterVisibleAndScrollsTargets(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	for i := 0; i < 12; i++ {
+		makeSkill(t, cfg.MustActiveRoot("project", "agents"), fmt.Sprintf("skill-%02d", i), "Local.")
+	}
+	m := New(cfg)
+	m.width = 100
+	m.height = 18
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("migrate modal did not open")
+	}
+	view := plain(m.modal.View(m.width, m.height, m))
+	if got := strings.Count(view, "\n") + 1; got > m.height {
+		t.Fatalf("migrate modal height = %d, want <= %d:\n%s", got, m.height, view)
+	}
+	for _, want := range []string{"Migrate active skills", "Targets (12)", "skill-00", "[ Apply ]", "Cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("migrate modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "skill-11") {
+		t.Fatalf("migrate modal should not render every target before scrolling:\n%s", view)
+	}
+	for _, unexpected := range []string{"Plan", "Compare active content", "If identical", "If different"} {
+		if strings.Contains(view, unexpected) {
+			t.Fatalf("migrate modal should not explain migration internals %q:\n%s", unexpected, view)
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	view = plain(m.modal.View(m.width, m.height, m))
+	if got := strings.Count(view, "\n") + 1; got > m.height {
+		t.Fatalf("scrolled migrate modal height = %d, want <= %d:\n%s", got, m.height, view)
+	}
+	for _, want := range []string{"skill-11", "[ Apply ]", "Cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("scrolled migrate modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestActiveMigrateContinuesBatchAfterConflictResolution(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "bravo-skill", "Active.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "bravo-skill", "Archived.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "charlie-skill", "Charlie.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 40
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected conflict modal")
+	}
+	if view := plain(m.modal.View(120, 40, m)); !strings.Contains(view, "Archive conflict: bravo-skill") {
+		t.Fatalf("expected bravo conflict modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("k"))
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after continuing batch", m.modal)
+	}
+	if m.status != "migrated 3 locations" {
+		t.Fatalf("status = %q, want migrated 3 locations", m.status)
+	}
+	for _, name := range []string{"alpha-skill", "charlie-skill"} {
+		activePath := filepath.Join(cfg.MustActiveRoot("project", "agents"), name)
+		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), name)
+		if _, err := os.Stat(archivePath); err != nil {
+			t.Fatalf("%s archive missing after batch continuation: %v", name, err)
+		}
+		resolved, err := filepath.EvalSymlinks(activePath)
+		if err != nil {
+			t.Fatalf("%s active link missing after batch continuation: %v", name, err)
+		}
+		if resolved != archivePath {
+			t.Fatalf("%s active resolved to %q, want %q", name, resolved, archivePath)
+		}
+	}
+	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "bravo-skill"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Archived." {
+		t.Fatalf("bravo archive description = %q, want Archived.", info.Description)
+	}
+}
+
+func TestActiveMigrateContinuesBatchAfterUseActiveConflictResolution(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Active alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Archived alpha.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "bravo-skill", "Active bravo.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "bravo-skill", "Archived bravo.")
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "charlie-skill", "Charlie.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 40
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected first conflict modal")
+	}
+	if view := plain(m.modal.View(120, 40, m)); !strings.Contains(view, "Archive conflict: alpha-skill") {
+		t.Fatalf("expected alpha conflict modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected second conflict modal after choosing active for first conflict")
+	}
+	if view := plain(m.modal.View(120, 40, m)); !strings.Contains(view, "Archive conflict: bravo-skill") {
+		t.Fatalf("expected bravo conflict modal after continuing queue:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after completing queue", m.modal)
+	}
+	if m.status != "migrated 3 locations" {
+		t.Fatalf("status = %q, want migrated 3 locations", m.status)
+	}
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "alpha-skill", want: "Active alpha."},
+		{name: "bravo-skill", want: "Active bravo."},
+		{name: "charlie-skill", want: "Charlie."},
+	} {
+		info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), tc.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Description != tc.want {
+			t.Fatalf("%s archive description = %q, want %q", tc.name, info.Description, tc.want)
+		}
+	}
+}
+
+func TestActiveMigrateConflictResolutionReloadsActiveList(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Active alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Archived alpha.")
+	m := New(cfg)
+	m.width = 120
+	m.height = 40
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+
+	updated, _ := m.Update(keyRunes("m"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("expected conflict modal")
+	}
+
+	updated, reloadCmd := m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if reloadCmd == nil {
+		t.Fatal("post-mutation reload command = nil, want asynchronous reload")
+	}
+	updated, _ = m.Update(reloadCmd())
+	m = mustModel(t, updated)
+
+	if len(m.active) != 1 {
+		t.Fatalf("active groups = %d, want 1", len(m.active))
+	}
+	group := m.active[0]
+	if group.Name != "alpha-skill" || len(group.Members) != 1 {
+		t.Fatalf("active group = %#v", group)
+	}
+	member := group.Members[0]
+	if member.Status != actions.StatusManaged {
+		t.Fatalf("active status = %q, want managed", member.Status)
+	}
+	if member.Description != "Active alpha." {
+		t.Fatalf("active description = %q, want reloaded active description", member.Description)
+	}
+}
+
+func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "managed", "Managed.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(root, "managed")); err != nil {
+		t.Fatal(err)
+	}
+	makeSkill(t, root, "unmanaged", "Unmanaged.")
+	if err := os.Symlink(filepath.Join(home, "missing"), filepath.Join(root, "broken")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	m.selected = map[ViewName]map[string]bool{
+		ViewActive: {},
+		ViewRepo:   {},
+		ViewDoctor: {},
+	}
+	for _, group := range m.active {
+		m.selected[ViewActive][group.ID] = true
+	}
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("unlink modal is nil")
+	}
+	view := m.modal.View(110, 35, m)
+	for _, want := range []string{"Unlink usages:", "◆ .Ag", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unlink modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestActiveUnlinkManagedOnlyAsksForLocationsNotCopy(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "autofix", "Autofix.")
+	agentsRoot := cfg.MustActiveRoot("global", "agents")
+	claudeRoot := cfg.MustActiveRoot("global", "claude")
+	if err := os.MkdirAll(agentsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(agentsRoot, "autofix")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(claudeRoot, "autofix")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("unlink modal is nil")
+	}
+	view := m.modal.View(120, 35, m)
+	for _, want := range []string{"Unlink usages: autofix", "~Ag", "~Cl", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unlink locations modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Migrate to repo") || strings.Contains(view, "Delete active copies") {
+		t.Fatalf("managed-only unlink asked to copy/delete active directories:\n%s", view)
+	}
+}
+
+func TestActiveUnlinkManagedGroupRemovesEachSelectedLocation(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "autofix", "Autofix.")
+	agentsPath := filepath.Join(cfg.MustActiveRoot("global", "agents"), "autofix")
+	claudePath := filepath.Join(cfg.MustActiveRoot("global", "claude"), "autofix")
+	if err := os.MkdirAll(filepath.Dir(agentsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, agentsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, claudePath); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if _, err := os.Lstat(agentsPath); !os.IsNotExist(err) {
+		t.Fatalf("agents link still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("claude link still exists or unexpected error: %v", err)
+	}
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after successful managed unlink", m.modal)
+	}
+	if m.status != "unlinked 2 locations" {
+		t.Fatalf("status = %q, want unlinked 2 locations", m.status)
+	}
+}
+
+func TestActiveUnlinkUnmanagedAliasChoosesLocationThenArchivesSelectedLink(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	agentsPath := makeSkill(t, cfg.MustActiveRoot("global", "agents"), "code-review", "Review.")
+	claudePath := filepath.Join(cfg.MustActiveRoot("global", "claude"), "code-review")
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(agentsPath, claudePath); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("unlink modal is nil")
+	}
+	view := m.modal.View(120, 35, m)
+	for _, want := range []string{"Unlink usages: code-review", "~Ag", "~Cl", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unlink locations modal missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("copy/delete choice modal is nil")
+	}
+	if !strings.Contains(m.modal.View(120, 35, m), "Copy selected unmanaged skills to repo") {
+		t.Fatalf("expected copy/delete choice modal:\n%s", m.modal.View(120, 35, m))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	archived := filepath.Join(cfg.ArchiveSkillsRoot(), "code-review")
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(agentsPath); err != nil {
+		t.Fatalf("agents source should remain: %v", err)
+	}
+	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("claude link still exists or unexpected error: %v", err)
+	}
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after successful unlink", m.modal)
+	}
+	if m.status == "" {
+		t.Fatal("status is empty after successful unlink")
+	}
+}
+
+func TestActiveUnlinkUnmanagedAliasConflictOpensDiffAndContinues(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	source := makeSkill(t, filepath.Join(home, "external"), "code-review", "Review.")
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "code-review", "Archived.")
+	activePath := filepath.Join(cfg.MustActiveRoot("project", "codex"), "code-review")
+	if err := os.MkdirAll(filepath.Dir(activePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, activePath); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+
+	if m.modal == nil {
+		t.Fatal("conflict modal is nil")
+	}
+	view := m.modal.View(120, 40, m)
+	if !strings.Contains(view, "Archive conflict: code-review") {
+		t.Fatalf("expected archive conflict diff modal:\n%s", view)
+	}
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	info, err := skills.Read(archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "Review." {
+		t.Fatalf("archive description = %q, want Review.", info.Description)
+	}
+	if _, err := os.Lstat(activePath); !os.IsNotExist(err) {
+		t.Fatalf("active link still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("external source should remain: %v", err)
+	}
+	if m.modal != nil {
+		t.Fatalf("modal = %#v, want closed after resolved unlink", m.modal)
+	}
+}
+
+func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("repo link modal is nil")
+	}
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"Link repo skill", "Destination", ".Ag", "project:agents", "Will create"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("link modal missing %q:\n%s", want, view)
+		}
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go")); err != nil {
+		t.Fatalf("link was not created: %v", err)
+	}
+	view = plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "✓ zen-of-go linked") {
+		t.Fatalf("link result should report first successful apply, not a second failure:\n%s", view)
+	}
+	if strings.Contains(view, "already exists") {
+		t.Fatalf("link result reports duplicate second apply:\n%s", view)
+	}
+}
+
+func TestRepoLinkModalShowsFocusedDestinationAndSelectedChoice(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+
+	raw := m.modal.View(100, 30, m)
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("selected choice background style is not configured")
+	}
+	view := plain(raw)
+	if !strings.Contains(view, "› ● .Ag  project:agents") {
+		t.Fatalf("link modal missing focused selected destination:\n%s", view)
+	}
+	if !strings.Contains(view, "  ○ .Cl  project:claude") {
+		t.Fatalf("link modal missing configured destination list:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	raw = m.modal.View(100, 30, m)
+	view = plain(raw)
+	if !strings.Contains(view, "› ● .Cl  project:claude") {
+		t.Fatalf("link modal missing focused destination after moving:\n%s", view)
+	}
+}
+
+func TestRepoLinkModalCanChangeDestination(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+
+	for i := 0; i < 5; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustModel(t, updated)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mustModel(t, updated)
+
+	if _, err := os.Lstat(filepath.Join(cfg.GlobalCodexRoot, "zen-of-go")); err != nil {
+		t.Fatalf("global codex link was not created: %v", err)
+	}
+}
+
+func TestRepoLinkModalUsesConfiguredRoots(t *testing.T) {
+	cfg := customRootConfig(t)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.setView(ViewRepo)
+
+	updated, _ := m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("repo link modal is nil")
+	}
+	view := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(view, ".Oc") || strings.Contains(view, ".Ag") {
+		t.Fatalf("repo link modal should use configured custom root only:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(cfg.ProjectRoot, ".opencode", "skills", "zen-of-go")); err != nil {
+		t.Fatalf("custom root link was not created: %v", err)
+	}
+}
+
+func TestRepoLinkUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("l"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "  target-skill") || strings.Contains(view, "  alpha-skill") {
+		t.Fatalf("link modal should target selected repo row, not cursor:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "target-skill")); err != nil {
+		t.Fatalf("selected repo skill was not linked: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(cfg.MustActiveRoot("project", "agents"), "alpha-skill")); !os.IsNotExist(err) {
+		t.Fatalf("cursor repo skill should not be linked, err=%v", err)
+	}
+}
+
+func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	projectRoot := cfg.MustActiveRoot("project", "agents")
+	globalRoot := cfg.MustActiveRoot("global", "claude")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(projectRoot, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(globalRoot, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	raw := m.modal.View(110, 35, m)
+	if colorAvailableForTest() && !selectedBackgroundConfigured() {
+		t.Fatal("usage chooser selected row background style is not configured")
+	}
+	view := plain(raw)
+	for _, want := range []string{"Unlink usages: zen-of-go", "◆ .Ag", "◆ ~Cl", "Unlink selected"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("usage chooser missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(filepath.Join(projectRoot, "zen-of-go")); !os.IsNotExist(err) {
+		t.Fatalf("project usage still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(globalRoot, "zen-of-go")); !os.IsNotExist(err) {
+		t.Fatalf("global usage still exists or unexpected error: %v", err)
+	}
+}
+
+func TestRepoUsageModalConstrainsLongTargetList(t *testing.T) {
+	targets := make([]repoUsageTarget, 0, 24)
+	selected := map[int]bool{}
+	for i := 0; i < 24; i++ {
+		targets = append(targets, repoUsageTarget{
+			Name:   fmt.Sprintf("skill-%02d", i),
+			Chip:   ".Ag",
+			Path:   fmt.Sprintf("/very/long/path/to/active/root/skill-%02d", i),
+			Status: actions.StatusManaged,
+		})
+		selected[i] = true
+	}
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.width = 90
+	m.height = 14
+	m.modal = repoUsageModal{name: "zen-of-go", targets: targets, selected: selected, index: 18}
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 14 {
+		t.Fatalf("view height = %d, want 14:\n%s", len(lines), view)
+	}
+	plainView := plain(view)
+	for _, want := range []string{"Unlink usages: zen-of-go", "skill-18", "Unlink selected", "↑/↓ move"} {
+		if !strings.Contains(plainView, want) {
+			t.Fatalf("constrained usage modal missing %q:\n%s", want, plainView)
+		}
+	}
+	if strings.Contains(plainView, "skill-00") {
+		t.Fatalf("usage modal did not scroll long target list:\n%s", plainView)
+	}
+
+	for i := 0; i < 5; i++ {
+		updated, _ := m.Update(keyRunes("j"))
+		m = mustModel(t, updated)
+	}
+	plainView = plain(m.View())
+	if !strings.Contains(plainView, "skill-23") {
+		t.Fatalf("usage modal did not scroll with j key:\n%s", plainView)
+	}
+}
+
+func TestRepoUnlinkUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	alphaArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alphaUsage := filepath.Join(root, "alpha-skill")
+	targetUsage := filepath.Join(root, "target-skill")
+	if err := os.Symlink(alphaArchive, alphaUsage); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetArchive, targetUsage); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("u"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	if !strings.Contains(view, "Unlink usages: target-skill") || strings.Contains(view, "alpha-skill") {
+		t.Fatalf("unlink modal should target selected repo row, not cursor:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(targetUsage); !os.IsNotExist(err) {
+		t.Fatalf("selected repo usage still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Lstat(alphaUsage); err != nil {
+		t.Fatalf("cursor repo usage should remain: %v", err)
+	}
+}
+
+func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, filepath.Join(root, "zen-of-go")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := m.modal.View(110, 35, m)
+	for _, want := range []string{"Delete archive: zen-of-go", "Visible usages", "Only current project roots and global roots are known", "Unlink visible usages, then delete archive"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("delete modal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRepoDeleteUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	alphaArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	if !strings.Contains(view, "Delete archive: target-skill") || strings.Contains(view, "Delete archive: alpha-skill") {
+		t.Fatalf("delete modal should target selected repo row, not cursor:\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if _, err := os.Stat(targetArchive); !os.IsNotExist(err) {
+		t.Fatalf("selected repo archive still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Stat(alphaArchive); err != nil {
+		t.Fatalf("cursor repo archive should remain: %v", err)
+	}
+}
+
+func TestRepoDeleteMultiSelectedNoVisibleUsagesUsesPluralDirectCopy(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	for _, want := range []string{
+		"Delete archives: 2 selected repo skills",
+		"Selected archives",
+		"alpha-skill",
+		"target-skill",
+		"No visible usages in the current working set.",
+		"Delete archives",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("batch delete modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "This archive is used in the current working set.") {
+		t.Fatalf("batch delete without usages should not show usage warning:\n%s", view)
+	}
+	if strings.Contains(view, "Unlink visible usages, then delete") {
+		t.Fatalf("batch delete without usages should use direct delete action:\n%s", view)
+	}
+}
+
+func TestRepoDeleteMultiSelectedMixedVisibleUsagesPluralizesWarning(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
+	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetArchive, filepath.Join(root, "target-skill")); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("R"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = mustModel(t, updated)
+
+	updated, _ = m.Update(keyRunes("d"))
+	m = mustModel(t, updated)
+	view := plain(m.modal.View(120, 35, m))
+	for _, want := range []string{
+		"Delete archives: 2 selected repo skills",
+		"Selected archives",
+		"alpha-skill",
+		"target-skill",
+		"One or more selected archives are used in the current working set.",
+		"Visible usages",
+		"Unlink visible usages, then delete archives",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("mixed batch delete modal missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "This archive is used in the current working set.") {
+		t.Fatalf("mixed batch delete should use plural usage warning:\n%s", view)
+	}
+}
+
+func TestRepoDeleteSkipsArchiveDeletionWhenUnlinkFails(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	m := New(cfg)
+	m.active = []ActiveGroup{{
+		Name: "zen-of-go",
+		Members: []actions.ActiveSkill{{
+			Name:   "zen-of-go",
+			Path:   filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go"),
+			Root:   roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents},
+			Status: actions.StatusManaged,
+		}},
+	}}
+
+	m.applyRepoDelete("zen-of-go")
+
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("archive should remain after unlink failure: %v", err)
+	}
+	if m.modal == nil {
+		t.Fatal("delete result modal is nil")
+	}
+	view := plain(m.modal.View(120, 30, m))
+	if !strings.Contains(view, "skipped because unlink failed") {
+		t.Fatalf("delete result missing skip message:\n%s", view)
+	}
+}
+
+func TestRepoDeleteReconcilesSuccessfulProjectUnlinkWhenLaterUnlinkFails(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
+	projectPath := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "zen-of-go")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archived, projectPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.WriteLocal(project, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "zen-of-go", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: strings.Repeat("a", 64)}}}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.active = []ActiveGroup{{Name: "zen-of-go", Members: []actions.ActiveSkill{
+		{Name: "zen-of-go", Path: projectPath, Root: roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents}, Status: actions.StatusManaged},
+		{Name: "zen-of-go", Path: filepath.Join(cfg.GlobalAgentsRoot, "missing"), Root: roots.ActiveRoot{Scope: config.ScopeGlobal, Target: config.TargetAgents}, Status: actions.StatusManaged},
+	}}}
+
+	m.applyRepoDelete("zen-of-go")
+	if m.pendingMutationCmd == nil {
+		t.Fatal("reconciliation command = nil after partial project success")
+	}
+	msg := m.pendingMutationCmd()
+	if _, cmd := m.Update(msg); cmd != nil {
+		t.Fatal("unexpected follow-up command")
+	}
+	got, err := manifest.LoadLocal(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skills) != 0 {
+		t.Fatalf("local skills = %#v, want reconciled empty overlay", got.Skills)
+	}
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("archive removed despite later unlink failure: %v", err)
+	}
+}
+
+func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	root := cfg.MustActiveRoot("project", "agents")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(root, "zen-of-go")
+	if err := os.Symlink(filepath.Join(home, "missing"), broken); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(cfg)
+	updated, _ := m.Update(keyRunes("D"))
+	m = mustModel(t, updated)
+	updated, _ = m.Update(keyRunes("f"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("doctor fix modal is nil")
+	}
+	view := m.modal.View(100, 30, m)
+	for _, want := range []string{"Doctor fixes", "broken symlink", "Built-in skills", "~Ag", "Archive only"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("doctor fix modal missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("doctor fix returned nil command")
+	}
+	updated, _ = m.Update(cmd())
+	m = mustModel(t, updated)
+	if _, err := os.Lstat(broken); !os.IsNotExist(err) {
+		t.Fatalf("broken symlink still exists or unexpected error: %v", err)
+	}
+}
+
+func TestDoctorBuiltInFixModalDefaultsToGlobalAgentsAndCanChooseArchiveOnly(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reload()
+	m.view = ViewDoctor
+	m.openDoctorFixModal()
+
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "[x] ~Ag") || !strings.Contains(view, "[ ] Archive only") {
+		t.Fatalf("unexpected defaults:\n%s", view)
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = mustModel(t, updated)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = mustModel(t, updated)
+	view = plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "[x] Archive only") {
+		t.Fatalf("archive-only option not selected:\n%s", view)
+	}
+}
+
+func TestDoctorBuiltInFixRunsInCommandAndAppliesGenerationSafeResult(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reload()
+	m.view = ViewDoctor
+	m.openDoctorFixModal()
+	catalog, _ := builtin.List()
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), catalog[0].Name)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("Enter returned nil command")
+	}
+	if _, err := os.Lstat(archive); !os.IsNotExist(err) {
+		t.Fatalf("filesystem mutated before command execution: %v", err)
+	}
+	msg := cmd()
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatalf("command did not archive built-in: %v", err)
+	}
+
+	m.doctorFixToken++
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal != nil || m.status == "" {
+		t.Fatalf("stale result applied: modal=%T status=%q", m.modal, m.status)
+	}
+}
+
+func TestDoctorFixIgnoresSecondFixWhileCommandIsInFlight(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg)
+	m.reload()
+	m.view = ViewDoctor
+	m.openDoctorFixModal()
+
+	updated, first := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if first == nil || !m.doctorFixInFlight {
+		t.Fatalf("first fix not in flight: cmd=%v inFlight=%v", first, m.doctorFixInFlight)
+	}
+	updated, second := m.Update(keyRunes("f"))
+	m = mustModel(t, updated)
+	if second != nil {
+		t.Fatalf("second fix returned mutation command: %#v", second)
+	}
+	if m.modal != nil || m.status != "doctor fix already running" {
+		t.Fatalf("in-flight state changed: modal=%T status=%q", m.modal, m.status)
+	}
+}
+
+func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
+	seen := map[string]bool{}
+	for action, key := range repoActionKeys() {
+		if seen[key] {
+			t.Fatalf("duplicate Repo key %q at %s", key, action)
+		}
+		seen[key] = true
+	}
+
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "old", "Old.")
+	activeRoot := filepath.Join(project, ".agents", "skills")
+	if err := os.MkdirAll(activeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(activeRoot, "friendly")
+	if err := os.Symlink(archive, alias); err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg)
+	m.setView(ViewRepo)
+
+	updated, cmd := m.Update(keyRunes(keyRepoRename))
+	m = mustModel(t, updated)
+	if cmd != nil {
+		t.Fatal("opening rename modal started filesystem work")
+	}
+	rename, ok := m.modal.(textModal)
+	if !ok {
+		t.Fatalf("modal = %T, want textModal", m.modal)
+	}
+	view := plain(rename.View(180, 30, m))
+	if !strings.Contains(view, "friendly") || !strings.Contains(strings.ToLower(view), "other projects") {
+		t.Fatalf("rename modal omitted usage/warning:\n%s", view)
+	}
+	rename.input.SetValue("new")
+	m.modal = rename
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil || !m.renameInFlight {
+		t.Fatalf("rename did not start asynchronously: cmd=%v inFlight=%v", cmd, m.renameInFlight)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "old")); err != nil {
+		t.Fatalf("archive changed before command ran: %v", err)
+	}
+	msg, ok := cmd().(renameArchiveResultMsg)
+	if !ok {
+		t.Fatalf("command message = %T", cmd())
+	}
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.renameInFlight || !strings.Contains(m.status, "Renamed old to new") {
+		t.Fatalf("rename completion state: inFlight=%v status=%q", m.renameInFlight, m.status)
+	}
+	resolved, err := filepath.EvalSymlinks(alias)
+	if err != nil || resolved != filepath.Join(cfg.ArchiveSkillsRoot(), "new") {
+		t.Fatalf("active link = %q, %v", resolved, err)
+	}
+}
+
+func TestRepoRenameCancellationStopsBeforeMutation(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "old", "Old.")
+	m := New(cfg)
+	m.setView(ViewRepo)
+	updated, _ := m.Update(keyRunes(keyRepoRename))
+	m = mustModel(t, updated)
+	rename := m.modal.(textModal)
+	rename.input.SetValue("new")
+	m.modal = rename
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil || m.renameCancel == nil {
+		t.Fatal("rename has no owned cancellation")
+	}
+	m.cancelRenameWork()
+	msg := cmd().(renameArchiveResultMsg)
+	if !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("error = %v", msg.err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "old")); err != nil {
+		t.Fatalf("archive mutated: %v", err)
+	}
+}

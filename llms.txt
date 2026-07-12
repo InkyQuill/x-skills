@@ -1,0 +1,77 @@
+# x-skills
+
+> A CLI and TUI tool for managing reusable agent skills — archive once, link where needed.
+
+## Overview
+
+x-skills keeps durable archived copies of agent skills in `~/.x-skills/skills` and
+symlinks selected skills into project or global agent directories (Codex, Claude,
+Agents). It ships with a Bubble Tea TUI for interactive management and a Cobra CLI
+for scripting.
+
+## Quick Start
+
+```bash
+git clone https://github.com/InkyQuill/x-skills.git
+cd x-skills
+mkdir -p bin
+go build -o bin/x-skills ./cmd/x-skills
+./bin/x-skills list
+go run ./cmd/x-skills tui
+```
+
+## Key Concepts
+
+- **Archived Skill**: a durable copy in `~/.x-skills/skills` — the canonical source
+- **Active Skill**: a symlink (or real directory) visible to an agent in `.agents/`, `.claude/`, or `.codex/`
+- **Link**: create an active-root symlink pointing to an archived skill
+- **Install**: add a remote skill to the local archive, optionally linking it
+- **Doctor**: diagnostic command that finds and optionally fixes broken symlinks, unmanaged directories, and conflicts
+
+## Repository Structure
+
+```
+bin/              built binaries (gitignored)
+cmd/x-skills/     main entrypoint
+internal/         application packages (cli, tui, repo, actions, symlinkcheck, ...)
+docs/adr/         four thematic architecture decision records
+docs/backlog.md   planned work
+.agents/skills/   active project skill symlinks
+skills/           project-owned x-skills workflow skills
+CONTEXT.md        project terminology glossary
+```
+
+## CLI
+
+```
+x-skills list                    show active skills
+x-skills list-roots              show managed roots and destination selectors
+x-skills repo                    list archived skills
+x-skills search <query>          search remote skills
+x-skills add <source>            archive a remote skill and optionally link it
+x-skills link <name>             link archived skill into active root
+x-skills unlink <name>           remove active skill symlink
+x-skills migrate <name>          archive an unmanaged active skill
+x-skills recommend <name>        add an archived skill to .x-skills.yaml
+x-skills unrecommend <name>      remove a recommendation
+x-skills restore --at .Ag        apply project manifests, preserving extras
+x-skills restore --full --at .Ag exactly reconcile selected project folders
+x-skills sync                     interactively aggregate project skills
+x-skills doctor                  audit and fix common issues
+x-skills doctor --fix -y         auto-fix without prompts
+x-skills tui                     open the Bubble Tea manager
+```
+
+Destinations are selected with repeatable `--at` selectors, such as
+`--at project:codex`, `--at global:agents`, or a label reported by
+`x-skills list-roots`.
+
+## References
+
+- Repository: https://github.com/InkyQuill/x-skills
+- Issues: https://github.com/InkyQuill/x-skills/issues
+- Domain vocabulary: CONTEXT.md
+- CLI guide: docs/cli.md
+- TUI guide: docs/tui.md
+- Remote skills guide: docs/remote-skills.md
+- Thematic ADRs: docs/adr/

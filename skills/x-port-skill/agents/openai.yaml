@@ -1,0 +1,4 @@
+interface:
+  display_name: "X Skills: Port Skill"
+  short_description: "Port skills across agent applications"
+  default_prompt: "Use $x-port-skill to port this skill for the selected agent applications without changing its intent."

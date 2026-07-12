@@ -150,11 +150,11 @@ func fixDoctorLocations(ctx context.Context, cfg config.Config, filter doctor.Fi
 	if err := doctor.ValidateBuiltInDestinations(destinations); err != nil {
 		return nil, err
 	}
-	results, err := doctor.FixIssues(filtered)
+	results, err := doctor.FixIssues(ctx, filtered)
 	if err != nil {
 		return results, err
 	}
-	builtInResults, err := doctor.FixBuiltIns(cfg, filtered, doctor.FixOptions{
+	builtInResults, err := doctor.FixBuiltIns(ctx, cfg, filtered, doctor.FixOptions{
 		BuiltInDestinations: destinations,
 		ArchiveOnlyBuiltIns: archiveOnlyBuiltIns,
 	})

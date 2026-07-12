@@ -59,6 +59,9 @@ type FixResult struct {
 }
 
 func Diagnose(ctx context.Context, cfg config.Config, filter Filter) ([]Issue, error) {
+	if filter.Scope != "" && !config.ValidScope(filter.Scope) {
+		return nil, fmt.Errorf("invalid scope %q", filter.Scope)
+	}
 	activeRoots := roots.ActiveRoots(cfg, roots.Filter{
 		Scope:  filter.Scope,
 		Target: filter.Target,
@@ -141,15 +144,15 @@ func Fix(ctx context.Context, cfg config.Config, opts FixOptions) ([]FixResult, 
 		return nil, err
 	}
 
-	results, err := FixIssues(issues)
+	results, err := FixIssues(ctx, issues)
 	if err != nil {
 		return results, err
 	}
-	builtInResults, err := FixBuiltIns(cfg, issues, opts)
+	builtInResults, err := FixBuiltIns(ctx, cfg, issues, opts)
 	return append(results, builtInResults...), err
 }
 
-func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResult, error) {
+func FixBuiltIns(ctx context.Context, cfg config.Config, issues []Issue, opts FixOptions) ([]FixResult, error) {
 	if err := ValidateBuiltInDestinations(opts.BuiltInDestinations); err != nil {
 		return nil, err
 	}
@@ -160,6 +163,9 @@ func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResul
 	for _, issue := range issues {
 		if issue.Kind != KindMissingBuiltIn && issue.Kind != KindInactiveBuiltIn {
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return results, err
 		}
 		if issue.Kind == KindMissingBuiltIn {
 			if _, archiveErr := builtin.Archive(cfg, []string{issue.Name}); archiveErr != nil {
@@ -178,6 +184,9 @@ func FixBuiltIns(cfg config.Config, issues []Issue, opts FixOptions) ([]FixResul
 			continue
 		}
 		for _, destination := range opts.BuiltInDestinations {
+			if err := ctx.Err(); err != nil {
+				return results, err
+			}
 			linked, linkErr := actions.Link(cfg, actions.LinkRequest{Name: issue.Name, Scope: destination.Scope, Target: destination.Target})
 			if linkErr != nil {
 				return results, linkErr
@@ -197,9 +206,12 @@ func ValidateBuiltInDestinations(destinations []roots.ActiveRoot) error {
 	return nil
 }
 
-func FixIssues(issues []Issue) ([]FixResult, error) {
+func FixIssues(ctx context.Context, issues []Issue) ([]FixResult, error) {
 	var results []FixResult
 	for _, issue := range issues {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
 		switch issue.Kind {
 		case KindBrokenSymlink:
 			result, err := fixBrokenSymlink(issue)

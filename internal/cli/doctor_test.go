@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -105,7 +106,7 @@ func TestDoctorFixUsesLocationFilteredGitHygieneIssues(t *testing.T) {
 		{Kind: doctor.KindSkillsFolderTracked, Name: claude.Label, Path: claude.Path, ProjectRoot: project, SafeFix: "git rm -r --cached -- '.claude/skills'"},
 	}
 	filtered := filterDoctorIssuesByLocations(issues, []roots.ActiveRoot{agents, globalAgents})
-	if _, err := doctor.FixIssues(filtered); err != nil {
+	if _, err := doctor.FixIssues(context.Background(), filtered); err != nil {
 		t.Fatal(err)
 	}
 	ignore, err := os.ReadFile(filepath.Join(project, ".gitignore"))

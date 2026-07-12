@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -224,7 +225,7 @@ func TestFixGitHygieneOnlyEditsGitignore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := FixIssues(issues)
+	results, err := FixIssues(context.Background(), issues)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func TestFixGitHygieneAppendsNormalizedIgnoreEntryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	issue := Issue{Kind: KindLocalManifestTracked, Name: ".x-skills.local.yaml", Path: filepath.Join(project, ".x-skills.local.yaml"), ProjectRoot: project, SafeFix: "git rm --cached -- .x-skills.local.yaml"}
-	if _, err := FixIssues([]Issue{issue, issue}); err != nil {
+	if _, err := FixIssues(context.Background(), []Issue{issue, issue}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(project, ".gitignore"))
@@ -383,7 +384,7 @@ func TestFixBuiltInsPreservesArchiveResultWhenLinkConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := FixBuiltIns(cfg, issues, FixOptions{BuiltInDestinations: []roots.ActiveRoot{destination}})
+	results, err := FixBuiltIns(context.Background(), cfg, issues, FixOptions{BuiltInDestinations: []roots.ActiveRoot{destination}})
 	if err == nil || !strings.Contains(err.Error(), "destination exists") {
 		t.Fatalf("error = %v, want destination conflict", err)
 	}
@@ -605,6 +606,61 @@ func TestFixWithoutYesDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestFixRejectsInvalidScopeWithoutArchiving(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+
+	if _, err := Diagnose(context.Background(), cfg, Filter{Scope: "bogus"}); err == nil || !strings.Contains(err.Error(), `invalid scope "bogus"`) {
+		t.Fatalf("Diagnose() error = %v, want invalid scope rejection", err)
+	}
+
+	_, err := Fix(context.Background(), cfg, FixOptions{Yes: true, Filter: Filter{Scope: "bogus"}, ArchiveOnlyBuiltIns: true})
+	if err == nil || !strings.Contains(err.Error(), `invalid scope "bogus"`) {
+		t.Fatalf("Fix() error = %v, want invalid scope rejection", err)
+	}
+	if _, statErr := os.Stat(cfg.ArchiveSkillsRoot()); !os.IsNotExist(statErr) {
+		t.Fatalf("archive was mutated for invalid scope: %v", statErr)
+	}
+}
+
+func TestFixIssuesStopsOnCancelledContext(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	root := cfg.MustActiveRoot("project", "claude")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "chapter-drafter")
+	if err := os.Symlink(filepath.Join(home, "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
+	if err != nil || len(issues) == 0 {
+		t.Fatalf("issues = %#v, err = %v, want broken symlink issue", issues, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results, err := FixIssues(ctx, issues)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FixIssues() error = %v, want context.Canceled", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %#v, want none", results)
+	}
+	if _, statErr := os.Lstat(link); statErr != nil {
+		t.Fatalf("broken symlink was mutated after cancellation: %v", statErr)
+	}
+	if _, err := FixBuiltIns(ctx, cfg, []Issue{{Kind: KindMissingBuiltIn, Name: "chapter-drafter"}}, FixOptions{ArchiveOnlyBuiltIns: true}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("FixBuiltIns() error = %v, want context.Canceled", err)
+	}
+	if _, statErr := os.Stat(cfg.ArchiveSkillsRoot()); !os.IsNotExist(statErr) {
+		t.Fatalf("archive was mutated after cancellation: %v", statErr)
+	}
+}
+
 func TestDoctorIgnoresUnmanagedDirectories(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -652,7 +708,7 @@ func TestFixReturnsAppliedResultsWhenLaterIssueFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := FixIssues([]Issue{
+	results, err := FixIssues(context.Background(), []Issue{
 		{
 			Kind:    KindBrokenSymlink,
 			Name:    "a-broken",

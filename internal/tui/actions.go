@@ -1037,7 +1037,7 @@ func (m *Model) openDoctorFixModal() {
 		fmt.Sprintf("  - %d broken symlink issues", brokenCount),
 	}
 	m.modal = newConfirmModal("Confirm", lines, false, func(current *Model) {
-		results, err := doctor.FixIssues(current.issues)
+		results, err := doctor.FixIssues(context.Background(), current.issues)
 		var output []string
 		for _, result := range results {
 			output = append(output, "✓ "+result.Name+"  "+result.Action)
@@ -1157,8 +1157,8 @@ func (d doctorBuiltInFixModal) apply(m *Model) tea.Cmd {
 	issues := append([]doctor.Issue(nil), m.issues...)
 	archiveOnly := d.checked[len(d.destinations)]
 	return func() tea.Msg {
-		results, err := doctor.FixIssues(issues)
-		builtInResults, builtInErr := doctor.FixBuiltIns(cfg, issues, doctor.FixOptions{
+		results, err := doctor.FixIssues(context.Background(), issues)
+		builtInResults, builtInErr := doctor.FixBuiltIns(context.Background(), cfg, issues, doctor.FixOptions{
 			BuiltInDestinations: destinations,
 			ArchiveOnlyBuiltIns: archiveOnly,
 		})

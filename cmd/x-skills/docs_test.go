@@ -24,6 +24,8 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 	readme := readFile(t, "README.md")
 	for _, required := range []string{
 		"Go implementation",
+		"curl -fsSL https://raw.githubusercontent.com/InkyQuill/x-skills/main/scripts/install.sh | sh",
+		"irm https://raw.githubusercontent.com/InkyQuill/x-skills/main/scripts/install.ps1 | iex",
 		"mkdir -p ~/bin",
 		"go build -o ~/bin/x-skills ./cmd/x-skills",
 		"go run ./cmd/x-skills list",
@@ -82,7 +84,6 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"install.sh",
 		"pyproject.toml",
 		"uv.lock",
 		filepath.Join("tests", "test_cli.py"),
@@ -101,7 +102,6 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 	}
 	for name, content := range liveDocs {
 		for _, retired := range []string{
-			"install.sh",
 			"go install github.com/InkyQuill/x-skills@latest",
 			"add-github",
 			"add-url",
@@ -114,6 +114,91 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 			if strings.Contains(content, retired) {
 				t.Errorf("%s contains retired distribution token %q", name, retired)
 			}
+		}
+	}
+}
+
+func TestReleaseAndInstallerConfiguration(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := filepath.Join("..", "..")
+	readFile := func(t *testing.T, name string) string {
+		t.Helper()
+
+		content, err := os.ReadFile(filepath.Join(repoRoot, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return string(content)
+	}
+
+	for _, name := range []string{
+		filepath.Join("scripts", "install.sh"),
+		filepath.Join("scripts", "install.ps1"),
+		".goreleaser.yaml",
+		"release.config.cjs",
+		filepath.Join(".github", "workflows", "ci.yml"),
+		filepath.Join(".github", "workflows", "release.yml"),
+	} {
+		if _, err := os.Stat(filepath.Join(repoRoot, name)); err != nil {
+			t.Fatalf("expected release artifact %s to exist: %v", name, err)
+		}
+	}
+
+	installSH := readFile(t, filepath.Join("scripts", "install.sh"))
+	for _, required := range []string{
+		"REPO=\"InkyQuill/x-skills\"",
+		"install_xs_link",
+		"command -v xs",
+		"tar -xzf",
+		"https://github.com/${REPO}/releases/download/${version}/${asset}",
+	} {
+		if !strings.Contains(installSH, required) {
+			t.Errorf("scripts/install.sh must contain %q", required)
+		}
+	}
+
+	installPS := readFile(t, filepath.Join("scripts", "install.ps1"))
+	for _, required := range []string{
+		"$Repo = \"InkyQuill/x-skills\"",
+		"Install-XsShortcut",
+		"Get-Command xs",
+		"Expand-Archive",
+		"https://github.com/$Repo/releases/download/$Version/$asset",
+	} {
+		if !strings.Contains(installPS, required) {
+			t.Errorf("scripts/install.ps1 must contain %q", required)
+		}
+	}
+
+	goreleaser := readFile(t, ".goreleaser.yaml")
+	for _, required := range []string{
+		"goos:",
+		"darwin",
+		"linux",
+		"windows",
+		"goarch:",
+		"amd64",
+		"arm64",
+		"- zip",
+		"- tar.gz",
+	} {
+		if !strings.Contains(goreleaser, required) {
+			t.Errorf(".goreleaser.yaml must contain %q", required)
+		}
+	}
+
+	releaseConfig := readFile(t, "release.config.cjs")
+	for _, required := range []string{
+		"@semantic-release/commit-analyzer",
+		"@semantic-release/release-notes-generator",
+		"@semantic-release/github",
+		"dist/*.tar.gz",
+		"dist/*.zip",
+		"dist/checksums.txt",
+	} {
+		if !strings.Contains(releaseConfig, required) {
+			t.Errorf("release.config.cjs must contain %q", required)
 		}
 	}
 }

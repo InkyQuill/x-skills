@@ -10,6 +10,23 @@ plus global skill roots. To inspect another project, `cd` there first.
 
 The Go CLI and TUI are the authoritative implementation of `x-skills`.
 
+Install the latest release on macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/InkyQuill/x-skills/main/scripts/install.sh | sh
+```
+
+Install the latest release on Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/InkyQuill/x-skills/main/scripts/install.ps1 | iex
+```
+
+Both installers place the executable in `~/.local/bin` by default. Set
+`X_SKILLS_INSTALL_DIR` to choose another directory, or `X_SKILLS_VERSION` to
+install a specific tag such as `v1.2.3`. They install `x-skills` and create an
+`xs` shortcut only when that command name is available.
+
 Build or run the Go implementation from a source checkout:
 
 ```bash

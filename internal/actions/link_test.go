@@ -7,7 +7,20 @@ import (
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
+
+// assertSamePath verifies two paths identify the same filesystem location.
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	ok, err := pathidentity.EquivalentE(got, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("path = %q, want same location as %q", got, want)
+	}
+}
 
 func TestLinkRepoSkillCreatesSymlink(t *testing.T) {
 	home := t.TempDir()
@@ -26,9 +39,7 @@ func TestLinkRepoSkillCreatesSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != source {
-		t.Fatalf("resolved = %q, want %q", resolved, source)
-	}
+	assertSamePath(t, resolved, source)
 }
 
 func TestLinkRepoSkillUsesConfiguredCustomRoot(t *testing.T) {
@@ -59,9 +70,7 @@ func TestLinkRepoSkillUsesConfiguredCustomRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != source {
-		t.Fatalf("resolved = %q, want %q", resolved, source)
-	}
+	assertSamePath(t, resolved, source)
 }
 
 func TestLinkFailsWhenDestinationExists(t *testing.T) {

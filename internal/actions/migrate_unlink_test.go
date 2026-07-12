@@ -32,9 +32,7 @@ func TestMigrateMovesDirectoryToRepoAndLinksBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != archived {
-		t.Fatalf("active resolved to %q, want %q", resolved, archived)
-	}
+	assertSamePath(t, resolved, archived)
 }
 
 func TestMigrateRequiresConfirmationBeforeMoving(t *testing.T) {
@@ -90,9 +88,7 @@ func TestMigrateRelinksWhenArchiveDestinationHasSameFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != archived {
-		t.Fatalf("active resolved to %q, want %q", resolved, archived)
-	}
+	assertSamePath(t, resolved, archived)
 }
 
 func TestMigrateReturnsConflictWhenArchiveDestinationDiffers(t *testing.T) {
@@ -146,9 +142,7 @@ func TestMigrateConflictUseActiveReplacesArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != archived {
-		t.Fatalf("active resolved to %q, want %q", resolved, archived)
-	}
+	assertSamePath(t, resolved, archived)
 }
 
 func TestUnlinkManagedRemovesSymlink(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
 
 func TestAddArchivesAndLinksDefaultProjectAgents(t *testing.T) {
@@ -578,8 +580,12 @@ func assertAddLinkAt(t *testing.T, linkPath, home, name string) {
 		t.Fatalf("resolve link %q: %v", linkPath, err)
 	}
 	want := filepath.Join(home, ".x-skills", "skills", name)
-	if resolved != want {
-		t.Fatalf("link %q resolved to %q, want %q", linkPath, resolved, want)
+	ok, err := pathidentity.EquivalentE(resolved, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("link %q resolved to %q, want same location as %q", linkPath, resolved, want)
 	}
 }
 

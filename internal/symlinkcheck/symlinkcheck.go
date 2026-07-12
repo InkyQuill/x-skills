@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
 
@@ -19,6 +20,11 @@ func ValidateSkillTarget(path string) Result {
 	if err != nil {
 		return Result{Broken: true, Reason: fmt.Sprintf("resolve symlink: %v", err)}
 	}
+	canonical, err := pathidentity.Canonical(resolvedPath)
+	if err != nil {
+		return Result{Broken: true, Reason: fmt.Sprintf("canonicalize target: %v", err)}
+	}
+	resolvedPath = canonical
 
 	info, err := os.Stat(resolvedPath)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"gopkg.in/yaml.v3"
 )
@@ -188,7 +189,7 @@ func renameArchivePaths(cfg config.Config, oldName, newName string) (string, str
 
 func managedRenameUsages(cfg config.Config, oldPath, newPath string) ([]renameUsage, error) {
 	paths := []renameUsage{}
-	canonicalOld, err := filepath.EvalSymlinks(oldPath)
+	canonicalOld, err := pathidentity.Canonical(oldPath)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +211,14 @@ func managedRenameUsages(cfg config.Config, oldPath, newPath string) ([]renameUs
 				continue
 			}
 			resolved, err := filepath.EvalSymlinks(path)
-			if err != nil || !samePath(resolved, canonicalOld) {
+			if err != nil {
+				continue
+			}
+			same, sameErr := pathidentity.EquivalentE(resolved, canonicalOld)
+			if sameErr != nil {
+				return nil, fmt.Errorf("compare visible usage %q target %q with archive %q: %w", path, resolved, canonicalOld, sameErr)
+			}
+			if !same {
 				continue
 			}
 			text, err := os.Readlink(path)
@@ -283,7 +291,11 @@ func revalidateRenameUsageTarget(usage renameUsage, oldPath string) error {
 		return err
 	}
 	resolved, err := filepath.EvalSymlinks(usage.path)
-	if err != nil || !samePath(resolved, oldPath) {
+	if err != nil {
+		return fmt.Errorf("visible usage %q target drifted before mutation", usage.path)
+	}
+	same, sameErr := pathidentity.EquivalentE(resolved, oldPath)
+	if sameErr != nil || !same {
 		return fmt.Errorf("visible usage %q target drifted before mutation", usage.path)
 	}
 	return nil

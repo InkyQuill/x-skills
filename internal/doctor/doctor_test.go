@@ -13,9 +13,22 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/builtin"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
+
+// assertSamePath verifies two paths identify the same filesystem location.
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	ok, err := pathidentity.EquivalentE(got, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("path = %q, want same location as %q", got, want)
+	}
+}
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -506,9 +519,7 @@ func TestFixBrokenSymlinkRelinksWhenRepoSkillExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != repoSkill {
-		t.Fatalf("resolved = %q, want %q", resolved, repoSkill)
-	}
+	assertSamePath(t, resolved, repoSkill)
 	if matches, err := filepath.Glob(filepath.Join(root, ".chapter-drafter.tmp.*")); err != nil || len(matches) != 0 {
 		t.Fatalf("temporary links = %v, err = %v", matches, err)
 	}

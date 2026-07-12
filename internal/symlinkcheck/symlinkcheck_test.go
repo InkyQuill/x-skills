@@ -5,7 +5,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
+
+// assertSamePath verifies two paths identify the same filesystem location.
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	ok, err := pathidentity.EquivalentE(got, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("path = %q, want same location as %q", got, want)
+	}
+}
 
 func TestValidateSkillTargetAcceptsSkillDirectorySymlink(t *testing.T) {
 	root := t.TempDir()
@@ -19,9 +33,7 @@ func TestValidateSkillTargetAcceptsSkillDirectorySymlink(t *testing.T) {
 	if result.Broken {
 		t.Fatalf("ValidateSkillTarget() marked valid target broken: %#v", result)
 	}
-	if result.ResolvedPath != target {
-		t.Fatalf("ResolvedPath = %q, want %q", result.ResolvedPath, target)
-	}
+	assertSamePath(t, result.ResolvedPath, target)
 }
 
 func TestValidateSkillTargetReportsMissingTarget(t *testing.T) {

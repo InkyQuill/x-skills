@@ -214,7 +214,7 @@ func TestRenameArchiveReportsManifestWriteAndRollbackFailure(t *testing.T) {
 		return os.Rename(oldPath, newPath)
 	}
 	renameArchiveFilesystem.symlink = func(target, path string) error {
-		if strings.Contains(target, "old") {
+		if filepath.Base(filepath.Clean(target)) == "old" {
 			return errors.New("injected symlink rollback failure")
 		}
 		return os.Symlink(target, path)
@@ -383,9 +383,10 @@ func TestRenameArchiveRelinksVisibleManagedUsagesAndUpdatesManifests(t *testing.
 	}
 	for _, link := range result.RelinkedPaths {
 		resolved, resolveErr := filepath.EvalSymlinks(link)
-		if resolveErr != nil || resolved != result.ArchivePath {
-			t.Fatalf("link %q resolves to %q, %v", link, resolved, resolveErr)
+		if resolveErr != nil {
+			t.Fatalf("link %q resolve error: %v", link, resolveErr)
 		}
+		assertSamePath(t, resolved, result.ArchivePath)
 	}
 	if _, err := os.Stat(unmanaged); err != nil {
 		t.Fatalf("unmanaged same-name entry changed: %v", err)
@@ -453,9 +454,10 @@ func TestRenameArchiveRollsBackAfterRelinkFailure(t *testing.T) {
 		t.Fatalf("new archive remains after rollback: %v", err)
 	}
 	resolved, err := filepath.EvalSymlinks(first)
-	if err != nil || resolved != archive {
-		t.Fatalf("first link rollback = %q, %v", resolved, err)
+	if err != nil {
+		t.Fatalf("first link rollback resolve error: %v", err)
 	}
+	assertSamePath(t, resolved, archive)
 	data, _ := os.ReadFile(filepath.Join(project, ".x-skills.local.yaml"))
 	if !strings.Contains(string(data), "name: old") {
 		t.Fatalf("manifest changed after rollback: %s", data)

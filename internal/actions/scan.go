@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
@@ -152,14 +153,9 @@ func brokenSkill(root roots.ActiveRoot, path, name, reason string) ActiveSkill {
 	}
 }
 
+// samePath reports whether a and b refer to the same filesystem location,
+// handling symlinks and platform-specific aliases such as /var vs /private/var
+// on macOS and short vs long path forms on Windows.
 func samePath(a, b string) bool {
-	absA, err := filepath.Abs(a)
-	if err == nil {
-		a = absA
-	}
-	absB, err := filepath.Abs(b)
-	if err == nil {
-		b = absB
-	}
-	return filepath.Clean(a) == filepath.Clean(b)
+	return pathidentity.Equivalent(a, b)
 }

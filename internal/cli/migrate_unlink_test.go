@@ -23,9 +23,7 @@ func TestMigrateWithYesFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != archived {
-		t.Fatalf("resolved = %q, want %q", resolved, archived)
-	}
+	assertSamePath(t, resolved, archived)
 }
 
 func TestMigrateWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testing.T) {
@@ -87,9 +85,7 @@ func TestMigratePromptsForAmbiguousActiveSkillAndConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != archived {
-		t.Fatalf("resolved = %q, want %q", resolved, archived)
-	}
+	assertSamePath(t, resolved, archived)
 }
 
 func TestBatchMigrateSummaryIncludesSkippedConfirmations(t *testing.T) {

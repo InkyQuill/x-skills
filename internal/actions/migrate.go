@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
@@ -235,7 +236,14 @@ func ensureUnmanagedSkillDirectory(active, archived string) error {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, err := filepath.EvalSymlinks(active)
-		if err == nil && samePath(resolved, archived) {
+		if err != nil {
+			return fmt.Errorf("active skill is not an unmanaged directory: %s", active)
+		}
+		same, sameErr := pathidentity.EquivalentE(resolved, archived)
+		if sameErr != nil {
+			return fmt.Errorf("compare active skill target %q with archive %q: %w", active, archived, sameErr)
+		}
+		if same {
 			return fmt.Errorf("active skill already managed: %s", active)
 		}
 		return fmt.Errorf("active skill is not an unmanaged directory: %s", active)

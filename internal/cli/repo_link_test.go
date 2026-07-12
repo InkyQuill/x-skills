@@ -6,7 +6,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
+
+// assertSamePath verifies two paths identify the same filesystem location.
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	ok, err := pathidentity.EquivalentE(got, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("path = %q, want same location as %q", got, want)
+	}
+}
 
 func TestRepoListsArchivedSkills(t *testing.T) {
 	home := t.TempDir()
@@ -44,9 +58,7 @@ func TestLinkAcceptsMultipleNames(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resolved != source {
-			t.Fatalf("%s resolved to %q, want %q", name, resolved, source)
-		}
+		assertSamePath(t, resolved, source)
 	}
 }
 
@@ -68,9 +80,7 @@ func TestLinkAcceptsMultipleLocations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resolved != source {
-			t.Fatalf("%s resolved to %q, want %q", target, resolved, source)
-		}
+		assertSamePath(t, resolved, source)
 	}
 	if !strings.Contains(out.String(), "Summary:") || !strings.Contains(out.String(), "linked: typescript-expert, typescript-expert") {
 		t.Fatalf("link output:\n%s", out.String())
@@ -99,9 +109,7 @@ func TestLinkSupportsConfiguredCustomTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != source {
-		t.Fatalf("resolved = %q, want %q", resolved, source)
-	}
+	assertSamePath(t, resolved, source)
 	if !strings.Contains(out.String(), "linked: typescript-expert") {
 		t.Fatalf("link output:\n%s", out.String())
 	}
@@ -124,9 +132,7 @@ func TestLinkBatchReportsPartialFailureAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != second {
-		t.Fatalf("second-skill resolved to %q, want %q", resolved, second)
-	}
+	assertSamePath(t, resolved, second)
 	if _, err := os.Lstat(filepath.Join(project, ".codex", "skills", "missing-skill")); !os.IsNotExist(err) {
 		t.Fatalf("missing-skill stat error = %v, want not exist", err)
 	}
@@ -175,7 +181,5 @@ func TestLinkPromptsForAmbiguousDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != source {
-		t.Fatalf("resolved = %q, want %q", resolved, source)
-	}
+	assertSamePath(t, resolved, source)
 }

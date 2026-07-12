@@ -569,7 +569,7 @@ func applySkill(ctx context.Context, cfg config.Config, filesystem applyFilesyst
 	}
 	for _, backup := range backups {
 		if !backup.created {
-			if err := os.RemoveAll(backup.backup); err != nil {
+			if err := filesystem.removeAll(backup.backup); err != nil {
 				return mutation, fmt.Errorf("remove destination backup %q: %w", backup.backup, err)
 			}
 		}

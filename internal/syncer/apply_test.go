@@ -328,17 +328,14 @@ func TestApplyReportsArchivePublicationWhenSourceRemovalFails(t *testing.T) {
 	plan := Plan{Migrations: []Change{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, Action: "migrate", SourcePath: source, ArchivePath: archive}},
 		Conflicts: []Conflict{{CandidateID: "review:" + fp, Name: "review", Fingerprint: fp, DestinationPath: archive, DestinationStatus: actions.StatusManaged,
 			DestinationFingerprint: archiveConflictFP, ManagedTarget: archive, Resolution: ConflictResolution{DestinationPath: archive, PreserveAs: "review-old", Action: ConflictReplace}}}}
-	parent := filepath.Dir(source)
-	result := Apply(context.Background(), cfg, plan, ApplyOptions{Progress: func(update Progress) {
-		if update.Action == ConflictReplace {
-			if err := os.Chmod(parent, 0o555); err != nil {
-				t.Fatal(err)
-			}
+	fs := defaultApplyFilesystem()
+	fs.removeAll = func(path string) error {
+		if path == source {
+			return errors.New("injected source removal failure")
 		}
-	}})
-	if err := os.Chmod(parent, 0o755); err != nil {
-		t.Fatal(err)
+		return os.RemoveAll(path)
 	}
+	result := Apply(context.Background(), cfg, plan, ApplyOptions{filesystem: fs})
 	if len(result.Failed) != 1 || !result.Failed[0].ArchiveChanged || result.Failed[0].SourceRemoved {
 		t.Fatalf("Apply source-removal result = %#v", result)
 	}
@@ -401,12 +398,14 @@ func TestApplyReportsBackupCleanupFailureWithoutBreakingLink(t *testing.T) {
 			t.Fatalf("backup lookup = %v, %v", matches, err)
 		}
 		backup = matches[0]
-		if err := os.Chmod(backup, 0); err != nil {
-			t.Fatal(err)
+	}, filesystem: applyFilesystem{removeAll: func(path string) error {
+		if backup != "" && path == backup {
+			return errors.New("injected backup cleanup failure")
 		}
+		return os.RemoveAll(path)
+	},
 	}})
 	if backup != "" {
-		_ = os.Chmod(backup, 0o755)
 		_ = os.RemoveAll(backup)
 	}
 	if len(result.Failed) != 1 || result.Failed[0].Err == nil || result.Failed[0].LinksRolledBack {

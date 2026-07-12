@@ -211,5 +211,5 @@ func windowsShortPath(t *testing.T, path string) string {
 	if err != nil {
 		t.Skipf("could not query Windows short path for %q: %v", path, err)
 	}
-	return strings.TrimSpace(string(out))
+	return strings.Trim(strings.TrimSpace(string(out)), `"`)
 }

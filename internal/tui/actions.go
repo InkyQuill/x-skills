@@ -1037,7 +1037,12 @@ func (m *Model) openDoctorFixModal() {
 		fmt.Sprintf("  - %d broken symlink issues", brokenCount),
 	}
 	m.modal = newConfirmModal("Confirm", lines, false, func(current *Model) {
-		results, err := doctor.FixIssues(context.Background(), current.issues)
+		current.cancelDoctorFixWork()
+		ctx, cancel := context.WithCancel(context.Background())
+		current.doctorFixCancel = cancel
+		current.doctorFixInFlight = true
+		defer current.cancelDoctorFixWork()
+		results, err := doctor.FixIssues(ctx, current.issues)
 		var output []string
 		for _, result := range results {
 			output = append(output, "✓ "+result.Name+"  "+result.Action)
@@ -1148,8 +1153,11 @@ func (d doctorBuiltInFixModal) apply(m *Model) tea.Cmd {
 		m.modal = d
 		return nil
 	}
+	m.cancelDoctorFixWork()
 	m.doctorFixToken++
 	token := m.doctorFixToken
+	ctx, cancel := context.WithCancel(context.Background())
+	m.doctorFixCancel = cancel
 	m.doctorFixInFlight = true
 	m.status = "applying Doctor fixes..."
 	m.modal = nil
@@ -1157,8 +1165,8 @@ func (d doctorBuiltInFixModal) apply(m *Model) tea.Cmd {
 	issues := append([]doctor.Issue(nil), m.issues...)
 	archiveOnly := d.checked[len(d.destinations)]
 	return func() tea.Msg {
-		results, err := doctor.FixIssues(context.Background(), issues)
-		builtInResults, builtInErr := doctor.FixBuiltIns(context.Background(), cfg, issues, doctor.FixOptions{
+		results, err := doctor.FixIssues(ctx, issues)
+		builtInResults, builtInErr := doctor.FixBuiltIns(ctx, cfg, issues, doctor.FixOptions{
 			BuiltInDestinations: destinations,
 			ArchiveOnlyBuiltIns: archiveOnly,
 		})
@@ -1166,7 +1174,7 @@ func (d doctorBuiltInFixModal) apply(m *Model) tea.Cmd {
 		if err == nil {
 			err = builtInErr
 		}
-		active, repoSkills, currentIssues, repoUsage, reloadErr := loadTUIData(context.Background(), cfg)
+		active, repoSkills, currentIssues, repoUsage, reloadErr := loadTUIData(ctx, cfg)
 		if err == nil {
 			err = reloadErr
 		}
@@ -1178,7 +1186,11 @@ func (m *Model) applyDoctorFixResult(msg doctorFixResultMsg) tea.Cmd {
 	if msg.token != m.doctorFixToken {
 		return nil
 	}
+	if m.doctorFixCancel != nil {
+		m.doctorFixCancel()
+	}
 	m.doctorFixInFlight = false
+	m.doctorFixCancel = nil
 	m.active = msg.active
 	m.repo = msg.repo
 	m.issues = msg.issues
@@ -1195,4 +1207,12 @@ func (m *Model) applyDoctorFixResult(msg doctorFixResultMsg) tea.Cmd {
 	m.modal = newResultModal("Doctor Results", output)
 	m.status = "Doctor fixes complete"
 	return nil
+}
+
+func (m *Model) cancelDoctorFixWork() {
+	if m.doctorFixCancel != nil {
+		m.doctorFixCancel()
+		m.doctorFixCancel = nil
+	}
+	m.doctorFixInFlight = false
 }

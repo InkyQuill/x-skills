@@ -52,6 +52,7 @@ type Model struct {
 	updating               bool
 	doctorFixToken         int
 	doctorFixInFlight      bool
+	doctorFixCancel        context.CancelFunc
 	mutationToken          uint64
 	mutationInFlight       bool
 	mutationProjectTouched bool
@@ -227,6 +228,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
 		m.cancelSyncWork()
+		m.cancelDoctorFixWork()
 		return m, tea.Quit
 	}
 
@@ -270,6 +272,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
 		m.cancelSyncWork()
+		m.cancelDoctorFixWork()
 		return m, tea.Quit
 	case keyActive:
 		m.setView(ViewActive)

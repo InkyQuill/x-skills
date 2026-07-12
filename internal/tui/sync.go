@@ -166,7 +166,7 @@ func (m *Model) beginSyncApply(workbench syncWorkbenchModal) tea.Cmd {
 			}})
 			msg := syncResultMsg{token: token, result: result}
 			if ctx.Err() == nil {
-				msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
+				msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(ctx, cfg)
 			}
 			messages <- msg
 		}()

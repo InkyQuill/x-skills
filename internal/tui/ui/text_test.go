@@ -45,6 +45,35 @@ func TestTruncateANSIKeepsEscapeSequencesOutOfWidth(t *testing.T) {
 	}
 }
 
+func TestSanitizeANSI(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "plain text unchanged", value: "plain text\tvalue\n", want: "plain text\tvalue\n"},
+		{name: "sgr preserved", value: "\x1b[7;38;5;196mselected\x1b[0m", want: "\x1b[7;38;5;196mselected\x1b[0m"},
+		{name: "osc hyperlink dropped", value: "a\x1b]8;;https://evil.test\x07link\x1b]8;;\x07b", want: "alinkb"},
+		{name: "osc st terminator dropped", value: "a\x1b]0;title\x1b\\b", want: "ab"},
+		{name: "cursor movement dropped", value: "a\x1b[10;10Hb", want: "ab"},
+		{name: "screen clear dropped", value: "a\x1b[2Jb", want: "ab"},
+		{name: "private csi dropped", value: "a\x1b[?25lb", want: "ab"},
+		{name: "sgr with intermediates dropped", value: "a\x1b[1 mb", want: "ab"},
+		{name: "dcs dropped", value: "a\x1bPq payload\x1b\\b", want: "ab"},
+		{name: "bel and del dropped", value: "a\x07b\x7fc", want: "abc"},
+		{name: "lone trailing escape dropped", value: "a\x1b", want: "a"},
+		{name: "unterminated csi dropped", value: "a\x1b[31", want: "a"},
+		{name: "unterminated osc dropped", value: "a\x1b]8;;https://evil.test", want: "a"},
+		{name: "wide runes preserved", value: "値\x1b[31m値\x1b[0m", want: "値\x1b[31m値\x1b[0m"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SanitizeANSI(tt.value); got != tt.want {
+				t.Fatalf("SanitizeANSI(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPadRightANSIUsesDisplayWidth(t *testing.T) {
 	got := PadRightANSI("値", 4)
 	if got != "値  " || lipgloss.Width(got) != 4 {

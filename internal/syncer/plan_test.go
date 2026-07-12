@@ -655,6 +655,22 @@ func TestClassifyDestinationRejectsBrokenSymlink(t *testing.T) {
 	}
 }
 
+func TestClassifyDestinationRejectsSymlinkToNonDirectory(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	file := filepath.Join(cfg.ProjectRoot, "regular-file")
+	if err := os.WriteFile(file, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cfg.ProjectRoot, "review")
+	if err := os.Symlink(file, path); err != nil {
+		t.Fatal(err)
+	}
+	_, err := classifyDestination(cfg, path, filepath.Join(cfg.ArchiveSkillsRoot(), "review"), "candidate", false, false)
+	if err == nil || !strings.Contains(err.Error(), "symlink to non-directory") {
+		t.Fatalf("error = %v, want symlink to non-directory rejection", err)
+	}
+}
+
 func TestArchivePathMatchesFingerprintRejectsSymlinkedArchiveEntry(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	external := makePlanSkill(t, t.TempDir(), "external", "external")

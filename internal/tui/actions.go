@@ -103,7 +103,7 @@ func (m *Model) beginRepoRename(oldName, newName string) tea.Cmd {
 		if ctx.Err() != nil {
 			return msg
 		}
-		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
+		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(ctx, cfg)
 		return msg
 	}
 }
@@ -148,7 +148,7 @@ func (m *Model) queueProjectReconciliation() bool {
 	cfg := m.cfg
 	m.pendingMutationCmd = func() tea.Msg {
 		_, err := manifest.ReconcileLocal(cfg)
-		active, repoSkills, issues, repoUsage, reloadErr := loadTUIData(cfg)
+		active, repoSkills, issues, repoUsage, reloadErr := loadTUIData(context.Background(), cfg)
 		if err == nil {
 			err = reloadErr
 		}
@@ -511,7 +511,7 @@ func (m *Model) toggleRepoRecommendations() tea.Cmd {
 			}
 		}
 		msg.err = err
-		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
+		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(context.Background(), cfg)
 		return msg
 	}
 }
@@ -1166,7 +1166,7 @@ func (d doctorBuiltInFixModal) apply(m *Model) tea.Cmd {
 		if err == nil {
 			err = builtInErr
 		}
-		active, repoSkills, currentIssues, repoUsage, reloadErr := loadTUIData(cfg)
+		active, repoSkills, currentIssues, repoUsage, reloadErr := loadTUIData(context.Background(), cfg)
 		if err == nil {
 			err = reloadErr
 		}

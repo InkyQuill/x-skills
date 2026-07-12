@@ -76,7 +76,7 @@ func renderConstrainedModal(width, height int, opts constrainedModalOptions) str
 
 	safeBody := make([]string, len(opts.Body))
 	for i, line := range opts.Body {
-		safeBody[i] = ansi.Strip(line)
+		safeBody[i] = tuiui.SanitizeANSI(line)
 	}
 	body := presentModalBody(truncateModalLines(safeBody, contentWidth), bodyHeight, opts.Focus, opts.Scroll, opts.UseScroll)
 	lines := make([]string, 0, len(header)+len(body)+footerHeight)

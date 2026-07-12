@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,7 +55,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		issues, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +73,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 		}
 		runGit(t, project, "add", "--", ".x-skills.local.yaml")
 
-		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		issues, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +88,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 		makeSkill(t, filepath.Join(project, ".agents", "skills"), "tracked-skill")
 		runGit(t, project, "add", "--", ".agents/skills/tracked-skill/SKILL.md")
 
-		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		issues, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +107,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		issues, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +122,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(project, ".x-skills.yaml"), []byte("version: 1\nskills: []\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		issues, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +143,7 @@ func TestDiagnoseGitHygieneUsesGitTrackingState(t *testing.T) {
 		}
 		makeSkill(t, filepath.Join(project, ".agents", "skills"), "local-skill")
 
-		issues, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+		issues, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -159,7 +160,7 @@ func TestDiagnoseGitHygieneSurfacesBrokenRepository(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Diagnose(config.Default(project, t.TempDir()), Filter{})
+	_, err := Diagnose(context.Background(), config.Default(project, t.TempDir()), Filter{})
 	if err == nil || !strings.Contains(err.Error(), "inspect Git work tree") {
 		t.Fatalf("error = %v, want Git probe failure", err)
 	}
@@ -219,7 +220,7 @@ func TestFixGitHygieneOnlyEditsGitignore(t *testing.T) {
 	runGit(t, project, "add", "--", ".x-skills.local.yaml", ".agents/skills/tracked-skill/SKILL.md")
 
 	cfg := config.Default(project, t.TempDir())
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestDiagnoseBuiltInsReportsMissingInactiveAndActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +325,7 @@ func TestDiagnoseBuiltInsReportsMissingInactiveAndActive(t *testing.T) {
 
 func TestDiagnoseProjectFilterSkipsGlobalBuiltIns(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
-	issues, err := Diagnose(cfg, Filter{Scope: config.ScopeProject})
+	issues, err := Diagnose(context.Background(), cfg, Filter{Scope: config.ScopeProject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestDiagnoseProjectFilterSkipsGlobalBuiltIns(t *testing.T) {
 func TestFixBuiltInsArchivesOnlyOrLinksToExplicitGlobalDestinations(t *testing.T) {
 	t.Run("archive only", func(t *testing.T) {
 		cfg := config.Default(t.TempDir(), t.TempDir())
-		results, err := Fix(cfg, FixOptions{Yes: true, ArchiveOnlyBuiltIns: true})
+		results, err := Fix(context.Background(), cfg, FixOptions{Yes: true, ArchiveOnlyBuiltIns: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +351,7 @@ func TestFixBuiltInsArchivesOnlyOrLinksToExplicitGlobalDestinations(t *testing.T
 	t.Run("global destination", func(t *testing.T) {
 		cfg := config.Default(t.TempDir(), t.TempDir())
 		destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeGlobal, Target: config.TargetAgents})[0]
-		results, err := Fix(cfg, FixOptions{Yes: true, BuiltInDestinations: []roots.ActiveRoot{destination}})
+		results, err := Fix(context.Background(), cfg, FixOptions{Yes: true, BuiltInDestinations: []roots.ActiveRoot{destination}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -365,7 +366,7 @@ func TestFixBuiltInsArchivesOnlyOrLinksToExplicitGlobalDestinations(t *testing.T
 	t.Run("project rejected", func(t *testing.T) {
 		cfg := config.Default(t.TempDir(), t.TempDir())
 		destination := roots.ActiveRoots(cfg, roots.Filter{Scope: config.ScopeProject})[0]
-		_, err := Fix(cfg, FixOptions{Yes: true, BuiltInDestinations: []roots.ActiveRoot{destination}})
+		_, err := Fix(context.Background(), cfg, FixOptions{Yes: true, BuiltInDestinations: []roots.ActiveRoot{destination}})
 		if err == nil || !strings.Contains(err.Error(), "global") {
 			t.Fatalf("error = %v, want global destination rejection", err)
 		}
@@ -378,7 +379,7 @@ func TestFixBuiltInsPreservesArchiveResultWhenLinkConflicts(t *testing.T) {
 	catalog, _ := builtin.List()
 	name := catalog[0].Name
 	makeSkill(t, destination.Path, name)
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +407,7 @@ func TestDiagnoseReportsBrokenSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +433,7 @@ func TestDiagnoseReportsSymlinkToFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +459,7 @@ func TestDiagnoseReportsSymlinkToNonSkillDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +494,7 @@ func TestFixBrokenSymlinkRelinksWhenRepoSkillExists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := Fix(cfg, FixOptions{Yes: true})
+	results, err := Fix(context.Background(), cfg, FixOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +526,7 @@ func TestFixBrokenSymlinkRemovesWhenRepoSkillMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := Fix(cfg, FixOptions{Yes: true})
+	results, err := Fix(context.Background(), cfg, FixOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +561,7 @@ func TestFixRespectsFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := Fix(cfg, FixOptions{
+	results, err := Fix(context.Background(), cfg, FixOptions{
 		Yes:    true,
 		Filter: Filter{Scope: "project"},
 	})
@@ -591,7 +592,7 @@ func TestFixWithoutYesDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Fix(cfg, FixOptions{})
+	_, err := Fix(context.Background(), cfg, FixOptions{})
 	if err == nil {
 		t.Fatal("expected confirmation error")
 	}
@@ -610,7 +611,7 @@ func TestDoctorIgnoresUnmanagedDirectories(t *testing.T) {
 	cfg := config.Default(project, home)
 	unmanaged := makeSkill(t, cfg.MustActiveRoot("project", "claude"), "local-skill")
 
-	issues, err := Diagnose(cfg, Filter{})
+	issues, err := Diagnose(context.Background(), cfg, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +621,7 @@ func TestDoctorIgnoresUnmanagedDirectories(t *testing.T) {
 		}
 	}
 
-	results, err := Fix(cfg, FixOptions{Yes: true})
+	results, err := Fix(context.Background(), cfg, FixOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}

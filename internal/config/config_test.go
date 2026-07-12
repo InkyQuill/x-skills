@@ -236,6 +236,26 @@ func TestLoadGlobalConfigNormalizesConsumers(t *testing.T) {
 	t.Fatal("project agents root missing")
 }
 
+func TestLoadGlobalConfigDefaultsOmittedConsumersForKnownTarget(t *testing.T) {
+	home := t.TempDir()
+	cfg := Default(t.TempDir(), home)
+	writeGlobalConfig(t, home, []byte("active_roots:\n  - scope: project\n    target: claude\n    path: .claude/custom-skills\n"))
+
+	loaded, err := LoadGlobal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range loaded.ManagedRoots() {
+		if root.Scope == ScopeProject && root.Target == TargetClaude {
+			if want := defaultConsumers(TargetClaude); !slices.Equal(root.Consumers, want) {
+				t.Fatalf("Consumers = %v, want %v", root.Consumers, want)
+			}
+			return
+		}
+	}
+	t.Fatal("project claude root missing")
+}
+
 func TestLoadGlobalConfigLeavesOmittedCustomConsumersUnknown(t *testing.T) {
 	home := t.TempDir()
 	cfg := Default(t.TempDir(), home)

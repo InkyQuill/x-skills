@@ -58,7 +58,7 @@ type FixResult struct {
 	Path   string
 }
 
-func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
+func Diagnose(ctx context.Context, cfg config.Config, filter Filter) ([]Issue, error) {
 	activeRoots := roots.ActiveRoots(cfg, roots.Filter{
 		Scope:  filter.Scope,
 		Target: filter.Target,
@@ -66,6 +66,9 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 
 	var issues []Issue
 	for _, root := range activeRoots {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		rootIssues, err := diagnoseRoot(cfg, root)
 		if err != nil {
 			return nil, err
@@ -78,7 +81,7 @@ func Diagnose(cfg config.Config, filter Filter) ([]Issue, error) {
 	}
 	issues = append(issues, builtInIssues...)
 	if filter.Scope == "" || filter.Scope == config.ScopeProject {
-		gitIssues, err := diagnoseGitHygiene(cfg, filter)
+		gitIssues, err := diagnoseGitHygiene(ctx, cfg, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +128,7 @@ func builtInActiveGlobally(archivePath, name string, globalRoots []roots.ActiveR
 	return false
 }
 
-func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
+func Fix(ctx context.Context, cfg config.Config, opts FixOptions) ([]FixResult, error) {
 	if !opts.Yes {
 		return nil, fmt.Errorf("doctor fix requires confirmation; rerun with -y")
 	}
@@ -133,7 +136,7 @@ func Fix(cfg config.Config, opts FixOptions) ([]FixResult, error) {
 		return nil, err
 	}
 
-	issues, err := Diagnose(cfg, opts.Filter)
+	issues, err := Diagnose(ctx, cfg, opts.Filter)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +224,8 @@ func FixIssues(issues []Issue) ([]FixResult, error) {
 	return results, nil
 }
 
-func diagnoseGitHygiene(cfg config.Config, filter Filter) ([]Issue, error) {
-	inside, err := gitInsideWorkTree(cfg.ProjectRoot)
+func diagnoseGitHygiene(ctx context.Context, cfg config.Config, filter Filter) ([]Issue, error) {
+	inside, err := gitInsideWorkTree(ctx, cfg.ProjectRoot)
 	if err != nil || !inside {
 		return nil, err
 	}
@@ -230,12 +233,12 @@ func diagnoseGitHygiene(cfg config.Config, filter Filter) ([]Issue, error) {
 	var issues []Issue
 	recommended := filepath.Join(cfg.ProjectRoot, ".x-skills.yaml")
 	if _, err := os.Stat(recommended); err == nil {
-		tracked, trackErr := gitPathTracked(cfg.ProjectRoot, ".x-skills.yaml")
+		tracked, trackErr := gitPathTracked(ctx, cfg.ProjectRoot, ".x-skills.yaml")
 		if trackErr != nil {
 			return nil, trackErr
 		}
 		if !tracked {
-			ignored, ignoreErr := gitPathIgnored(cfg.ProjectRoot, ".x-skills.yaml")
+			ignored, ignoreErr := gitPathIgnored(ctx, cfg.ProjectRoot, ".x-skills.yaml")
 			if ignoreErr != nil {
 				return nil, ignoreErr
 			}
@@ -252,7 +255,7 @@ func diagnoseGitHygiene(cfg config.Config, filter Filter) ([]Issue, error) {
 	}
 
 	local := filepath.Join(cfg.ProjectRoot, ".x-skills.local.yaml")
-	tracked, err := gitPathTracked(cfg.ProjectRoot, ".x-skills.local.yaml")
+	tracked, err := gitPathTracked(ctx, cfg.ProjectRoot, ".x-skills.local.yaml")
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +269,7 @@ func diagnoseGitHygiene(cfg config.Config, filter Filter) ([]Issue, error) {
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		tracked, err := gitFolderTracked(cfg.ProjectRoot, rel)
+		tracked, err := gitFolderTracked(ctx, cfg.ProjectRoot, rel)
 		if err != nil {
 			return nil, err
 		}
@@ -277,8 +280,8 @@ func diagnoseGitHygiene(cfg config.Config, filter Filter) ([]Issue, error) {
 	return issues, nil
 }
 
-func gitInsideWorkTree(projectRoot string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "rev-parse", "--is-inside-work-tree")
+func gitInsideWorkTree(ctx context.Context, projectRoot string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "rev-parse", "--is-inside-work-tree")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -303,8 +306,8 @@ func hasGitMarker(path string) bool {
 	}
 }
 
-func gitPathIgnored(projectRoot, path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "check-ignore", "--quiet", "--", path)
+func gitPathIgnored(ctx context.Context, projectRoot, path string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "check-ignore", "--quiet", "--", path)
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -315,8 +318,8 @@ func gitPathIgnored(projectRoot, path string) (bool, error) {
 	return true, nil
 }
 
-func gitPathTracked(projectRoot, path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--error-unmatch", "--", path)
+func gitPathTracked(ctx context.Context, projectRoot, path string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "ls-files", "--error-unmatch", "--", path)
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -327,8 +330,8 @@ func gitPathTracked(projectRoot, path string) (bool, error) {
 	return true, nil
 }
 
-func gitFolderTracked(projectRoot, path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", projectRoot, "ls-files", "--", ":(literal)"+path)
+func gitFolderTracked(ctx context.Context, projectRoot, path string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "ls-files", "--", ":(literal)"+path)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("inspect tracked Skills Folder %q: %w", path, err)

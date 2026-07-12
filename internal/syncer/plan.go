@@ -583,7 +583,7 @@ func classifyDestination(cfg config.Config, path, archivePath, candidateFingerpr
 		if resolvedInfo, statErr := os.Stat(resolved); statErr != nil {
 			return destinationClassification{}, fmt.Errorf("inspect resolved destination %q: %w", resolved, statErr)
 		} else if !resolvedInfo.IsDir() {
-			return destinationClassification{kind: destinationDivergent, status: status}, nil
+			return destinationClassification{}, fmt.Errorf("destination %q is a symlink to non-directory %q; remove or repoint it before syncing", path, resolved)
 		}
 		if sameCanonicalPath(resolved, archivePath) {
 			if archiveMatches {

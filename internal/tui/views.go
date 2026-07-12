@@ -741,6 +741,9 @@ func normalizeViewHeight(view string, width, height int) string {
 func renderOverlay(base, layer string, width, height int) string {
 	lines := strings.Split(normalizeViewHeight(base, width, height), "\n")
 	layerLines := strings.Split(layer, "\n")
+	for i, line := range layerLines {
+		layerLines[i] = tuiui.SanitizeANSI(line)
+	}
 	layerHeight := len(layerLines)
 	layerWidth := 0
 	for _, line := range layerLines {

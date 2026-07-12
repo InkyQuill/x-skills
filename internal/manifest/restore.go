@@ -121,6 +121,7 @@ func PlanRestore(ctx context.Context, cfg config.Config, request RestoreRequest)
 	}
 	plan := RestorePlan{Notices: notices, checkoutRoot: checkoutRoot}
 	cache := remote.NewCheckoutCache(checkoutRoot)
+	reservedArchives := map[string]struct{}{}
 	for _, skill := range effective.Skills {
 		resolved, resolveErr := resolveRestoreSkill(ctx, cfg, cache, skill)
 		if resolveErr != nil {
@@ -142,7 +143,7 @@ func PlanRestore(ctx context.Context, cfg config.Config, request RestoreRequest)
 			} else if err != nil {
 				return cleanupRestorePlan(plan, fmt.Errorf("inspect restore destination %q: %w", path, err))
 			} else {
-				change, conflict, normalizeErr := planDestinationNormalization(cfg, destination, skill.Name, path)
+				change, conflict, normalizeErr := planDestinationNormalization(cfg, destination, skill.Name, path, reservedArchives)
 				if normalizeErr != nil {
 					return cleanupRestorePlan(plan, normalizeErr)
 				}
@@ -157,7 +158,7 @@ func PlanRestore(ctx context.Context, cfg config.Config, request RestoreRequest)
 		}
 	}
 	if request.Full {
-		removals, conflicts, err := planRestoreRemovals(cfg, destinations, desired)
+		removals, conflicts, err := planRestoreRemovals(cfg, destinations, desired, reservedArchives)
 		if err != nil {
 			return cleanupRestorePlan(plan, err)
 		}
@@ -301,7 +302,7 @@ func validateRestorePlanForApply(cfg config.Config, plan RestorePlan) error {
 	return nil
 }
 
-func planDestinationNormalization(cfg config.Config, destination roots.ActiveRoot, name, path string) (*Change, *MigrationConflict, error) {
+func planDestinationNormalization(cfg config.Config, destination roots.ActiveRoot, name, path string, reserved map[string]struct{}) (*Change, *MigrationConflict, error) {
 	active, err := actions.ScanActive(cfg, actions.ScanFilter{Scope: destination.Scope, Target: destination.Target})
 	if err != nil {
 		return nil, nil, err
@@ -327,7 +328,7 @@ func planDestinationNormalization(cfg config.Config, destination roots.ActiveRoo
 		return change, nil, nil
 	}
 	change.ArchiveName = ""
-	suggested, err := availableRestoreArchiveName(cfg, name+"-preserved")
+	suggested, err := availableRestoreArchiveName(cfg, name+"-preserved", reserved)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -413,7 +414,7 @@ func validateRestoreDestinations(cfg config.Config, requested []roots.ActiveRoot
 	return result, nil
 }
 
-func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, desired map[string]struct{}) ([]Change, []MigrationConflict, error) {
+func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, desired map[string]struct{}, reserved map[string]struct{}) ([]Change, []MigrationConflict, error) {
 	var changes []Change
 	var conflicts []MigrationConflict
 	for _, destination := range destinations {
@@ -434,14 +435,18 @@ func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, des
 			if skill.Status == actions.StatusUnmanaged {
 				kind, archiveName = ChangeMigrate, occurrenceName
 				archive := filepath.Join(cfg.ArchiveSkillsRoot(), occurrenceName)
-				if _, err := os.Lstat(archive); err == nil {
-					activeFP, activeErr := fingerprint.Directory(skill.Path)
-					archiveFP, archiveErr := fingerprint.Directory(archive)
-					if activeErr == nil && archiveErr == nil && activeFP == archiveFP {
-						kind, archiveName = ChangeRemove, ""
-					} else {
+				_, alreadyPlanned := reserved[occurrenceName]
+				if _, err := os.Lstat(archive); err == nil || alreadyPlanned {
+					if !alreadyPlanned && err == nil {
+						activeFP, activeErr := fingerprint.Directory(skill.Path)
+						archiveFP, archiveErr := fingerprint.Directory(archive)
+						if activeErr == nil && archiveErr == nil && activeFP == archiveFP {
+							kind, archiveName = ChangeRemove, ""
+						}
+					}
+					if kind == ChangeMigrate {
 						archiveName = ""
-						suggested, err := availableRestoreArchiveName(cfg, occurrenceName+"-preserved")
+						suggested, err := availableRestoreArchiveName(cfg, occurrenceName+"-preserved", reserved)
 						if err != nil {
 							return nil, nil, err
 						}
@@ -449,6 +454,8 @@ func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, des
 					}
 				} else if !errors.Is(err, os.ErrNotExist) {
 					return nil, nil, err
+				} else {
+					reserved[occurrenceName] = struct{}{}
 				}
 			}
 			changes = append(changes, Change{Kind: kind, Name: occurrenceName, Path: skill.Path, Destination: destination, ArchiveName: archiveName})
@@ -512,13 +519,17 @@ func validatePlannedChange(cfg config.Config, change Change) error {
 	return nil
 }
 
-func availableRestoreArchiveName(cfg config.Config, base string) (string, error) {
+func availableRestoreArchiveName(cfg config.Config, base string, reserved map[string]struct{}) (string, error) {
 	for index := 0; ; index++ {
 		name := base
 		if index > 0 {
 			name = fmt.Sprintf("%s-%d", base, index+1)
 		}
+		if _, taken := reserved[name]; taken {
+			continue
+		}
 		if _, err := os.Lstat(filepath.Join(cfg.ArchiveSkillsRoot(), name)); errors.Is(err, os.ErrNotExist) {
+			reserved[name] = struct{}{}
 			return name, nil
 		} else if err != nil {
 			return "", fmt.Errorf("inspect restore archive name %q: %w", name, err)

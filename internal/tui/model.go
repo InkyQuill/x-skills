@@ -435,7 +435,7 @@ func resolvedSkillPath(path string) string {
 	return path
 }
 
-func loadTUIData(cfg config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
+func loadTUIData(ctx context.Context, cfg config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
 	var firstErr error
 	activeSkills, err := actions.ScanActive(cfg, actions.ScanFilter{})
 	if err != nil {
@@ -449,7 +449,7 @@ func loadTUIData(cfg config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue
 		firstErr = err
 	}
 
-	issues, err := doctor.Diagnose(cfg, doctor.Filter{})
+	issues, err := doctor.Diagnose(ctx, cfg, doctor.Filter{})
 	if err != nil && firstErr == nil {
 		firstErr = err
 	}
@@ -470,7 +470,7 @@ func (m *Model) reload() {
 }
 
 func (m *Model) reloadSynchronously() {
-	m.active, m.repo, m.issues, m.repoUsage, m.err = loadTUIData(m.cfg)
+	m.active, m.repo, m.issues, m.repoUsage, m.err = loadTUIData(context.Background(), m.cfg)
 	m.clampCursor()
 }
 
@@ -478,7 +478,7 @@ func (m *Model) reloadCmd() tea.Cmd {
 	token := m.reloadToken
 	cfg := m.cfg
 	return func() tea.Msg {
-		active, repoSkills, issues, repoUsage, err := loadTUIData(cfg)
+		active, repoSkills, issues, repoUsage, err := loadTUIData(context.Background(), cfg)
 		return reloadResultMsg{
 			token:     token,
 			active:    active,

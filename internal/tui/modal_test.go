@@ -117,6 +117,21 @@ func TestConstrainedModalSanitizesTitleAndBodyControls(t *testing.T) {
 	}
 }
 
+func TestConstrainedModalKeepsBodyStylingWhileDroppingUnsafeControls(t *testing.T) {
+	view := renderConstrainedModal(80, 20, constrainedModalOptions{
+		Title: "Choices",
+		Body:  []string{"\x1b[7m> selected row\x1b[0m", "plain row\x1b[2J\x1b]8;;https://evil.test\x07"},
+	})
+	if !strings.Contains(view, "\x1b[7m> selected row\x1b[0m") {
+		t.Fatalf("modal stripped SGR body styling:\n%q", view)
+	}
+	for _, control := range []string{"\x1b[2J", "\x1b]8", "\x07"} {
+		if strings.Contains(view, control) {
+			t.Fatalf("modal retained terminal control %q: %q", control, view)
+		}
+	}
+}
+
 func TestConflictDiffKeepsSelectedFileVisibleBeyondViewport(t *testing.T) {
 	files := make([]diffFile, 20)
 	for i := range files {

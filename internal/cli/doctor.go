@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -44,7 +45,7 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 					}
 					filter = doctorFilterForLocations(locations)
 				}
-				results, err := fixDoctorLocations(cfg, filter, locations, archiveOnlyBuiltIns)
+				results, err := fixDoctorLocations(cmd.Context(), cfg, filter, locations, archiveOnlyBuiltIns)
 				if err != nil && len(results) > 0 {
 					writeDoctorFixResults(cmd.OutOrStdout(), results)
 					return err
@@ -56,7 +57,7 @@ func newDoctorCommand(rootOptions *options) *cobra.Command {
 				return nil
 			}
 
-			issues, err := doctor.Diagnose(cfg, filter)
+			issues, err := doctor.Diagnose(cmd.Context(), cfg, filter)
 			if err != nil {
 				return err
 			}
@@ -136,8 +137,8 @@ func doctorFilterForLocations(locations []roots.ActiveRoot) doctor.Filter {
 	}
 }
 
-func fixDoctorLocations(cfg config.Config, filter doctor.Filter, locations []roots.ActiveRoot, archiveOnlyBuiltIns bool) ([]doctor.FixResult, error) {
-	issues, err := doctor.Diagnose(cfg, filter)
+func fixDoctorLocations(ctx context.Context, cfg config.Config, filter doctor.Filter, locations []roots.ActiveRoot, archiveOnlyBuiltIns bool) ([]doctor.FixResult, error) {
+	issues, err := doctor.Diagnose(ctx, cfg, filter)
 	if err != nil {
 		return nil, err
 	}

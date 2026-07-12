@@ -192,6 +192,59 @@ func TestFullRestoreArchivesUnmanagedExtraWhenArchiveDoesNotExist(t *testing.T) 
 	}
 }
 
+func TestFullRestorePlansDuplicateAbsentArchiveAsResolvableConflict(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	agents := restoreRoot(t, cfg, config.TargetAgents)
+	claude := restoreRoot(t, cfg, config.TargetClaude)
+	makeRestoreSkill(t, filepath.Join(agents.Path, "extra"), "extra")
+	makeRestoreSkill(t, filepath.Join(claude.Path, "extra"), "extra")
+	if err := os.WriteFile(filepath.Join(claude.Path, "extra", "unique"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanRestore(context.Background(), cfg, RestoreRequest{Destinations: []roots.ActiveRoot{agents, claude}, Full: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = plan.Close() }()
+	if len(plan.Removals) != 2 {
+		t.Fatalf("removals = %#v, want 2 migrations", plan.Removals)
+	}
+	named, unnamed := 0, -1
+	for i, change := range plan.Removals {
+		if change.Kind != ChangeMigrate {
+			t.Fatalf("removal kind = %q, want migrate", change.Kind)
+		}
+		switch change.ArchiveName {
+		case "extra":
+			named++
+		case "":
+			unnamed = i
+		}
+	}
+	if named != 1 || unnamed < 0 {
+		t.Fatalf("removals = %#v, want one reserved archive and one unresolved duplicate", plan.Removals)
+	}
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].SuggestedName != "extra-preserved" {
+		t.Fatalf("conflicts = %#v, want one resolvable conflict suggesting extra-preserved", plan.Conflicts)
+	}
+	if plan.Conflicts[0].Path != plan.Removals[unnamed].Path {
+		t.Fatalf("conflict path = %q, want %q", plan.Conflicts[0].Path, plan.Removals[unnamed].Path)
+	}
+
+	plan.Removals[unnamed].ArchiveName = plan.Conflicts[0].SuggestedName
+	if _, err := ApplyRestore(context.Background(), cfg, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "extra", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.ArchiveSkillsRoot(), "extra-preserved", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlanAndApplyRestoreFetchRemoteSkill(t *testing.T) {
 	project, home, upstream := t.TempDir(), t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

@@ -349,7 +349,7 @@ func (m *Model) beginRestoreApply(plan manifest.RestorePlan) tea.Cmd {
 		defer cancel()
 		result, err := manifest.ApplyRestore(ctx, cfg, plan)
 		msg := restoreApplyMsg{token: token, result: result, err: err}
-		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(cfg)
+		msg.active, msg.repo, msg.issues, msg.repoUsage, msg.reloadErr = loadTUIData(ctx, cfg)
 		return msg
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/compatibility"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
@@ -133,16 +134,16 @@ func canonicalPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
+	canonical, err := pathidentity.Canonical(abs)
 	if err == nil {
-		info, err := os.Stat(resolved)
+		info, err := os.Stat(canonical)
 		if err != nil {
 			return "", err
 		}
 		if !info.IsDir() {
-			return "", fmt.Errorf("resolved path %q is not a directory", resolved)
+			return "", fmt.Errorf("resolved path %q is not a directory", canonical)
 		}
-		return filepath.Clean(resolved), nil
+		return canonical, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -157,14 +158,14 @@ func canonicalPath(path string) (string, error) {
 			if !info.IsDir() && len(missing) > 0 {
 				return "", fmt.Errorf("existing ancestor %q is not a directory", current)
 			}
-			resolved, err := filepath.EvalSymlinks(current)
+			resolved, err := pathidentity.Canonical(current)
 			if err != nil {
 				return "", err
 			}
 			for i := len(missing) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, missing[i])
 			}
-			return filepath.Clean(resolved), nil
+			return resolved, nil
 		case !errors.Is(statErr, os.ErrNotExist):
 			return "", statErr
 		}

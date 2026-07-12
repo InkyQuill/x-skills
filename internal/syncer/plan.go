@@ -12,6 +12,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
@@ -512,14 +513,19 @@ func pathsOverlap(a, b string) bool {
 }
 
 func canonicalEntryPath(path string) (string, error) {
-	if path == "" || filepath.Base(filepath.Clean(path)) == "." {
+	canonical, err := pathidentity.CanonicalEntry(path)
+	if err == nil {
+		return canonical, nil
+	}
+	clean := filepath.Clean(path)
+	if path == "" || filepath.Base(clean) == "." {
 		return "", fmt.Errorf("invalid entry path %q", path)
 	}
-	parent, err := canonicalPath(filepath.Dir(path))
-	if err != nil {
-		return "", err
+	parent, parentErr := canonicalPath(filepath.Dir(path))
+	if parentErr != nil {
+		return "", parentErr
 	}
-	return filepath.Join(parent, filepath.Base(filepath.Clean(path))), nil
+	return filepath.Join(parent, filepath.Base(clean)), nil
 }
 
 func archivedNames(cfg config.Config) (map[string]struct{}, error) {
@@ -658,7 +664,7 @@ func archivePathMatchesFingerprint(cfg config.Config, path, want string) (bool, 
 	if err != nil {
 		return false, err
 	}
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := pathidentity.Canonical(path)
 	if err != nil {
 		return false, err
 	}
@@ -670,11 +676,11 @@ func archivePathMatchesFingerprint(cfg config.Config, path, want string) (bool, 
 }
 
 func isArchivedPath(cfg config.Config, path string) bool {
-	root, err := filepath.EvalSymlinks(cfg.ArchiveSkillsRoot())
+	root, err := pathidentity.Canonical(cfg.ArchiveSkillsRoot())
 	if err != nil {
 		root = cfg.ArchiveSkillsRoot()
 	}
-	path, err = filepath.EvalSymlinks(path)
+	path, err = pathidentity.Canonical(path)
 	if err != nil {
 		return false
 	}
@@ -683,15 +689,7 @@ func isArchivedPath(cfg config.Config, path string) bool {
 }
 
 func sameCanonicalPath(a, b string) bool {
-	for _, value := range []*string{&a, &b} {
-		if resolved, err := filepath.EvalSymlinks(*value); err == nil {
-			*value = resolved
-		}
-		if abs, err := filepath.Abs(*value); err == nil {
-			*value = abs
-		}
-	}
-	return filepath.Clean(a) == filepath.Clean(b)
+	return pathidentity.Equivalent(a, b)
 }
 
 func suggestPreserveName(name, target string, reserved map[string]struct{}) (string, error) {

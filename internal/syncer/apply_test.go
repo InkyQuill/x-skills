@@ -13,6 +13,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
 
 func TestApplyMigratesPreservesLinksAndReconcilesManifest(t *testing.T) {
@@ -75,10 +76,7 @@ func TestApplyArchiveConflictUsesSharedRenameForVisibleAliases(t *testing.T) {
 	if len(result.Failed) != 0 || result.PlanError != nil {
 		t.Fatalf("result = %#v", result)
 	}
-	resolved, err := filepath.EvalSymlinks(alias)
-	if err != nil || resolved != filepath.Join(cfg.ArchiveSkillsRoot(), "review-preserved") {
-		t.Fatalf("alias = %q, %v", resolved, err)
-	}
+	assertApplyLink(t, alias, filepath.Join(cfg.ArchiveSkillsRoot(), "review-preserved"))
 	assertApplyFile(t, filepath.Join(existing, "content.txt"), "incoming")
 }
 
@@ -386,10 +384,7 @@ func TestApplyPublicationFailureRestoresArchiveAliases(t *testing.T) {
 	if _, err := os.Lstat(preserved); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("preserved alias remains after rollback: %v", err)
 	}
-	resolved, err := filepath.EvalSymlinks(usage)
-	if err != nil || resolved != archive {
-		t.Fatalf("usage resolves to %q, err=%v; want %q", resolved, err, archive)
-	}
+	assertApplyLink(t, usage, archive)
 }
 
 func TestApplyReportsBackupCleanupFailureWithoutBreakingLink(t *testing.T) {
@@ -590,6 +585,32 @@ func TestApplyRejectsReplacementIdentityDriftAtMutationBoundaries(t *testing.T) 
 	}
 }
 
+func TestClassificationMatchesConflictComparesManagedTargetIdentity(t *testing.T) {
+	t.Parallel()
+
+	managedTarget := makeApplySkill(t, t.TempDir(), "approved", "approved")
+	alias := filepath.Join(t.TempDir(), "approved-alias")
+	if err := os.Symlink(managedTarget, alias); err != nil {
+		t.Fatal(err)
+	}
+	fp := applyFingerprint(t, managedTarget)
+
+	classification := destinationClassification{
+		kind:          destinationDivergent,
+		status:        actions.StatusManaged,
+		fingerprint:   fp,
+		managedTarget: managedTarget,
+	}
+	conflict := Conflict{
+		DestinationStatus:      actions.StatusManaged,
+		DestinationFingerprint: fp,
+		ManagedTarget:          alias,
+	}
+	if !classificationMatchesConflict(classification, conflict) {
+		t.Fatal("classificationMatchesConflict treated equivalent managed targets as drift")
+	}
+}
+
 func applyFingerprint(t *testing.T, path string) string {
 	t.Helper()
 	fp, err := fingerprint.Directory(path)
@@ -634,9 +655,15 @@ func makeApplySkillAt(t *testing.T, path, content string) {
 func assertApplyLink(t *testing.T, path, want string) {
 	t.Helper()
 	got, err := filepath.EvalSymlinks(path)
-	if err != nil || got != want {
+	if err != nil || !applySamePath(got, want) {
 		t.Fatalf("link %q = %q, %v; want %q", path, got, err, want)
 	}
+}
+
+// applySamePath compares symlink targets by filesystem identity so tests are
+// insensitive to platform-specific raw path spelling.
+func applySamePath(a, b string) bool {
+	return pathidentity.Equivalent(a, b)
 }
 
 func assertApplyFile(t *testing.T, path, want string) {

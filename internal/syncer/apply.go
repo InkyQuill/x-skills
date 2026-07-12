@@ -15,6 +15,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/repo"
 )
 
@@ -214,7 +215,8 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 		if change.Action != LinkCreate && change.Action != LinkNormalize {
 			return fmt.Errorf("invalid link action %q", change.Action)
 		}
-		if _, err := archivePath(change.ArchivePath, change.Name); err != nil {
+		linkArchive, err := archivePath(change.ArchivePath, change.Name)
+		if err != nil {
 			return err
 		}
 		destination, err := activePath(change.DestinationPath, change.Name)
@@ -227,6 +229,8 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 		if _, source := sources[destination]; source {
 			return fmt.Errorf("link destination %q is also a migration source", destination)
 		}
+		change.ArchivePath = linkArchive
+		change.DestinationPath = destination
 		links[destination] = change
 	}
 	conflicts := make(map[string]Conflict)
@@ -310,7 +314,7 @@ func validateApplyPlan(cfg config.Config, plan Plan) error {
 		if replacing && !classificationMatchesConflict(classification, conflicts[destination]) {
 			return fmt.Errorf("replacement destination %q identity drifted from preflight", destination)
 		}
-		if replacing && (link.DestinationFingerprint != conflicts[destination].DestinationFingerprint || link.ManagedTarget != conflicts[destination].ManagedTarget) {
+		if replacing && (link.DestinationFingerprint != conflicts[destination].DestinationFingerprint || !sameManagedTarget(link.ManagedTarget, conflicts[destination].ManagedTarget)) {
 			return fmt.Errorf("replacement destination %q has inconsistent planned identity", destination)
 		}
 		if !replacing && link.Action == LinkCreate && classification.kind != destinationMissing {
@@ -608,9 +612,19 @@ func validateLinkImmediately(cfg config.Config, work applyWork, link Change) err
 }
 
 func classificationMatchesConflict(classification destinationClassification, conflict Conflict) bool {
-	return classification.status == conflict.DestinationStatus &&
-		classification.fingerprint == conflict.DestinationFingerprint &&
-		classification.managedTarget == conflict.ManagedTarget
+	if classification.status != conflict.DestinationStatus || classification.fingerprint != conflict.DestinationFingerprint {
+		return false
+	}
+	return sameManagedTarget(classification.managedTarget, conflict.ManagedTarget)
+}
+
+// sameManagedTarget compares managed symlink targets by filesystem identity
+// while preserving empty/non-empty mismatches as identity drift.
+func sameManagedTarget(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	return pathidentity.Equivalent(a, b)
 }
 
 func validateReplacementIdentity(cfg config.Config, conflict Conflict) error {

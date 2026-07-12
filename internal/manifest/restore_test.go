@@ -11,6 +11,7 @@ import (
 
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
@@ -450,9 +451,7 @@ func TestApplyRestoreUnavailableIgnoresBlockedConflictAndAppliesUnrelatedAdditio
 	if _, err := os.Stat(filepath.Join(root.Path, "divergent", "local")); err != nil {
 		t.Fatal("divergent active copy was mutated")
 	}
-	if target, err := filepath.EvalSymlinks(filepath.Join(root.Path, "safe")); err != nil || target != filepath.Join(cfg.ArchiveSkillsRoot(), "safe") {
-		t.Fatalf("safe link = %q, %v", target, err)
-	}
+	assertRestoreLink(t, filepath.Join(root.Path, "safe"), filepath.Join(cfg.ArchiveSkillsRoot(), "safe"))
 }
 
 func TestPlanRestoreUsesManagedOccurrenceNameInsteadOfFrontmatterName(t *testing.T) {
@@ -635,8 +634,16 @@ func TestApplyRestoreAddsLinksAndMigratesUnmanagedExtrasWithoutDeletingArchives(
 	if _, err := os.Lstat(filepath.Join(root.Path, "extra")); !os.IsNotExist(err) {
 		t.Fatalf("extra remains in destination: %v", err)
 	}
-	if target, err := filepath.EvalSymlinks(filepath.Join(root.Path, "wanted")); err != nil || target != filepath.Join(cfg.ArchiveSkillsRoot(), "wanted") {
-		t.Fatalf("wanted link = %q, %v", target, err)
+	assertRestoreLink(t, filepath.Join(root.Path, "wanted"), filepath.Join(cfg.ArchiveSkillsRoot(), "wanted"))
+}
+
+// assertRestoreLink compares restored symlink targets by filesystem identity so
+// raw target spelling differences do not fail on platforms like macOS.
+func assertRestoreLink(t *testing.T, path, want string) {
+	t.Helper()
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil || !pathidentity.Equivalent(target, want) {
+		t.Fatalf("link %q = %q, %v; want %q", path, target, err, want)
 	}
 }
 

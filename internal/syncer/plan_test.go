@@ -12,6 +12,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/roots"
 )
 
@@ -38,10 +39,10 @@ func TestPreflightPlansManagedReuseAndDestinationClassificationsWithoutMutation(
 	if len(plan.Migrations) != 0 {
 		t.Fatalf("Migrations = %#v, want managed archive reuse", plan.Migrations)
 	}
-	if len(plan.Links) != 1 || plan.Links[0].DestinationPath != matchingUnmanaged || plan.Links[0].Action != LinkNormalize {
+	if len(plan.Links) != 1 || !planSamePath(plan.Links[0].DestinationPath, matchingUnmanaged) || plan.Links[0].Action != LinkNormalize {
 		t.Fatalf("Links = %#v, want one normalization", plan.Links)
 	}
-	if len(plan.Skipped) != 1 || plan.Skipped[0].DestinationPath != managed || plan.Skipped[0].Reason != SkipAlreadyManaged {
+	if len(plan.Skipped) != 1 || !planSamePath(plan.Skipped[0].DestinationPath, managed) || plan.Skipped[0].Reason != SkipAlreadyManaged {
 		t.Fatalf("Skipped = %#v, want already-managed destination", plan.Skipped)
 	}
 	assertPlanSnapshot(t, before, cfg.ProjectRoot, cfg.ArchiveRoot)
@@ -61,7 +62,7 @@ func TestPreflightPlansUnmanagedMigrationAndMissingLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Migrations) != 1 || plan.Migrations[0].SourcePath != source || plan.Migrations[0].ArchivePath != filepath.Join(cfg.ArchiveSkillsRoot(), "review") {
+	if len(plan.Migrations) != 1 || !planSamePath(plan.Migrations[0].SourcePath, source) || !planSamePath(plan.Migrations[0].ArchivePath, filepath.Join(cfg.ArchiveSkillsRoot(), "review")) {
 		t.Fatalf("Migrations = %#v", plan.Migrations)
 	}
 	if len(plan.Links) != 1 || plan.Links[0].Action != LinkCreate {
@@ -281,7 +282,7 @@ func TestPreflightRequiresExplicitResolutionForDivergentArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Migrations) != 0 || len(plan.Skipped) != 0 || len(plan.Conflicts) != 1 || plan.Conflicts[0].DestinationPath != archive {
+	if len(plan.Migrations) != 0 || len(plan.Skipped) != 0 || len(plan.Conflicts) != 1 || !planSamePath(plan.Conflicts[0].DestinationPath, archive) {
 		t.Fatalf("divergent archive plan = %#v", plan)
 	}
 	if plan.Conflicts[0].SuggestedPreserveAs != "review-from-archive" {
@@ -600,6 +601,17 @@ func bindPlanCandidate(candidate *Candidate) {
 	candidate.ID = candidate.Name + ":" + candidate.Fingerprint
 }
 
+// planSamePath compares expected test fixture paths by filesystem identity so
+// platform-specific spellings like macOS /var and /private/var do not matter.
+func planSamePath(a, b string) bool {
+	if pathidentity.Equivalent(a, b) {
+		return true
+	}
+	canonicalA, errA := canonicalEntryPath(a)
+	canonicalB, errB := canonicalEntryPath(b)
+	return errA == nil && errB == nil && canonicalA == canonicalB
+}
+
 type planSnapshotEntry struct {
 	mode    os.FileMode
 	size    int64
@@ -684,6 +696,20 @@ func TestArchivePathMatchesFingerprintRejectsSymlinkedArchiveEntry(t *testing.T)
 	_, err := archivePathMatchesFingerprint(cfg, archive, mustPlanFingerprint(t, external))
 	if err == nil || !strings.Contains(err.Error(), "real directory") {
 		t.Fatalf("error = %v, want symlinked archive rejection", err)
+	}
+}
+
+func TestSameCanonicalPathMatchesEntriesThroughAliasedParent(t *testing.T) {
+	t.Parallel()
+
+	realParent := t.TempDir()
+	aliasParent := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+
+	if !sameCanonicalPath(filepath.Join(realParent, "missing"), filepath.Join(aliasParent, "missing")) {
+		t.Fatal("sameCanonicalPath treated aliased missing entries as different paths")
 	}
 }
 

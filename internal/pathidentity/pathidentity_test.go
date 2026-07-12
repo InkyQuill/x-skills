@@ -202,6 +202,7 @@ func TestWindowsCanonicalizationHandlesShortAndLongNames(t *testing.T) {
 	}
 }
 
+// windowsShortPath returns Windows' short-name spelling for path when available.
 func windowsShortPath(t *testing.T, path string) string {
 	t.Helper()
 	out, err := exec.Command("cmd", "/c", "for %I in (\""+path+"\") do @echo %~sI").Output()

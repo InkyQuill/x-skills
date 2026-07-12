@@ -211,9 +211,14 @@ func windowsShortPath(t *testing.T, path string) string {
 	if err != nil {
 		t.Skipf("could not query Windows short path for %q: %v", path, err)
 	}
-	short := strings.Trim(strings.TrimSpace(string(out)), `"`)
-	if drive := strings.Index(short, `:\`); drive > 0 {
+	short := strings.ReplaceAll(strings.TrimSpace(string(out)), `"`, "")
+	if drive := strings.Index(short, `:`); drive > 0 && isWindowsDriveLetter(short[drive-1]) {
 		short = short[drive-1:]
 	}
-	return strings.Trim(short, `"`)
+	return short
+}
+
+// isWindowsDriveLetter reports whether b can start a Windows drive-qualified path.
+func isWindowsDriveLetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }

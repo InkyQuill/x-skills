@@ -260,6 +260,36 @@ func TestRenameArchiveDiscoversAliasesByTargetAndPreservesLinkStyle(t *testing.T
 	}
 }
 
+func TestRenameArchiveRelinksWhenRenameCannotReplaceExistingSymlink(t *testing.T) {
+	project := t.TempDir()
+	cfg := config.Default(project, t.TempDir())
+	archive := makeRenameSkill(t, cfg.ArchiveSkillsRoot(), "old")
+	alias := makeRenameLink(t, filepath.Join(project, ".agents", "skills"), "alias", archive)
+	original := renameArchiveFilesystem
+	renameArchiveFilesystem.rename = func(oldPath, newPath string) error {
+		if strings.Contains(oldPath, ".x-skills-rename-link-") {
+			if _, err := os.Lstat(newPath); err == nil {
+				return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: os.ErrPermission}
+			}
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	t.Cleanup(func() { renameArchiveFilesystem = original })
+
+	result, err := RenameArchive(cfg, "old", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(result.RelinkedPaths, []string{alias}) {
+		t.Fatalf("relinked paths = %#v", result.RelinkedPaths)
+	}
+	resolved, resolveErr := filepath.EvalSymlinks(alias)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
+	}
+	assertSamePath(t, resolved, filepath.Join(cfg.ArchiveSkillsRoot(), "new"))
+}
+
 func TestRenameArchiveLeavesSameNameUnmanagedSymlinkUntouched(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, t.TempDir())

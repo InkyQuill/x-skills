@@ -266,6 +266,9 @@ func renameUsageOrder(cfg config.Config, path string) int {
 	return len(cfg.ManagedRoots())
 }
 
+// replaceRenameLink swaps a visible usage symlink to point at the renamed archive.
+// It uses rename-first replacement when the platform supports it, then falls
+// back to remove-and-rename for platforms that reject replacing an existing link.
 func replaceRenameLink(usage renameUsage) (err error) {
 	temp, err := temporaryRenameSibling(usage.path, "link")
 	if err != nil {
@@ -275,7 +278,39 @@ func replaceRenameLink(usage renameUsage) (err error) {
 	if err := renameArchiveFilesystem.symlink(usage.newText, temp); err != nil {
 		return err
 	}
-	return renameArchiveFilesystem.rename(temp, usage.path)
+	if err := renameArchiveFilesystem.rename(temp, usage.path); err != nil {
+		if !renameLinkReplacePermissionDenied(err) {
+			return err
+		}
+		return replaceRenameLinkAfterRenameFailure(usage, temp, err)
+	}
+	return nil
+}
+
+// renameLinkReplacePermissionDenied reports whether a failed symlink replacement
+// looks like a platform refusal to overwrite the existing link path.
+func renameLinkReplacePermissionDenied(err error) bool {
+	return errors.Is(err, os.ErrPermission)
+}
+
+// replaceRenameLinkAfterRenameFailure handles filesystems that cannot rename a
+// staged symlink over an existing symlink, preserving drift checks and restoring
+// the old link if the fallback publish fails after removal.
+func replaceRenameLinkAfterRenameFailure(usage renameUsage, temp string, renameErr error) error {
+	if err := revalidateRenameUsage(usage); err != nil {
+		return errors.Join(renameErr, err)
+	}
+	if err := renameArchiveFilesystem.remove(usage.path); err != nil {
+		return errors.Join(renameErr, fmt.Errorf("remove existing usage before relink: %w", err))
+	}
+	if err := renameArchiveFilesystem.rename(temp, usage.path); err != nil {
+		restoreErr := renameArchiveFilesystem.symlink(usage.oldText, usage.path)
+		if restoreErr != nil {
+			restoreErr = fmt.Errorf("restore previous usage after failed relink: %w", restoreErr)
+		}
+		return errors.Join(renameErr, fmt.Errorf("publish replacement usage: %w", err), restoreErr)
+	}
+	return nil
 }
 
 func revalidateRenameUsage(usage renameUsage) error {

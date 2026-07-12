@@ -12,6 +12,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/compatibility"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/syncer"
 	"github.com/charmbracelet/huh"
@@ -243,11 +244,33 @@ func TestSyncInteractiveConflictPromptsForPreserveNameAndConfirmation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{destination, "Preserve", "one-local", "Apply sync plan?"} {
+	assertSyncOutputConflictPathEquivalent(t, out.String(), destination)
+	for _, want := range []string{"Preserve", "one-local", "Apply sync plan?"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
 	}
+}
+
+// assertSyncOutputConflictPathEquivalent accepts platform-specific canonical spellings.
+func assertSyncOutputConflictPathEquivalent(t *testing.T, output, want string) {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		path, ok := strings.CutPrefix(line, "Conflict at ")
+		if !ok {
+			continue
+		}
+		path = strings.TrimSuffix(path, ":")
+		equivalent, err := pathidentity.EquivalentE(path, want)
+		if err != nil {
+			t.Fatalf("compare conflict path %q with %q: %v\n%s", path, want, err, output)
+		}
+		if !equivalent {
+			t.Fatalf("conflict path = %q, want same location as %q\n%s", path, want, output)
+		}
+		return
+	}
+	t.Fatalf("output missing conflict path for %q:\n%s", want, output)
 }
 
 func TestSyncConflictChoicesReplaceKeepAndCancel(t *testing.T) {

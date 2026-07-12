@@ -3,6 +3,7 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -155,8 +156,11 @@ func TestWriteRecommendedIsDeterministicAndNormalizesPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o644 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
 		t.Fatalf("mode = %o, want 644", info.Mode().Perm())
+	}
+	if info.Mode().Perm()&0o600 != 0o600 || info.Mode().Perm()&0o111 != 0 {
+		t.Fatalf("mode = %o, want readable/writable without executable bits", info.Mode().Perm())
 	}
 
 	got, err := LoadRecommended(root)

@@ -488,7 +488,7 @@ func TestAddReplaceUpdatesSameNameArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "v2\n" {
+	if strings.TrimRight(string(data), "\r\n") != "v2" {
 		t.Fatalf("version.txt = %q, want v2", data)
 	}
 }

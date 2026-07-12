@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -180,6 +181,11 @@ func TestDoctorQuotesCustomSkillsFolderSuggestionAndEscapesIgnorePattern(t *test
 	home := t.TempDir()
 	runDoctorGit(t, project, "init", "--quiet")
 	rootRel := "team skills;$(touch nope)*[x]?"
+	wantIgnore := `/team\ skills;$(touch\ nope)\*\[x\]\?/`
+	if runtime.GOOS == "windows" {
+		rootRel = "team skills;$(touch nope)[x]"
+		wantIgnore = `/team\ skills;$(touch\ nope)\[x\]/`
+	}
 	skill := filepath.Join(project, rootRel, "tracked", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
 		t.Fatal(err)
@@ -195,7 +201,7 @@ func TestDoctorQuotesCustomSkillsFolderSuggestionAndEscapesIgnorePattern(t *test
 	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configData), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runDoctorGit(t, project, "add", "--", filepath.ToSlash(filepath.Join(rootRel, "tracked", "SKILL.md")))
+	runDoctorGit(t, project, "add", "--", ":(literal)"+filepath.ToSlash(filepath.Join(rootRel, "tracked", "SKILL.md")))
 
 	var out bytes.Buffer
 	if err := Execute([]string{"--home", home, "--project-root", project, "doctor"}, strings.NewReader(""), &out, &bytes.Buffer{}); err != nil {
@@ -214,7 +220,6 @@ func TestDoctorQuotesCustomSkillsFolderSuggestionAndEscapesIgnorePattern(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantIgnore := `/team\ skills;$(touch\ nope)\*\[x\]\?/`
 	if !strings.Contains(string(ignore), wantIgnore) {
 		t.Fatalf(".gitignore missing literal pattern %q:\n%s", wantIgnore, ignore)
 	}

@@ -273,8 +273,24 @@ func TestEnterOpensActiveDetailModal(t *testing.T) {
 }
 
 func TestEnterOpensRepoDetailModal(t *testing.T) {
-	home := t.TempDir()
-	project := t.TempDir()
+	home, err := os.MkdirTemp("", "xskills-archive-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(home); err != nil {
+			t.Logf("remove temp home: %v", err)
+		}
+	})
+	project, err := os.MkdirTemp("", "xskills-repo-project-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(project); err != nil {
+			t.Logf("remove temp project: %v", err)
+		}
+	})
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
 	active := makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
@@ -293,8 +309,8 @@ func TestEnterOpensRepoDetailModal(t *testing.T) {
 	if m.modal == nil {
 		t.Fatal("modal is nil")
 	}
-	view := plain(m.modal.View(100, 30, m))
-	for _, want := range []string{"Detail: zen-of-go (Repo)", "Archive path", cfg.ArchiveSkillsRoot(), "Description", "Go style.", "Usages", ".Ag"} {
+	view := plain(m.modal.View(160, 30, m))
+	for _, want := range []string{"Detail: zen-of-go (Repo)", "Archive path", "xskills-archive-home-", "Description", "Go style.", "Usages", ".Ag"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("repo detail modal missing %q:\n%s", want, view)
 		}
@@ -302,7 +318,17 @@ func TestEnterOpensRepoDetailModal(t *testing.T) {
 }
 
 func TestEnterOpensDoctorDetailModal(t *testing.T) {
-	cfg := config.Default(t.TempDir(), t.TempDir())
+	project, err := os.MkdirTemp("", "xskills-doctor-project-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(project); err != nil {
+			t.Logf("remove temp project: %v", err)
+		}
+	})
+	home := t.TempDir()
+	cfg := config.Default(project, home)
 	root := cfg.MustActiveRoot("project", "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -326,8 +352,8 @@ func TestEnterOpensDoctorDetailModal(t *testing.T) {
 	if m.modal == nil {
 		t.Fatal("modal is nil")
 	}
-	view := plain(m.modal.View(100, 30, m))
-	for _, want := range []string{"Detail: zen-of-go (Doctor)", "Issue kind", "broken-symlink", "Affected path", brokenPath, "Reason", "Safe fix"} {
+	view := plain(m.modal.View(160, 30, m))
+	for _, want := range []string{"Detail: zen-of-go (Doctor)", "Issue kind", "broken-symlink", "Affected path", "xskills-doctor-project-", "Reason", "Safe fix"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("doctor detail modal missing %q:\n%s", want, view)
 		}

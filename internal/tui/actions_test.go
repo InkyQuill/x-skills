@@ -17,10 +17,24 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/fingerprint"
 	"github.com/InkyQuill/x-skills/internal/manifest"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	"github.com/InkyQuill/x-skills/internal/skills"
 )
+
+// requireEquivalentPath fails the test if got and want do not identify the same
+// filesystem entry.
+func requireEquivalentPath(t *testing.T, context, got, want string) {
+	t.Helper()
+	ok, err := pathidentity.EquivalentE(got, want)
+	if err != nil {
+		t.Fatalf("%s path identity check failed for %q and %q: %v", context, got, want, err)
+	}
+	if !ok {
+		t.Fatalf("%s path = %q, want equivalent to %q", context, got, want)
+	}
+}
 
 func requireRestorePlanModal(t *testing.T, value modal) restorePlanModal {
 	t.Helper()
@@ -415,13 +429,7 @@ func TestActiveMigrateSameSHAArchivesRelinkWithoutConflict(t *testing.T) {
 	if m.modal != nil {
 		t.Fatalf("modal = %#v, want closed after successful migrate", m.modal)
 	}
-	resolved, err := filepath.EvalSymlinks(active)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != archived {
-		t.Fatalf("active resolved to %q, want %q", resolved, archived)
-	}
+	requireEquivalentPath(t, "active link", active, archived)
 	if !strings.Contains(m.status, "relinked") {
 		t.Fatalf("status = %q, want relinked", m.status)
 	}
@@ -551,13 +559,7 @@ func TestActiveMigrateContinuesBatchAfterConflictResolution(t *testing.T) {
 		if _, err := os.Stat(archivePath); err != nil {
 			t.Fatalf("%s archive missing after batch continuation: %v", name, err)
 		}
-		resolved, err := filepath.EvalSymlinks(activePath)
-		if err != nil {
-			t.Fatalf("%s active link missing after batch continuation: %v", name, err)
-		}
-		if resolved != archivePath {
-			t.Fatalf("%s active resolved to %q, want %q", name, resolved, archivePath)
-		}
+		requireEquivalentPath(t, name+" active link", activePath, archivePath)
 	}
 	info, err := skills.Read(filepath.Join(cfg.ArchiveSkillsRoot(), "bravo-skill"))
 	if err != nil {
@@ -1571,10 +1573,7 @@ func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
 	if m.renameInFlight || !strings.Contains(m.status, "Renamed old to new") {
 		t.Fatalf("rename completion state: inFlight=%v status=%q", m.renameInFlight, m.status)
 	}
-	resolved, err := filepath.EvalSymlinks(alias)
-	if err != nil || resolved != filepath.Join(cfg.ArchiveSkillsRoot(), "new") {
-		t.Fatalf("active link = %q, %v", resolved, err)
-	}
+	requireEquivalentPath(t, "renamed active alias", alias, filepath.Join(cfg.ArchiveSkillsRoot(), "new"))
 }
 
 func TestRepoRenameCancellationStopsBeforeMutation(t *testing.T) {

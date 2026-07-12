@@ -1650,7 +1650,18 @@ func TestInstallPreviewMissingSourceRepository(t *testing.T) {
 }
 
 func TestInstallPreviewMissingSkillInRepoShowsStaleRegistryModal(t *testing.T) {
-	repoDir := makeTUITestGitRepo(t)
+	repoDir, err := os.MkdirTemp("", "xskills-stale-repo-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(repoDir); err != nil {
+			t.Logf("remove temp repo: %v", err)
+		}
+	})
+	runTUITestGit(t, repoDir, "init")
+	runTUITestGit(t, repoDir, "config", "user.email", "test@example.com")
+	runTUITestGit(t, repoDir, "config", "user.name", "Test")
 	writeTUITestRemoteSkill(t, repoDir, "skills/other", "other", "Other.")
 	gitTUITestCommit(t, repoDir, "initial")
 
@@ -1679,7 +1690,7 @@ func TestInstallPreviewMissingSkillInRepoShowsStaleRegistryModal(t *testing.T) {
 		"Uh-oh...",
 		"Couldn't find the requested skill in repo.",
 		"You might want to check the repo contents.",
-		repoDir,
+		"xskills-stale-repo-",
 		"Remember that this sometimes happens with skills.sh - it's stale data.",
 		"[ OK ]",
 	} {
@@ -2042,13 +2053,7 @@ func TestInstallAndUseLinksProjectAgentsByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")
-	resolved, err := filepath.EvalSymlinks(active)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != archive {
-		t.Fatalf("resolved = %q, want %q", resolved, archive)
-	}
+	requireEquivalentPath(t, "active link", active, archive)
 	if m.modal != nil {
 		t.Fatal("modal is still open after install and use")
 	}
@@ -2292,13 +2297,7 @@ func TestInstallAndUseBlocksArchiveOnlyWhileInFlightAndCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents), "svelte-coder")
-	resolved, err := filepath.EvalSymlinks(active)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != archive {
-		t.Fatalf("resolved = %q, want %q", resolved, archive)
-	}
+	requireEquivalentPath(t, "active link", active, archive)
 }
 
 func TestInstallAndUseStaleCommandDoesNotArchiveOrLink(t *testing.T) {

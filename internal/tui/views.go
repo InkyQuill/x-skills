@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/remote"
@@ -587,7 +586,7 @@ type rowSegment struct {
 
 func selectableRow(segments []rowSegment, focused bool, selected bool, width int) string {
 	if !focused && !selected {
-		return tuiui.TruncateANSI(ansi.Strip(joinRowSegments(segments, lipgloss.NoColor{})), width)
+		return tuiui.TruncateANSI(joinRowSegments(segments, lipgloss.NoColor{}), width)
 	}
 
 	rowStyle := selectedBg
@@ -604,9 +603,9 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 		}
 		text := segment.text
 		if segment.render != nil {
-			text = ansi.Strip(segment.render(background))
+			text = tuiui.SanitizeANSI(segment.render(background))
 		} else {
-			text = ansi.Strip(text)
+			text = tuiui.SanitizeANSI(text)
 		}
 		if lipgloss.Width(text) > remaining {
 			text = tuiui.TruncateANSI(text, remaining)
@@ -628,10 +627,10 @@ func joinRowSegments(segments []rowSegment, background lipgloss.TerminalColor) s
 	var row strings.Builder
 	for _, segment := range segments {
 		if segment.render != nil {
-			row.WriteString(ansi.Strip(segment.render(background)))
+			row.WriteString(tuiui.SanitizeANSI(segment.render(background)))
 			continue
 		}
-		row.WriteString(ansi.Strip(segment.text))
+		row.WriteString(tuiui.SanitizeANSI(segment.text))
 	}
 	return row.String()
 }

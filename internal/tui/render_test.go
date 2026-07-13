@@ -102,6 +102,16 @@ func TestHelpModalRendersConfiguredRootLabels(t *testing.T) {
 	}
 }
 
+func TestHelpDoesNotDescribeObsoleteGroupCountBadge(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	view := plain(newHelpModal().View(120, 40, m))
+	for _, obsolete := range []string{"group count badge", "×N"} {
+		if strings.Contains(view, obsolete) {
+			t.Fatalf("help modal contains obsolete legend %q:\n%s", obsolete, view)
+		}
+	}
+}
+
 func TestStatusRowsDistinguishableWithoutColor(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	statuses := []string{actions.StatusManaged, actions.StatusUnmanaged, actions.StatusBroken}

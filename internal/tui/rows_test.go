@@ -76,7 +76,7 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 
 	rows := renderActiveRows(m, 100)
 	got := strings.Join(rows, "\n")
-	for _, want := range []string{"› ◇ ◇ zen-of-go", ".Ag", "~Cl", "Go style."} {
+	for _, want := range []string{"› ◇ ○ zen-of-go", ".Ag", "~Cl", "Go style."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("row missing %q:\n%s", want, got)
 		}
@@ -99,8 +99,8 @@ func TestStatusRenderersUseExactSymbolsIndependentlyOfRowState(t *testing.T) {
 		wantChip   string
 		wantMarker string
 	}{
-		{name: "unicode managed", status: actions.StatusManaged, wantChip: "✓ managed", wantMarker: "✓"},
-		{name: "unicode unmanaged", status: actions.StatusUnmanaged, wantChip: "◇ unmanaged", wantMarker: "◇"},
+		{name: "unicode managed", status: actions.StatusManaged, wantChip: "● managed", wantMarker: "●"},
+		{name: "unicode unmanaged", status: actions.StatusUnmanaged, wantChip: "○ unmanaged", wantMarker: "○"},
 		{name: "unicode broken", status: actions.StatusBroken, wantChip: "× broken", wantMarker: "×"},
 		{name: "ASCII managed", ascii: true, status: actions.StatusManaged, wantChip: "+ managed", wantMarker: "+"},
 		{name: "ASCII unmanaged", ascii: true, status: actions.StatusUnmanaged, wantChip: "? unmanaged", wantMarker: "?"},

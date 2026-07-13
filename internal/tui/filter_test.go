@@ -175,7 +175,7 @@ func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
 	m = mustModel(t, updated)
 
 	view := plain(m.View())
-	if !strings.Contains(view, "› ◇ ◇ target-skill") {
+	if !strings.Contains(view, "› ◇ ○ target-skill") {
 		t.Fatalf("filtered cursor is not drawn on target row:\n%s", view)
 	}
 

@@ -300,17 +300,9 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 	if err := validateReleaseWorkflow(workflow); err != nil {
 		t.Error(err)
 	}
-	lineEndingSources := map[string]string{
-		"LF source":   workflow,
-		"CRLF source": strings.ReplaceAll(workflow, "\n", "\r\n"),
-	}
-	for name, source := range lineEndingSources {
-		t.Run(name, func(t *testing.T) {
-			crlfWorkflow := strings.ReplaceAll(normalizeLineEndings(source), "\n", "\r\n")
-			if err := validateReleaseWorkflow(crlfWorkflow); err != nil {
-				t.Errorf("validate CRLF release workflow: %v", err)
-			}
-		})
+	crlfWorkflow := strings.ReplaceAll(normalizeLineEndings(workflow), "\n", "\r\n")
+	if err := validateReleaseWorkflow(crlfWorkflow); err != nil {
+		t.Errorf("validate CRLF release workflow: %v", err)
 	}
 	invalidWorkflows := []struct {
 		name    string

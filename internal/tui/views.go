@@ -50,7 +50,14 @@ func renderHeader(m Model, width int) string {
 		tabLabel(false, "s", "Restore"),
 		tabLabel(false, "S", "Sync"),
 	}
-	title := titleStyle.Render(m.pulseDiamond()+" x-skills") + "  " + strings.Join(tabs, " ")
+	titleParts := []string{
+		titleStyle.Render(m.pulseDiamond() + " x-skills"),
+		versionStyle.Render(m.buildInfo.Display()),
+	}
+	if m.latestRelease != "" && m.buildInfo.IsRelease() {
+		titleParts = append(titleParts, updateStyle.Render("update "+m.latestRelease))
+	}
+	title := strings.Join(titleParts, "  ") + "  " + strings.Join(tabs, " ")
 	return tuiui.TruncateANSI(title, width)
 }
 
@@ -83,6 +90,9 @@ func renderListPanel(m Model, width, maxRows int) string {
 		rows = renderDoctorRows(m, width)
 	case ViewInstall:
 		return renderInstallPanel(m, width, rowCount)
+	}
+	if m.reloadInFlight && len(rows) == 0 {
+		rows = []string{accentStyle.Render(m.pulseDiamond() + " Loading skills data…")}
 	}
 	if len(rows) == 0 {
 		rows = []string{mutedStyle.Render("No items.")}

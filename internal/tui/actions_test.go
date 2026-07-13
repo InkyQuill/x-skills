@@ -344,7 +344,7 @@ func TestRepoRecommendationKeyRoutesWithoutConflictingWithViewKey(t *testing.T) 
 	if err := remote.WriteSourceMetadata(archive, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "owner", Repo: "skills", SkillPath: "skills/zen-of-go"}); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.setView(ViewRepo)
 
 	updated, cmd := m.Update(keyRunes("r"))
@@ -417,7 +417,7 @@ func TestActiveMigrateSameSHAArchivesRelinkWithoutConflict(t *testing.T) {
 	active := makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Same.")
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Same.")
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("m"))
 	m = mustModel(t, updated)
 	if m.modal == nil {
@@ -442,7 +442,7 @@ func TestActiveMigrateDivergentArchiveOpensConflictModal(t *testing.T) {
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Active.")
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Archived.")
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("m"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -474,7 +474,7 @@ func TestActiveMigrateModalKeepsFooterVisibleAndScrollsTargets(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		makeSkill(t, cfg.MustActiveRoot("project", "agents"), fmt.Sprintf("skill-%02d", i), "Local.")
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 100
 	m.height = 18
 	for _, group := range m.active {
@@ -527,7 +527,7 @@ func TestActiveMigrateContinuesBatchAfterConflictResolution(t *testing.T) {
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "bravo-skill", "Active.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "bravo-skill", "Archived.")
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "charlie-skill", "Charlie.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 120
 	m.height = 40
 	for _, group := range m.active {
@@ -579,7 +579,7 @@ func TestActiveMigrateContinuesBatchAfterUseActiveConflictResolution(t *testing.
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "bravo-skill", "Active bravo.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "bravo-skill", "Archived bravo.")
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "charlie-skill", "Charlie.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 120
 	m.height = 40
 	for _, group := range m.active {
@@ -638,7 +638,7 @@ func TestActiveMigrateConflictResolutionReloadsActiveList(t *testing.T) {
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Active alpha.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Archived alpha.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 120
 	m.height = 40
 	for _, group := range m.active {
@@ -694,7 +694,7 @@ func TestActiveUnlinkGroupsManagedBrokenAndUnmanaged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.selected = map[ViewName]map[string]bool{
 		ViewActive: {},
 		ViewRepo:   {},
@@ -736,7 +736,7 @@ func TestActiveUnlinkManagedOnlyAsksForLocationsNotCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("u"))
 	m = mustModel(t, updated)
 	if m.modal == nil {
@@ -773,7 +773,7 @@ func TestActiveUnlinkManagedGroupRemovesEachSelectedLocation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("u"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -806,7 +806,7 @@ func TestActiveUnlinkUnmanagedAliasChoosesLocationThenArchivesSelectedLink(t *te
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("u"))
 	m = mustModel(t, updated)
 	if m.modal == nil {
@@ -866,7 +866,7 @@ func TestActiveUnlinkUnmanagedAliasConflictOpensDiffAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("u"))
@@ -909,7 +909,7 @@ func TestRepoLinkModalShowsDestinationAndCreatesLink(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("l"))
@@ -942,7 +942,7 @@ func TestRepoLinkModalShowsFocusedDestinationAndSelectedChoice(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("l"))
@@ -974,7 +974,7 @@ func TestRepoLinkModalCanChangeDestination(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("l"))
@@ -995,7 +995,7 @@ func TestRepoLinkModalCanChangeDestination(t *testing.T) {
 func TestRepoLinkModalUsesConfiguredRoots(t *testing.T) {
 	cfg := customRootConfig(t)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.setView(ViewRepo)
 
 	updated, _ := m.Update(keyRunes("l"))
@@ -1021,7 +1021,7 @@ func TestRepoLinkUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -1068,7 +1068,7 @@ func TestRepoUnlinkUsageChooserDefaultsAllUsagesSelected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("u"))
@@ -1154,7 +1154,7 @@ func TestRepoUnlinkUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
 	if err := os.Symlink(targetArchive, targetUsage); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -1194,7 +1194,7 @@ func TestRepoDeleteWithUsagesShowsScopeLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("d"))
@@ -1213,7 +1213,7 @@ func TestRepoDeleteUsesSelectedRepoRowInsteadOfCursor(t *testing.T) {
 	cfg := config.Default(project, home)
 	alphaArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
 	targetArchive := makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -1248,7 +1248,7 @@ func TestRepoDeleteMultiSelectedNoVisibleUsagesUsesPluralDirectCopy(t *testing.T
 	cfg := config.Default(project, home)
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
@@ -1296,7 +1296,7 @@ func TestRepoDeleteMultiSelectedMixedVisibleUsagesPluralizesWarning(t *testing.T
 	if err := os.Symlink(targetArchive, filepath.Join(root, "target-skill")); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
@@ -1334,7 +1334,7 @@ func TestRepoDeleteSkipsArchiveDeletionWhenUnlinkFails(t *testing.T) {
 	project := t.TempDir()
 	cfg := config.Default(project, home)
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.active = []ActiveGroup{{
 		Name: "zen-of-go",
 		Members: []actions.ActiveSkill{{
@@ -1373,7 +1373,7 @@ func TestRepoDeleteReconcilesSuccessfulProjectUnlinkWhenLaterUnlinkFails(t *test
 	if err := manifest.WriteLocal(project, manifest.Manifest{Version: 1, Skills: []manifest.Skill{{Name: "zen-of-go", Source: manifest.Source{Type: manifest.SourceArchive}, Fingerprint: strings.Repeat("a", 64)}}}); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.active = []ActiveGroup{{Name: "zen-of-go", Members: []actions.ActiveSkill{
 		{Name: "zen-of-go", Path: projectPath, Root: roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents}, Status: actions.StatusManaged},
 		{Name: "zen-of-go", Path: filepath.Join(cfg.GlobalAgentsRoot, "missing"), Root: roots.ActiveRoot{Scope: config.ScopeGlobal, Target: config.TargetAgents}, Status: actions.StatusManaged},
@@ -1412,7 +1412,7 @@ func TestDoctorFixModalShowsIssueCountsAndApplies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("f"))
@@ -1538,7 +1538,7 @@ func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
 	if err := os.Symlink(archive, alias); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.setView(ViewRepo)
 
 	updated, cmd := m.Update(keyRunes(keyRepoRename))
@@ -1579,7 +1579,7 @@ func TestRepoRenameKeyIsUniqueAndRunsAsynchronously(t *testing.T) {
 func TestRepoRenameCancellationStopsBeforeMutation(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "old", "Old.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.setView(ViewRepo)
 	updated, _ := m.Update(keyRunes(keyRepoRename))
 	m = mustModel(t, updated)

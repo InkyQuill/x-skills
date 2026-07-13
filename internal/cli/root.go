@@ -12,14 +12,15 @@ import (
 )
 
 type options struct {
-	projectRoot string
-	homeDir     string
-	archiveRoot string
-	yes         bool
-	no          bool
-	noInput     bool
-	json        bool
-	buildInfo   buildinfo.Info
+	projectRoot          string
+	homeDir              string
+	archiveRoot          string
+	yes                  bool
+	no                   bool
+	noInput              bool
+	json                 bool
+	buildInfo            buildinfo.Info
+	latestReleaseChecker buildinfo.LatestReleaseChecker
 
 	flags  *pflag.FlagSet
 	loaded *config.Config
@@ -46,10 +47,11 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 	cfg := config.Default(projectRoot, homeDir)
 	opts := options{
-		projectRoot: cfg.ProjectRoot,
-		homeDir:     cfg.HomeDir,
-		archiveRoot: cfg.ArchiveRoot,
-		buildInfo:   buildinfo.Current(),
+		projectRoot:          cfg.ProjectRoot,
+		homeDir:              cfg.HomeDir,
+		archiveRoot:          cfg.ArchiveRoot,
+		buildInfo:            buildinfo.Current(),
+		latestReleaseChecker: buildinfo.NewGitHubReleaseChecker(nil),
 	}
 
 	root := &cobra.Command{

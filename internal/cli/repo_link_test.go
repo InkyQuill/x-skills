@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,16 @@ import (
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/pathidentity"
+	"github.com/InkyQuill/x-skills/internal/remote"
 )
+
+type repoRecord struct {
+	Identity     string                 `json:"identity"`
+	DeclaredName string                 `json:"declared_name,omitempty"`
+	Description  string                 `json:"description,omitempty"`
+	Path         string                 `json:"path"`
+	Source       *remote.SourceMetadata `json:"source,omitempty"`
+}
 
 // assertSamePath verifies two paths identify the same filesystem location.
 func assertSamePath(t *testing.T, got, want string) {
@@ -36,6 +46,124 @@ func TestRepoListsArchivedSkills(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "unused-skill") || !strings.Contains(out.String(), "Not linked.") {
 		t.Fatalf("repo output:\n%s", out.String())
+	}
+}
+
+func TestRepoShowsDeclaredNameOnlyWhenDifferent(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "matching", "Matching.")
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "repo"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "composition-patterns (declared: vercel-composition-patterns)") {
+		t.Fatalf("repo output missing divergent declared name:\n%s", text)
+	}
+	if strings.Contains(text, "matching (declared:") {
+		t.Fatalf("repo output repeats matching declared name:\n%s", text)
+	}
+}
+
+func TestRepoJSON(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), "composition-patterns")
+	source := remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "InkyQuill",
+		Repo:       "skills",
+		CloneURL:   "https://github.com/InkyQuill/skills.git",
+		Commit:     "abc123",
+		SkillPath:  "skills/composition-patterns",
+	}
+	if err := remote.WriteSourceMetadata(archivePath, source); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "--json", "repo"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []repoRecord
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+		t.Fatalf("unmarshal repo JSON: %v\n%s", err, out.String())
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %#v, want one", records)
+	}
+	record := records[0]
+	if record.Identity != "composition-patterns" || record.DeclaredName != "vercel-composition-patterns" ||
+		record.Description != "Compose." || record.Path != archivePath {
+		t.Fatalf("record = %#v", record)
+	}
+	if record.Source == nil || record.Source.SourceType != remote.SourceTypeGitHub ||
+		record.Source.Owner != "InkyQuill" || record.Source.Repo != "skills" ||
+		record.Source.SkillPath != "skills/composition-patterns" {
+		t.Fatalf("source = %#v", record.Source)
+	}
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Fatalf("repo JSON contains ANSI styling: %q", out.String())
+	}
+}
+
+func TestRepoJSONOmitsMatchingDeclaredName(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	makeSkill(t, filepath.Join(home, ".x-skills", "skills"), "matching", "Matching.")
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "--json", "repo"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal repo JSON: %v\n%s", err, out.String())
+	}
+	if len(raw) != 1 {
+		t.Fatalf("records = %#v, want one", raw)
+	}
+	if _, ok := raw[0]["declared_name"]; ok {
+		t.Fatalf("matching declared_name present: %#v", raw[0])
+	}
+}
+
+func TestRepoJSONEmptyArray(t *testing.T) {
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", t.TempDir(), "--project-root", t.TempDir(), "--json", "repo"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []repoRecord
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+		t.Fatalf("unmarshal repo JSON: %v\n%s", err, out.String())
+	}
+	if records == nil || len(records) != 0 {
+		t.Fatalf("records = %#v, want non-nil empty slice", records)
 	}
 }
 

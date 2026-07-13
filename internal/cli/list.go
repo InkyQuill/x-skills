@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -12,6 +13,23 @@ import (
 
 type listOptions struct {
 	at []string
+}
+
+type listJSONRecord struct {
+	Identity     string       `json:"identity"`
+	DeclaredName string       `json:"declared_name,omitempty"`
+	Description  string       `json:"description,omitempty"`
+	Status       string       `json:"status"`
+	Path         string       `json:"path"`
+	Reason       string       `json:"reason,omitempty"`
+	Root         listJSONRoot `json:"root"`
+}
+
+type listJSONRoot struct {
+	Scope  string `json:"scope"`
+	Target string `json:"target"`
+	Label  string `json:"label"`
+	Path   string `json:"path"`
 }
 
 func newListCommand(rootOptions *options) *cobra.Command {
@@ -32,7 +50,10 @@ func newListCommand(rootOptions *options) *cobra.Command {
 				return err
 			}
 			skills = filterSkillsByLocations(skills, locations)
-			return writeList(cmd.OutOrStdout(), skills, filter)
+			if rootOptions.json {
+				return writeListJSON(cmd.OutOrStdout(), skills)
+			}
+			return writeListHuman(cmd.OutOrStdout(), skills, filter)
 		},
 	}
 
@@ -65,7 +86,7 @@ func filterSkillsByLocations(skills []actions.ActiveSkill, locations []roots.Act
 	return filtered
 }
 
-func writeList(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanFilter) error {
+func writeListHuman(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanFilter) error {
 	if len(skills) == 0 {
 		_, err := fmt.Fprintln(out, "No active skills found.")
 		return err
@@ -80,17 +101,66 @@ func writeList(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanF
 				continue
 			}
 			if skill.Status == actions.StatusBroken {
-				if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Identity, skill.Status, skill.Reason); err != nil {
+				if _, err := fmt.Fprintf(
+					out,
+					"  %s  %s  %s\n",
+					skillDisplayName(skill.Identity, skill.DeclaredName),
+					skill.Status,
+					skill.Reason,
+				); err != nil {
 					return err
 				}
 				continue
 			}
-			if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Identity, skill.Status, skill.Description); err != nil {
+			if _, err := fmt.Fprintf(
+				out,
+				"  %s  %s  %s\n",
+				skillDisplayName(skill.Identity, skill.DeclaredName),
+				skill.Status,
+				skill.Description,
+			); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func writeListJSON(out io.Writer, skills []actions.ActiveSkill) error {
+	records := make([]listJSONRecord, 0, len(skills))
+	for _, skill := range skills {
+		records = append(records, listJSONRecord{
+			Identity:     skill.Identity,
+			DeclaredName: differingDeclaredName(skill.Identity, skill.DeclaredName),
+			Description:  skill.Description,
+			Status:       skill.Status,
+			Path:         skill.Path,
+			Reason:       skill.Reason,
+			Root: listJSONRoot{
+				Scope:  skill.Root.Scope,
+				Target: skill.Root.Target,
+				Label:  skill.Root.Label,
+				Path:   skill.Root.Path,
+			},
+		})
+	}
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(records)
+}
+
+func skillDisplayName(identity, declaredName string) string {
+	if differingDeclaredName(identity, declaredName) == "" {
+		return identity
+	}
+	return fmt.Sprintf("%s (declared: %s)", identity, declaredName)
+}
+
+func differingDeclaredName(identity, declaredName string) string {
+	if declaredName == "" || declaredName == identity {
+		return ""
+	}
+	return declaredName
 }
 
 func rootsForSkills(skills []actions.ActiveSkill, filter actions.ScanFilter) []roots.ActiveRoot {

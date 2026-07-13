@@ -280,12 +280,56 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 	}
 
 	workflow := readFile(t, filepath.Join(".github", "workflows", "release.yml"))
-	if !strings.Contains(workflow, "install-only: true") {
-		t.Error("release workflow must install GoReleaser without publishing before semantic-release")
+	if err := validateReleaseWorkflow(workflow); err != nil {
+		t.Error(err)
+	}
+	invalidWorkflows := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "wrong action major",
+			content: strings.Replace(
+				workflow,
+				"goreleaser/goreleaser-action@v7",
+				"goreleaser/goreleaser-action@v6",
+				1,
+			),
+		},
+		{
+			name:    "semantic-release before GoReleaser",
+			content: "          semantic-release\n" + workflow,
+		},
+	}
+	for _, invalid := range invalidWorkflows {
+		t.Run(invalid.name, func(t *testing.T) {
+			if err := validateReleaseWorkflow(invalid.content); err == nil {
+				t.Error("release workflow validation accepted invalid ordering or action version")
+			}
+		})
 	}
 	if strings.Contains(workflow, "release --snapshot") {
 		t.Error("release workflow must not build and discard snapshot artifacts")
 	}
+}
+
+func validateReleaseWorkflow(workflow string) error {
+	actionIndex := strings.Index(workflow, "uses: goreleaser/goreleaser-action@v7")
+	if actionIndex == -1 {
+		return fmt.Errorf("release workflow must use goreleaser/goreleaser-action@v7")
+	}
+	installOnlyIndex := strings.Index(workflow, "install-only: true")
+	if installOnlyIndex == -1 {
+		return fmt.Errorf("release workflow must install GoReleaser without publishing")
+	}
+	semanticReleaseIndex := strings.Index(workflow, "          semantic-release\n")
+	if semanticReleaseIndex == -1 {
+		return fmt.Errorf("release workflow must invoke semantic-release")
+	}
+	if actionIndex >= installOnlyIndex || installOnlyIndex >= semanticReleaseIndex {
+		return fmt.Errorf("release workflow must install GoReleaser before invoking semantic-release")
+	}
+	return nil
 }
 
 func TestDevelopmentInstallerReplacesExistingBinary(t *testing.T) {

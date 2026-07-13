@@ -59,6 +59,15 @@ type MissingSkillError struct {
 	Err           error
 }
 
+type AmbiguousSkillError struct {
+	Name  string
+	Paths []string
+}
+
+func (e *AmbiguousSkillError) Error() string {
+	return fmt.Sprintf("ambiguous skill %q: %s", e.Name, strings.Join(e.Paths, ", "))
+}
+
 func (e *MissingSkillError) Error() string {
 	if e.PreferredPath == "" {
 		if e.Name == "" {
@@ -285,7 +294,10 @@ func (c Checkout) findSkillByRepoSearch(ctx context.Context, name string) (Found
 		return FoundSkill{}, &MissingSkillError{Name: name, RepoURL: c.Source.CloneURL}
 	}
 	if len(matches) > 1 {
-		return FoundSkill{}, fmt.Errorf("ambiguous skill %q: %s", name, strings.Join(matches, ", "))
+		return FoundSkill{}, &AmbiguousSkillError{
+			Name:  name,
+			Paths: append([]string{}, matches...),
+		}
 	}
 	return c.foundAt(filepath.Join(c.Path, filepath.FromSlash(matches[0])), matches[0])
 }

@@ -90,6 +90,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 	root.AddCommand(
 		newAddCommand(&opts),
+		newPreviewCommand(&opts),
 		newSearchCommand(&opts),
 		newListCommand(&opts),
 		newListRootsCommand(&opts),

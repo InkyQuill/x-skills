@@ -660,8 +660,10 @@ func activeDetail(group ActiveGroup) string {
 	return mutedStyle.Render(singleLineDescription(group.Description))
 }
 
+var descriptionLineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
 func singleLineDescription(description string) string {
-	return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(description)
+	return descriptionLineBreaks.Replace(description)
 }
 
 func renderStatus(m Model, width int) string {

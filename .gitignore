@@ -3,5 +3,6 @@ __pycache__/
 .x-skills.local.yaml
 .agents/
 .superpowers/
+.worktrees/
 .remember/
 bin/

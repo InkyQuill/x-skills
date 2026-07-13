@@ -52,6 +52,8 @@ func TestRestoreReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := setupActiveIdentityMismatch(t, home, project)
 	writeRestoreCLISkill(t, cfg, "other")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetCodex), "other")
 
 	err := Execute(
 		[]string{
@@ -67,6 +69,11 @@ func TestRestoreReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatalf("restored skill %q: %v", active, err)
+	}
+	assertSamePath(t, resolved, archive)
 	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
 }
 

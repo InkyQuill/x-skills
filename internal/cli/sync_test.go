@@ -227,7 +227,9 @@ func TestSyncAppliesResolvedPlanAfterConfirmation(t *testing.T) {
 func TestSyncReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := setupActiveIdentityMismatch(t, home, project)
-	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "other", "Other.")
+	source := makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "other", "Other.")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetCodex), "other")
 
 	err := Execute(
 		[]string{
@@ -244,6 +246,14 @@ func TestSyncReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Lstat(source); !os.IsNotExist(err) {
+		t.Fatalf("synced source still exists or unexpected error: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatalf("synced skill %q: %v", active, err)
+	}
+	assertSamePath(t, resolved, archive)
 	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
 }
 

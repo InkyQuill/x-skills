@@ -29,7 +29,8 @@ func TestMigrateWithYesFlag(t *testing.T) {
 func TestMigrateReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := setupActiveIdentityMismatch(t, home, project)
-	makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
 
 	err := Execute(
 		[]string{
@@ -45,6 +46,11 @@ func TestMigrateReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatalf("migrated skill %q: %v", active, err)
+	}
+	assertSamePath(t, resolved, archive)
 	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
 }
 
@@ -200,7 +206,8 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 func TestUnlinkReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := setupActiveIdentityMismatch(t, home, project)
-	makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
 
 	err := Execute(
 		[]string{
@@ -216,6 +223,12 @@ func TestUnlinkReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("unlinked skill still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("deleted unmanaged skill was archived or unexpected error: %v", err)
 	}
 	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
 }

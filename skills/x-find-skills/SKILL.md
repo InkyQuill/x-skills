@@ -34,14 +34,25 @@ curl -fsSLG 'https://skills.sh/api/search' \
   --data-urlencode 'limit=20'
 ```
 
-Parse results for `name`, `description`, `owner`, `repo`, `path`, `installs`, and `audit`. Treat search/API failures as transient unless the same repository/path also fails during checkout.
+Registry results may contain only `name`, `source`, and `installs`; `description`, `path`, and
+`audit` are optional. Build the initial ranking from the available name, source, and install count.
+Do not fill in absent fields. Before a consequential recommendation or install, inspect each
+shortlisted candidate with:
+
+```bash
+x-skills preview owner/repo skill
+```
+
+Base final relevance on the returned `SKILL.md` content.
+Running or listing the command is not enough: read its output. If preview output is unavailable,
+present only the initial shortlist and stop before a final recommendation or install command.
 
 1. Reconcile remote results with local archive:
 
 - Already archived with matching source metadata: recommend linking, not reinstalling.
 - Same name but different source: flag as a conflict; recommend preview/diff before replacing.
 - Not archived: recommend `x-skills add`.
-- Registry path is stale: still try install; `x-skills add` searches the repo by folder name and `SKILL.md` name when the provided path is wrong.
+- A supplied registry path is stale: still try install; `x-skills add` searches the repo by folder name and `SKILL.md` name when the provided path is wrong.
 
 ## Install Commands
 
@@ -64,14 +75,16 @@ x-skills add owner/repo --all --no-link -y
 
 ## Ranking
 
-Prefer candidates in this order:
+Use this order:
 
 1. Already archived and relevant to the current project.
-2. Official or well-known source repos with clear descriptions and strong install counts.
-3. Skills whose `SKILL.md` directly matches the user's requested workflow.
-4. Lower-install or unknown-source skills only after previewing the contents and explaining the risk.
+2. Initially shortlist remote candidates using only available names, sources, and install counts.
+3. Run `x-skills preview owner/repo skill` for candidates that could lead to a recommendation or
+   install.
+4. Rank final candidates by how directly their actual `SKILL.md` content matches the requested
+   workflow; explain source or content risks.
 
-Do not recommend solely from a registry row. Preview or inspect the skill when the user is likely to install it.
+Do not make a consequential recommendation or install solely from a registry row.
 
 ## Response Shape
 

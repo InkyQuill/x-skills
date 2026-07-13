@@ -26,6 +26,28 @@ func TestMigrateWithYesFlag(t *testing.T) {
 	assertSamePath(t, resolved, archived)
 }
 
+func TestMigrateReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"-y", "migrate", "other",
+			"--at", "project:codex",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
+}
+
 func TestMigrateWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -173,6 +195,29 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	if !strings.Contains(out.String(), "removed unmanaged") {
 		t.Fatalf("unlink output:\n%s", out.String())
 	}
+}
+
+func TestUnlinkReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"-y", "unlink", "other",
+			"--at", "project:codex",
+			"--delete-unmanaged",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
 }
 
 func TestUnlinkUnmanagedPromptsForArchiveOrDelete(t *testing.T) {

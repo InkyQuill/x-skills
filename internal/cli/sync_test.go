@@ -224,6 +224,29 @@ func TestSyncAppliesResolvedPlanAfterConfirmation(t *testing.T) {
 	}
 }
 
+func TestSyncReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, config.TargetClaude), "other", "Other.")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"-y", "sync",
+			"--at", "project:codex",
+			"--skill", "other",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
+}
+
 func TestSyncInteractiveConflictPromptsForPreserveNameAndConfirmation(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

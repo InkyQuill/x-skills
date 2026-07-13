@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/manifest"
 	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
 
@@ -60,6 +62,60 @@ func TestLinkAcceptsMultipleNames(t *testing.T) {
 		}
 		assertSamePath(t, resolved, source)
 	}
+}
+
+func TestLinkReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "other", "Other.")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"link", "other",
+			"--at", "project:codex",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
+}
+
+func setupActiveIdentityMismatch(t *testing.T, home, project string) config.Config {
+	t.Helper()
+	cfg := config.Default(project, home)
+	archive := makeSkill(t, cfg.ArchiveSkillsRoot(), "composition-patterns", "Compose.")
+	content := []byte("---\nname: vercel-composition-patterns\ndescription: Compose.\n---\n")
+	if err := os.WriteFile(filepath.Join(archive, "SKILL.md"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	activeRoot := cfg.MustActiveRoot(config.ScopeProject, config.TargetAgents)
+	if err := os.MkdirAll(activeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archive, filepath.Join(activeRoot, "composition-patterns")); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func assertLocalManifestHasIdentity(t *testing.T, cfg config.Config, identity string) {
+	t.Helper()
+	local, err := manifest.LoadLocal(cfg.ProjectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, skill := range local.Skills {
+		if skill.Name == identity {
+			return
+		}
+	}
+	t.Fatalf("local manifest skills = %#v, want identity %q", local.Skills, identity)
 }
 
 func TestLinkAcceptsMultipleLocations(t *testing.T) {

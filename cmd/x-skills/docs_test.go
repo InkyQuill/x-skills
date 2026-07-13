@@ -250,24 +250,41 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 		"arm64",
 		"- zip",
 		"- tar.gz",
+		"-X github.com/InkyQuill/x-skills/internal/buildinfo.version={{ .Version }}",
+		"extra_files:",
+		"glob: scripts/install.sh",
+		"glob: scripts/install.ps1",
 	} {
 		if !strings.Contains(goreleaser, required) {
 			t.Errorf(".goreleaser.yaml must contain %q", required)
 		}
+	}
+	if strings.Contains(goreleaser, "changelog:\n  disable: true") {
+		t.Error(".goreleaser.yaml must let GoReleaser generate the release changelog")
 	}
 
 	releaseConfig := readFile(t, "release.config.cjs")
 	for _, required := range []string{
 		"@semantic-release/commit-analyzer",
 		"@semantic-release/release-notes-generator",
-		"@semantic-release/github",
-		"dist/*.tar.gz",
-		"dist/*.zip",
-		"dist/checksums.txt",
+		"@semantic-release/exec",
+		"publishCmd",
+		"goreleaser release --clean",
 	} {
 		if !strings.Contains(releaseConfig, required) {
 			t.Errorf("release.config.cjs must contain %q", required)
 		}
+	}
+	if strings.Contains(releaseConfig, "@semantic-release/github") {
+		t.Error("release.config.cjs must delegate release publication exclusively to GoReleaser")
+	}
+
+	workflow := readFile(t, filepath.Join(".github", "workflows", "release.yml"))
+	if !strings.Contains(workflow, "install-only: true") {
+		t.Error("release workflow must install GoReleaser without publishing before semantic-release")
+	}
+	if strings.Contains(workflow, "release --snapshot") {
+		t.Error("release workflow must not build and discard snapshot artifacts")
 	}
 }
 

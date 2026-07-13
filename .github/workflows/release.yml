@@ -37,12 +37,12 @@ jobs:
       - name: Test
         run: go test ./...
 
-      - name: Build release artifacts
+      - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --snapshot --clean
+          install-only: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -54,8 +54,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           npx -y
-          -p semantic-release
+          -p semantic-release@25
           -p @semantic-release/commit-analyzer
           -p @semantic-release/release-notes-generator
-          -p @semantic-release/github
+          -p @semantic-release/exec
           semantic-release

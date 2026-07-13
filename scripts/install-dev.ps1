@@ -48,11 +48,13 @@ try {
 
     $installedExe = Join-Path $InstallDir "$BinName.exe"
     $stagedExe = Join-Path $InstallDir ".$BinName.install.$PID.exe"
+    $backupExe = Join-Path $InstallDir ".$BinName.backup.$PID.exe"
     Copy-Item -Force $builtExe $stagedExe
     try {
         if (Test-Path $installedExe) {
             Write-Step "existing $BinName found at $installedExe; replacing it"
-            [System.IO.File]::Replace($stagedExe, $installedExe, $null)
+            Remove-Item -Force $backupExe -ErrorAction SilentlyContinue
+            [System.IO.File]::Replace($stagedExe, $installedExe, $backupExe)
         } else {
             [System.IO.File]::Move($stagedExe, $installedExe)
         }
@@ -60,6 +62,7 @@ try {
         throw "replace $installedExe failed; close any running x-skills process and retry: $($_.Exception.Message)"
     } finally {
         Remove-Item -Force $stagedExe -ErrorAction SilentlyContinue
+        Remove-Item -Force $backupExe -ErrorAction SilentlyContinue
     }
     Install-XsShortcut
     Write-Host "installed $BinName to $installedExe"

@@ -215,6 +215,8 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 			"existing $BinName found",
 			"replacing it",
 			"[System.IO.File]::Replace",
+			"$backupExe",
+			"Remove-Item -Force $backupExe",
 			"close any running x-skills process and retry",
 			"X_SKILLS_INSTALL_DIR",
 			"github.com/InkyQuill/x-skills/internal/buildinfo.version",
@@ -222,6 +224,9 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 			if !strings.Contains(installPS, required) {
 				t.Errorf("scripts/%s must contain %q", name, required)
 			}
+		}
+		if strings.Contains(installPS, "[System.IO.File]::Replace($stagedExe, $installedExe, $null)") {
+			t.Errorf("scripts/%s must pass a legal backup path to File.Replace", name)
 		}
 	}
 
@@ -266,7 +271,6 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 	releaseConfig := readFile(t, "release.config.cjs")
 	for _, required := range []string{
 		"@semantic-release/commit-analyzer",
-		"@semantic-release/release-notes-generator",
 		"@semantic-release/exec",
 		"publishCmd",
 		"goreleaser release --clean",
@@ -278,10 +282,26 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 	if strings.Contains(releaseConfig, "@semantic-release/github") {
 		t.Error("release.config.cjs must delegate release publication exclusively to GoReleaser")
 	}
+	if strings.Contains(releaseConfig, "@semantic-release/release-notes-generator") {
+		t.Error("release.config.cjs must leave release notes to GoReleaser")
+	}
 
 	workflow := readFile(t, filepath.Join(".github", "workflows", "release.yml"))
+	for _, required := range []string{
+		"version: v2.17.0",
+		"semantic-release@25.0.7",
+		"@semantic-release/commit-analyzer@13.0.1",
+		"@semantic-release/exec@7.1.0",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow must pin %q", required)
+		}
+	}
 	if err := validateReleaseWorkflow(workflow); err != nil {
 		t.Error(err)
+	}
+	if err := validateReleaseWorkflow(strings.ReplaceAll(workflow, "\n", "\r\n")); err != nil {
+		t.Errorf("validate CRLF release workflow: %v", err)
 	}
 	invalidWorkflows := []struct {
 		name    string
@@ -314,6 +334,7 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 }
 
 func validateReleaseWorkflow(workflow string) error {
+	workflow = strings.ReplaceAll(workflow, "\r\n", "\n")
 	actionIndex := strings.Index(workflow, "uses: goreleaser/goreleaser-action@v7")
 	if actionIndex == -1 {
 		return fmt.Errorf("release workflow must use goreleaser/goreleaser-action@v7")

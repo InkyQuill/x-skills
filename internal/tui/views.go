@@ -385,7 +385,7 @@ func renderRepoRows(m Model, width int) []string {
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderRootChips(m.symbols, m.repoUsage[skill.Name], background)
 				}},
-				{text: " " + mutedStyle.Render(skill.Description)},
+				{text: " " + mutedStyle.Render(singleLineDescription(skill.Description))},
 			},
 			i == m.cursor,
 			m.selected[ViewRepo][id],
@@ -508,7 +508,7 @@ func renderInstallRows(m Model, width int) []string {
 			})
 		}
 		if result.Description != "" {
-			description := result.Description
+			description := singleLineDescription(result.Description)
 			segments = append(segments, rowSegment{
 				text: "  ",
 			}, rowSegment{
@@ -584,6 +584,13 @@ type rowSegment struct {
 	render func(background lipgloss.TerminalColor) string
 }
 
+func sanitizedSegmentText(segment rowSegment, background lipgloss.TerminalColor) string {
+	if segment.render != nil {
+		return tuiui.SanitizeANSI(segment.render(background))
+	}
+	return tuiui.SanitizeANSI(segment.text)
+}
+
 func selectableRow(segments []rowSegment, focused bool, selected bool, width int) string {
 	if !focused && !selected {
 		return tuiui.TruncateANSI(joinRowSegments(segments, lipgloss.NoColor{}), width)
@@ -601,12 +608,7 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 		if remaining <= 0 {
 			break
 		}
-		text := segment.text
-		if segment.render != nil {
-			text = tuiui.SanitizeANSI(segment.render(background))
-		} else {
-			text = tuiui.SanitizeANSI(text)
-		}
+		text := sanitizedSegmentText(segment, background)
 		if lipgloss.Width(text) > remaining {
 			text = tuiui.TruncateANSI(text, remaining)
 		}
@@ -626,11 +628,7 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 func joinRowSegments(segments []rowSegment, background lipgloss.TerminalColor) string {
 	var row strings.Builder
 	for _, segment := range segments {
-		if segment.render != nil {
-			row.WriteString(tuiui.SanitizeANSI(segment.render(background)))
-			continue
-		}
-		row.WriteString(tuiui.SanitizeANSI(segment.text))
+		row.WriteString(sanitizedSegmentText(segment, background))
 	}
 	return row.String()
 }
@@ -659,7 +657,11 @@ func activeDetail(group ActiveGroup) string {
 	if group.Status == actions.StatusBroken {
 		return dangerStyle.Render(group.Reason)
 	}
-	return mutedStyle.Render(group.Description)
+	return mutedStyle.Render(singleLineDescription(group.Description))
+}
+
+func singleLineDescription(description string) string {
+	return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(description)
 }
 
 func renderStatus(m Model, width int) string {

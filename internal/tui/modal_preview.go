@@ -24,15 +24,23 @@ type previewModal struct {
 }
 
 func newPreviewModal(title, skillPath string) modal {
-	rawBytes, err := os.ReadFile(filepath.Join(skillPath, "SKILL.md"))
-	var raw string
+	skillFile := filepath.Join(skillPath, "SKILL.md")
+	rawBytes, err := os.ReadFile(skillFile)
 	if err != nil {
-		raw = "read SKILL.md: " + err.Error()
-	} else {
-		raw = string(rawBytes)
+		rawBytes = []byte("read SKILL.md: " + err.Error())
 	}
+	return newPreviewModalFromDocument(title, skillFile, rawBytes)
+}
+
+func newPreviewModalFromDocument(title, skillFile string, rawBytes []byte) *previewModal {
 	vp := viewport.New(0, 0)
-	p := previewModal{title: title, path: filepath.Join(skillPath, "SKILL.md"), raw: raw, rendered: true, viewport: vp}
+	p := previewModal{
+		title:    title,
+		path:     skillFile,
+		raw:      string(rawBytes),
+		rendered: true,
+		viewport: vp,
+	}
 	p.refreshContent()
 	return &p
 }

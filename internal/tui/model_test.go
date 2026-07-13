@@ -452,7 +452,7 @@ func TestFooterShortcutsStayVisibleWithStatusAndModal(t *testing.T) {
 	if !strings.Contains(view, "installed opentui-react") {
 		t.Fatalf("view missing status:\n%s", view)
 	}
-	if !strings.Contains(view, "↵ details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
+	if !strings.Contains(view, "↵ preview  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
 		t.Fatalf("view missing footer shortcuts:\n%s", view)
 	}
 }

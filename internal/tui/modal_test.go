@@ -254,25 +254,18 @@ func TestScrollableModalClampsRepeatedPageDownDuringUpdate(t *testing.T) {
 	}
 }
 
-func TestEnterOpensActiveDetailModal(t *testing.T) {
+func TestActiveEnterAndPreviewKeyOpenPreviewModal(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := newLoadedModel(t, cfg)
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = mustModel(t, updated)
-	if m.modal == nil {
-		t.Fatal("modal is nil")
-	}
-	view := plain(m.modal.View(100, 30, m))
-	for _, want := range []string{"Detail: zen-of-go", "Canonical name", "Active members", "Debug"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("detail modal missing %q:\n%s", want, view)
-		}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, keyRunes("p")} {
+		m := newLoadedModel(t, cfg)
+		updated, _ := m.Update(key)
+		m = mustModel(t, updated)
+		assertPreviewModal(t, m)
 	}
 }
 
-func TestEnterOpensRepoDetailModal(t *testing.T) {
+func TestRepoEnterAndPreviewKeyOpenPreviewModal(t *testing.T) {
 	home, err := os.MkdirTemp("", "xskills-archive-home-")
 	if err != nil {
 		t.Fatal(err)
@@ -300,20 +293,13 @@ func TestEnterOpensRepoDetailModal(t *testing.T) {
 	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), "zen-of-go"), active); err != nil {
 		t.Fatal(err)
 	}
-	m := newLoadedModel(t, cfg)
-	updated, _ := m.Update(keyRunes("R"))
-	m = mustModel(t, updated)
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = mustModel(t, updated)
-	if m.modal == nil {
-		t.Fatal("modal is nil")
-	}
-	view := plain(m.modal.View(160, 30, m))
-	for _, want := range []string{"Detail: zen-of-go (Repo)", "Archive path", "xskills-archive-home-", "Description", "Go style.", "Usages", ".Ag"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("repo detail modal missing %q:\n%s", want, view)
-		}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, keyRunes("p")} {
+		m := newLoadedModel(t, cfg)
+		updated, _ := m.Update(keyRunes("R"))
+		m = mustModel(t, updated)
+		updated, _ = m.Update(key)
+		m = mustModel(t, updated)
+		assertPreviewModal(t, m)
 	}
 }
 
@@ -357,6 +343,13 @@ func TestEnterOpensDoctorDetailModal(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("doctor detail modal missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func assertPreviewModal(t *testing.T, m Model) {
+	t.Helper()
+	if _, ok := m.modal.(*previewModal); !ok {
+		t.Fatalf("modal = %T, want *previewModal", m.modal)
 	}
 }
 
@@ -463,6 +456,16 @@ func TestPreviewModalTogglesRawAndRendered(t *testing.T) {
 	raw := m.modal.View(100, 30, m)
 	if !strings.Contains(raw, "raw SKILL.md") {
 		t.Fatalf("preview missing raw marker:\n%s", raw)
+	}
+}
+
+func TestPreviewModalShowsReadErrorsInline(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.modal = newPreviewModal("Preview: missing", filepath.Join(t.TempDir(), "missing"))
+
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "read SKILL.md:") {
+		t.Fatalf("preview omitted inline read error:\n%s", view)
 	}
 }
 

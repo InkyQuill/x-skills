@@ -689,7 +689,7 @@ func commandPalette(m Model) string {
 	switch m.view {
 	case ViewRepo:
 		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
-			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "enter", Unicode: "↵", Label: "preview"},
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
 			{ASCII: "l", Label: "link"},
@@ -724,7 +724,7 @@ func commandPalette(m Model) string {
 		})
 	default:
 		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
-			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "enter", Unicode: "↵", Label: "preview"},
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
 			{ASCII: "m", Label: "migrate"},

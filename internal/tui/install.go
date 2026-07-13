@@ -79,13 +79,6 @@ type installSearchResultMsg struct {
 	err     error
 }
 
-type installPreviewMsg struct {
-	token int
-	name  string
-	path  string
-	err   error
-}
-
 type installUpdateDiffMsg struct {
 	token int
 	row   installResultView
@@ -297,6 +290,7 @@ func (m *Model) runInstallSearch() tea.Cmd {
 }
 
 func (m *Model) startInstallSearch() tea.Cmd {
+	m.closeRemotePreview()
 	m.cancelInstallWork()
 	m.install.searchToken++
 	clear(m.selected[ViewInstall])
@@ -340,6 +334,7 @@ func (m *Model) updateInstallInput(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	if m.install.Query != beforeQuery || m.install.Owner != beforeOwner {
+		m.closeRemotePreview()
 		m.install.previewToken++
 	}
 	return nil
@@ -386,42 +381,7 @@ func (m Model) installActionRows() []installResultView {
 }
 
 func (m *Model) previewInstallResult() tea.Cmd {
-	if m.install.useInFlight || m.install.archiveInFlight {
-		return nil
-	}
-	row, ok := m.selectedInstallResult()
-	if !ok {
-		return nil
-	}
-	m.install.previewToken++
-	token := m.install.previewToken
-	checkouts := m.ensureInstallCheckoutCache()
-	if checkouts == nil {
-		return func() tea.Msg {
-			return installPreviewMsg{token: token, name: row.Result.Name, err: errors.New(m.status)}
-		}
-	}
-	source, err := m.gitSourceForInstall(row.Result)
-	if err != nil {
-		return func() tea.Msg {
-			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
-		}
-	}
-	parent, _ := m.install.operationContext()
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(parent, installPreviewTimeout)
-		defer cancel()
-
-		checkout, err := checkouts.Checkout(ctx, source)
-		if err != nil {
-			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
-		}
-		found, err := checkout.FindSkillContext(ctx, row.Result.Name, row.Result.Path)
-		if err != nil {
-			return installPreviewMsg{token: token, name: row.Result.Name, err: err}
-		}
-		return installPreviewMsg{token: token, name: row.Result.Name, path: found.SkillDir}
-	}
+	return m.openRemotePreview()
 }
 
 func (m *Model) archiveInstallResult() tea.Cmd {

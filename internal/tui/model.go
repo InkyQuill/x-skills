@@ -12,6 +12,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/buildinfo"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
 )
 
@@ -45,6 +46,11 @@ type Model struct {
 	modal  modal
 	status string
 	err    error
+
+	previewToken   int
+	previewCancel  context.CancelFunc
+	previewLoading bool
+	resolvePreview previewResolver
 
 	reloadToken            int
 	reloadInFlight         bool
@@ -118,9 +124,10 @@ func New(cfg config.Config, opts ...Options) Model {
 			ViewDoctor:  {},
 			ViewInstall: {},
 		},
-		filter:    newFilterState(),
-		install:   newInstallState(),
-		buildInfo: options.BuildInfo,
+		filter:         newFilterState(),
+		install:        newInstallState(),
+		buildInfo:      options.BuildInfo,
+		resolvePreview: remote.ResolvePreview,
 	}
 	m.startupLoadCmd = m.beginReloadWithStatus(false)
 	if m.opts.LatestReleaseChecker != nil && m.buildInfo.IsRelease() {
@@ -173,18 +180,8 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, animationTick()
 	case installSearchResultMsg:
 		return m, m.applyInstallSearchResult(msg)
-	case installPreviewMsg:
-		if msg.token != m.install.previewToken || m.view != ViewInstall {
-			return m, nil
-		}
-		if msg.err != nil {
-			if m.showMissingSkillInRepoModal(msg.err) {
-				return m, nil
-			}
-			m.status = msg.err.Error()
-			return m, nil
-		}
-		m.modal = newPreviewModal("Preview: "+msg.name, msg.path)
+	case remotePreviewMsg:
+		m.applyRemotePreview(msg)
 		return m, nil
 	case installUpdateDiffMsg:
 		return m, m.applyInstallUpdateDiffResult(msg)
@@ -264,6 +261,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		m.cancelRemotePreview()
 		m.cancelStartupWork()
 		m.cancelRenameWork()
 		closeRestoreModalPlan(m.modal)
@@ -310,6 +308,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q":
+		m.cancelRemotePreview()
 		m.cancelStartupWork()
 		m.cancelRenameWork()
 		m.cancelInstallWork()
@@ -355,7 +354,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.view == ViewInstall {
 			return m, m.previewInstallResult()
 		}
-		m.openDetailModal()
+		if m.view == ViewDoctor {
+			m.openDetailModal()
+		} else {
+			m.openPreviewModal()
+		}
 	case "a":
 		if m.view == ViewInstall {
 			return m, m.archiveInstallResult()
@@ -425,33 +428,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) openDetailModal() {
-	switch m.view {
-	case ViewActive:
-		groups := m.visibleActiveGroups()
-		if m.cursor >= 0 && m.cursor < len(groups) {
-			m.modal = activeDetailModal(groups[m.cursor], m.symbols)
-		}
-	case ViewRepo:
-		skills := m.visibleRepoSkills()
-		if m.cursor >= 0 && m.cursor < len(skills) {
-			if skill, ok := m.repoSkillByName(skills[m.cursor].Name); ok {
-				m.modal = repoDetailModal(skill, m.repoUsage[skill.Identity], m.symbols)
-			}
-		}
-	case ViewDoctor:
-		if m.cursor >= 0 && m.cursor < len(m.issues) {
-			m.modal = doctorDetailModal(m.issues[m.cursor])
-		}
+	if m.view == ViewDoctor && m.cursor >= 0 && m.cursor < len(m.issues) {
+		m.modal = doctorDetailModal(m.issues[m.cursor])
 	}
-}
-
-func (m *Model) repoSkillByName(name string) (repo.Skill, bool) {
-	for _, skill := range m.repo {
-		if skill.Identity == name {
-			return skill, true
-		}
-	}
-	return repo.Skill{}, false
 }
 
 func (m *Model) openPreviewModal() {
@@ -583,6 +562,7 @@ func (m *Model) setView(view ViewName) {
 		return
 	}
 	if m.view == ViewInstall && view != ViewInstall {
+		m.closeRemotePreview()
 		m.cancelInstallWork()
 		m.install.InputMode = installInputNone
 	}
@@ -623,6 +603,7 @@ func (m *Model) moveCursor(delta int) {
 		m.cursor = 0
 	}
 	if m.view == ViewInstall && m.cursor != previous {
+		m.closeRemotePreview()
 		m.install.previewToken++
 	}
 }

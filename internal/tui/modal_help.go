@@ -43,7 +43,7 @@ func helpLines(m Model) []string {
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "R", Label: "switch to Repo view"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "D", Label: "switch to Doctor view"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "I", Label: "switch to Install view"}),
-		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "enter", Unicode: "↵", Label: "view row details"}),
+		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "enter", Unicode: "↵", Label: "preview skill (Doctor: details)"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "/", Label: "enter local filter mode"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "/", Label: "Install: / search"}),
 		"  " + helpCommand(m.opts.ASCII, tuiui.Shortcut{ASCII: "o", Label: "Install: edit owner filter"}),

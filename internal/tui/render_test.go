@@ -82,11 +82,11 @@ func TestActiveViewRendersConfiguredRootLabel(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 	if m.modal == nil {
-		t.Fatal("detail modal is nil")
+		t.Fatal("preview modal is nil")
 	}
-	detail := plain(m.modal.View(120, 40, m))
-	if !strings.Contains(detail, ".Oc") {
-		t.Fatalf("active detail missing configured label:\n%s", detail)
+	preview := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(preview, "Preview: zen-of-go") || !strings.Contains(preview, "Go style.") {
+		t.Fatalf("active preview missing skill content:\n%s", preview)
 	}
 }
 
@@ -320,7 +320,7 @@ func TestRepoFooterShowsRepoActions(t *testing.T) {
 	m.setView(ViewRepo)
 
 	view := plain(m.View())
-	want := "↵ details  / filter  p preview  l link  r recommend  u unlink  d delete  c clear  ^R refresh"
+	want := "↵ preview  / filter  p preview  l link  r recommend  u unlink  d delete  c clear  ^R refresh"
 	if !strings.Contains(view, want) {
 		t.Fatalf("repo footer missing repo actions:\n%s", view)
 	}

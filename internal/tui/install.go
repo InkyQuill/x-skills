@@ -1711,6 +1711,7 @@ func (m *Model) applyInstallSearchResult(msg installSearchResultMsg) tea.Cmd {
 	if msg.token != m.install.searchToken {
 		return nil
 	}
+	m.closeRemotePreview()
 	clear(m.selected[ViewInstall])
 	m.install.Searching = false
 	if msg.err != nil {

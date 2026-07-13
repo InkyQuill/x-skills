@@ -90,6 +90,16 @@ func (r *remotePreviewModal) Update(msg tea.KeyMsg, m *Model) (bool, tea.Cmd) {
 	return false, cmd
 }
 
+func (r *remotePreviewModal) routesKeyToModel(msg tea.KeyMsg) bool {
+	if r.preview != nil {
+		return false
+	}
+	if _, ok := viewForKey(msg); ok {
+		return true
+	}
+	return listCursorDelta(msg) != 0 || msg.String() == "enter"
+}
+
 func (m *Model) openRemotePreview() tea.Cmd {
 	if m.install.useInFlight || m.install.archiveInFlight {
 		return nil

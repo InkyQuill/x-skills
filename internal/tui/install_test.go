@@ -1658,7 +1658,10 @@ func TestInstallPreviewCompletionTransitionsSameModal(t *testing.T) {
 			Repository:    "vercel-labs/skills",
 			RequestedName: "svelte-coder",
 			SkillPath:     "skills/svelte-coder/SKILL.md",
-			SkillMD:       []byte("---\nname: svelte-coder\n---\n# Svelte\nRemote help.\n"),
+			SkillMD: []byte(
+				"---\nname: svelte-coder\n---\n# Svelte\nRemote help.\n" +
+					strings.Repeat("More remote preview content.\n", 30),
+			),
 		}, nil
 	}
 
@@ -1685,6 +1688,16 @@ func TestInstallPreviewCompletionTransitionsSameModal(t *testing.T) {
 	raw := plain(m.modal.View(100, 30, m))
 	if !strings.Contains(raw, "raw SKILL.md") || !strings.Contains(raw, "name: svelte-coder") {
 		t.Fatalf("remote preview did not preserve raw toggle:\n%s", raw)
+	}
+	previewModal := m.modal
+	cursor := m.cursor
+	updated, _ = m.Update(keyRunes("j"))
+	m = mustModel(t, updated)
+	if m.modal != previewModal || m.cursor != cursor {
+		t.Fatalf("completed preview yielded cursor key: modal=%T cursor=%d", m.modal, m.cursor)
+	}
+	if scrolled := plain(m.modal.View(100, 30, m)); scrolled == raw {
+		t.Fatalf("completed remote preview did not scroll:\n%s", scrolled)
 	}
 }
 
@@ -1715,20 +1728,15 @@ func TestInstallPreviewErrorStaysInActionableModal(t *testing.T) {
 
 func TestInstallPreviewIgnoresLateResultAfterOpeningNewPreview(t *testing.T) {
 	m := installPreviewTestModel(t)
-	m.install.Results = append(m.install.Results, installResultView{
-		Result: remote.SearchResult{
-			Name:  "react-coder",
-			Owner: "vercel-labs",
-			Repo:  "skills",
-			Path:  "skills/react-coder",
-		},
-		ArchiveState: remote.ArchiveStateNotArchived,
-	})
+	var sawCancelledContext atomic.Bool
 	m.resolvePreview = func(
-		_ context.Context,
+		ctx context.Context,
 		_ *remote.CheckoutCache,
 		request remote.PreviewRequest,
 	) (remote.PreviewResult, error) {
+		if ctx.Err() != nil {
+			sawCancelledContext.Store(true)
+		}
 		return remote.PreviewResult{
 			Repository:    "vercel-labs/skills",
 			RequestedName: request.Name,
@@ -1739,21 +1747,28 @@ func TestInstallPreviewIgnoresLateResultAfterOpeningNewPreview(t *testing.T) {
 
 	updated, firstCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	m.modal = nil
-	m.cursor = 1
-	secondCmd := m.openRemotePreview()
+	firstToken := m.previewToken
+	firstModal := m.modal
+	updated, secondCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
 	if secondCmd == nil {
 		t.Fatal("second preview command is nil")
 	}
 	second := m.modal
+	if second == firstModal || m.previewToken == firstToken {
+		t.Fatalf("replacement preview did not invalidate first: modal=%T token=%d", m.modal, m.previewToken)
+	}
 
 	updated, _ = m.Update(firstCmd())
 	m = mustModel(t, updated)
+	if !sawCancelledContext.Load() {
+		t.Fatal("replacement preview did not cancel first resolver context")
+	}
 	if m.modal != second || !m.previewLoading {
 		t.Fatalf("late result altered new preview: modal=%T loading=%v", m.modal, m.previewLoading)
 	}
 	view := plain(m.modal.View(100, 30, m))
-	if !strings.Contains(view, "react-coder") || strings.Contains(view, "# svelte-coder") {
+	if !strings.Contains(view, "svelte-coder") || strings.Contains(view, "# svelte-coder") {
 		t.Fatalf("late result replaced new preview:\n%s", view)
 	}
 }
@@ -2055,10 +2070,19 @@ func TestInstallPreviewIgnoresResultAfterLeavingAndReturning(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	msg := cmd().(remotePreviewMsg)
 
-	m.setView(ViewActive)
-	m.setView(ViewInstall)
+	token := m.previewToken
+	updated, _ = m.Update(keyRunes(keyActive))
+	m = mustModel(t, updated)
+	if m.view != ViewActive || m.modal != nil || m.previewCancel != nil || m.previewToken == token {
+		t.Fatalf("view key did not close preview: view=%s modal=%T cancel=%v token=%d", m.view, m.modal, m.previewCancel != nil, m.previewToken)
+	}
+	updated, _ = m.Update(keyRunes(keyInstall))
+	m = mustModel(t, updated)
+	msg := cmd().(remotePreviewMsg)
+	if !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("late preview error = %v, want context.Canceled", msg.err)
+	}
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.modal != nil {
@@ -2083,22 +2107,79 @@ func TestInstallPreviewIgnoresResultAfterNewSearch(t *testing.T) {
 	}}
 	m.install.testCloneURL = repoDir
 
-	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = mustModel(t, updated)
-
-	m.modal = nil
 	m.install.InputMode = installInputQuery
 	m.install.Query = "react"
-	searchCmd := m.startInstallSearch()
+	updated, searchCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	previewToken := m.previewToken
 	searchMsg := searchCmd().(installSearchResultMsg)
 	updated, _ = m.Update(searchMsg)
 	m = mustModel(t, updated)
+	if m.modal != nil || m.previewToken == previewToken {
+		t.Fatalf("search result did not invalidate old-row preview: modal=%T token=%d", m.modal, m.previewToken)
+	}
 
 	previewMsg := previewCmd().(remotePreviewMsg)
 	updated, _ = m.Update(previewMsg)
 	m = mustModel(t, updated)
 	if m.modal != nil {
 		t.Fatal("preview modal opened after new search")
+	}
+}
+
+func TestInstallPreviewIgnoresLateCompletionAfterMatchingSearchResult(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "error", err: errors.New("late preview failure")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := installPreviewTestModel(t)
+			m.install.searchToken = 7
+			m.resolvePreview = func(
+				context.Context,
+				*remote.CheckoutCache,
+				remote.PreviewRequest,
+			) (remote.PreviewResult, error) {
+				return remote.PreviewResult{
+					Repository:    "vercel-labs/skills",
+					RequestedName: "svelte-coder",
+					SkillPath:     "skills/svelte-coder/SKILL.md",
+					SkillMD:       []byte("# stale preview\n"),
+				}, test.err
+			}
+
+			updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = mustModel(t, updated)
+			previewToken := m.previewToken
+			updated, _ = m.Update(installSearchResultMsg{
+				token: 7,
+				query: "react",
+				results: []remote.SearchResult{{
+					Name:  "react-coder",
+					Owner: "vercel-labs",
+					Repo:  "skills",
+					Path:  "skills/react-coder",
+				}},
+			})
+			m = mustModel(t, updated)
+			if m.modal != nil || m.previewToken == previewToken {
+				t.Fatalf("matching search result did not close preview: modal=%T token=%d", m.modal, m.previewToken)
+			}
+
+			updated, _ = m.Update(previewCmd())
+			m = mustModel(t, updated)
+			if m.modal != nil || strings.Contains(m.status, "late preview") {
+				t.Fatalf("late %s altered UI: modal=%T status=%q", test.name, m.modal, m.status)
+			}
+			if len(m.install.Results) != 1 || m.install.Results[0].Result.Name != "react-coder" {
+				t.Fatalf("results = %#v, want replacement search row", m.install.Results)
+			}
+		})
 	}
 }
 
@@ -2126,12 +2207,20 @@ func TestInstallPreviewIgnoresResultAfterSelectionChange(t *testing.T) {
 	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 
-	m.moveCursor(1)
+	token := m.previewToken
+	updated, _ = m.Update(keyRunes("j"))
+	m = mustModel(t, updated)
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1", m.cursor)
 	}
+	if m.modal != nil || m.previewCancel != nil || m.previewToken == token {
+		t.Fatalf("cursor key did not close preview: modal=%T cancel=%v token=%d", m.modal, m.previewCancel != nil, m.previewToken)
+	}
 
 	previewMsg := previewCmd().(remotePreviewMsg)
+	if !errors.Is(previewMsg.err, context.Canceled) {
+		t.Fatalf("late preview error = %v, want context.Canceled", previewMsg.err)
+	}
 	updated, _ = m.Update(previewMsg)
 	m = mustModel(t, updated)
 	if m.modal != nil {

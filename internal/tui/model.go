@@ -272,7 +272,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	if m.modal != nil {
+	routesAroundModal := false
+	if preview, ok := m.modal.(*remotePreviewModal); ok {
+		routesAroundModal = preview.routesKeyToModel(msg)
+	}
+	if m.modal != nil && !routesAroundModal {
 		closedModal := m.modal
 		modalClosed, cmd := m.modal.Update(msg, &m)
 		if m.pendingMutationCmd != nil {
@@ -306,6 +310,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if view, ok := viewForKey(msg); ok {
+		if routesAroundModal && view == m.view {
+			m.closeRemotePreview()
+		}
+		m.setView(view)
+		return m, nil
+	}
+	if delta := listCursorDelta(msg); delta != 0 {
+		m.moveCursor(delta)
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "q":
 		m.cancelRemotePreview()
@@ -316,18 +332,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cancelSyncWork()
 		m.cancelDoctorFixWork()
 		return m, tea.Quit
-	case keyActive:
-		m.setView(ViewActive)
-	case keyRepo:
-		m.setView(ViewRepo)
-	case keyDoctor:
-		m.setView(ViewDoctor)
-	case keyInstall:
-		m.setView(ViewInstall)
-	case "up", "k":
-		m.moveCursor(-1)
-	case "down", "j":
-		m.moveCursor(1)
 	case " ":
 		m.toggleSelection()
 	case "c":

@@ -5,15 +5,53 @@ import (
 	"testing"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/buildinfo"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
+
+func TestHeaderRendersVersionAndAvailableUpdate(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{BuildInfo: buildinfo.New("1.2.3")})
+	m.latestRelease = "v1.3.0"
+	header := plain(renderHeader(m, 120))
+	for _, want := range []string{"x-skills", "v1.2.3", "update v1.3.0", "A:Active"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("header missing %q: %q", want, header)
+		}
+	}
+}
+
+func TestHeaderRendersDevelopmentVersionWithoutUpdate(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{BuildInfo: buildinfo.New("dev")})
+	m.latestRelease = "v1.3.0"
+	header := plain(renderHeader(m, 120))
+	if !strings.Contains(header, "x-skills  dev") {
+		t.Fatalf("development header missing version: %q", header)
+	}
+	if strings.Contains(header, "update") {
+		t.Fatalf("development header contains update copy: %q", header)
+	}
+}
+
+func TestHeaderVersionBadgesFitEightyColumnsWithValidANSI(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{BuildInfo: buildinfo.New("1.2.3")})
+	m.latestRelease = "v1.3.0"
+	header := renderHeader(m, 80)
+	if got := lipgloss.Width(header); got > 80 {
+		t.Fatalf("header width = %d, want <= 80: %q", got, header)
+	}
+	if got := tuiui.SanitizeANSI(header); got != header {
+		t.Fatalf("header contains invalid ANSI:\nraw: %q\nsanitized: %q", header, got)
+	}
+}
 
 func TestWideShellRendersListInspectorStatusAndFooter(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 120
 	m.height = 34
 	m.status = "relinked zen-of-go to existing archive"
@@ -29,7 +67,7 @@ func TestWideShellRendersListInspectorStatusAndFooter(t *testing.T) {
 func TestActiveViewRendersConfiguredRootLabel(t *testing.T) {
 	cfg := customRootConfig(t)
 	makeSkill(t, cfg.MustActiveRoot(config.ScopeProject, "opencode"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 120
 	m.height = 34
 
@@ -61,6 +99,16 @@ func TestHelpModalRendersConfiguredRootLabels(t *testing.T) {
 	}
 	if strings.Contains(view, ".Ag  project agents") || strings.Contains(view, ".Cl  project claude") {
 		t.Fatalf("help modal shows stale built-in root inventory:\n%s", view)
+	}
+}
+
+func TestHelpDoesNotDescribeObsoleteGroupCountBadge(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	view := plain(newHelpModal().View(120, 40, m))
+	for _, obsolete := range []string{"group count badge", "×N"} {
+		if strings.Contains(view, obsolete) {
+			t.Fatalf("help modal contains obsolete legend %q:\n%s", obsolete, view)
+		}
 	}
 }
 
@@ -167,7 +215,7 @@ func TestActiveInspectorUsesKeyValueRows(t *testing.T) {
 func TestRepoInspectorUsesKeyValueRowsAndUsageChips(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 120
 	m.height = 30
 	m.repoUsage["zen-of-go"] = []string{".Ag", "~Cl"}

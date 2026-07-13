@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/remote"
@@ -50,7 +49,14 @@ func renderHeader(m Model, width int) string {
 		tabLabel(false, "s", "Restore"),
 		tabLabel(false, "S", "Sync"),
 	}
-	title := titleStyle.Render(m.pulseDiamond()+" x-skills") + "  " + strings.Join(tabs, " ")
+	titleParts := []string{
+		titleStyle.Render(m.pulseDiamond() + " x-skills"),
+		versionStyle.Render(m.buildInfo.Display()),
+	}
+	if m.latestRelease != "" && m.buildInfo.IsRelease() {
+		titleParts = append(titleParts, updateStyle.Render("update "+m.latestRelease))
+	}
+	title := strings.Join(titleParts, "  ") + "  " + strings.Join(tabs, " ")
 	return tuiui.TruncateANSI(title, width)
 }
 
@@ -83,6 +89,9 @@ func renderListPanel(m Model, width, maxRows int) string {
 		rows = renderDoctorRows(m, width)
 	case ViewInstall:
 		return renderInstallPanel(m, width, rowCount)
+	}
+	if m.reloadInFlight && len(rows) == 0 {
+		rows = []string{accentStyle.Render(m.pulseDiamond() + " Loading skills data…")}
 	}
 	if len(rows) == 0 {
 		rows = []string{mutedStyle.Render("No items.")}
@@ -376,7 +385,7 @@ func renderRepoRows(m Model, width int) []string {
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderRootChips(m.symbols, m.repoUsage[skill.Name], background)
 				}},
-				{text: " " + mutedStyle.Render(skill.Description)},
+				{text: " " + mutedStyle.Render(singleLineDescription(skill.Description))},
 			},
 			i == m.cursor,
 			m.selected[ViewRepo][id],
@@ -499,7 +508,7 @@ func renderInstallRows(m Model, width int) []string {
 			})
 		}
 		if result.Description != "" {
-			description := result.Description
+			description := singleLineDescription(result.Description)
 			segments = append(segments, rowSegment{
 				text: "  ",
 			}, rowSegment{
@@ -575,9 +584,16 @@ type rowSegment struct {
 	render func(background lipgloss.TerminalColor) string
 }
 
+func sanitizedSegmentText(segment rowSegment, background lipgloss.TerminalColor) string {
+	if segment.render != nil {
+		return tuiui.SanitizeANSI(segment.render(background))
+	}
+	return tuiui.SanitizeANSI(segment.text)
+}
+
 func selectableRow(segments []rowSegment, focused bool, selected bool, width int) string {
 	if !focused && !selected {
-		return tuiui.TruncateANSI(ansi.Strip(joinRowSegments(segments, lipgloss.NoColor{})), width)
+		return tuiui.TruncateANSI(joinRowSegments(segments, lipgloss.NoColor{}), width)
 	}
 
 	rowStyle := selectedBg
@@ -592,12 +608,7 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 		if remaining <= 0 {
 			break
 		}
-		text := segment.text
-		if segment.render != nil {
-			text = ansi.Strip(segment.render(background))
-		} else {
-			text = ansi.Strip(text)
-		}
+		text := sanitizedSegmentText(segment, background)
 		if lipgloss.Width(text) > remaining {
 			text = tuiui.TruncateANSI(text, remaining)
 		}
@@ -617,11 +628,7 @@ func selectableRow(segments []rowSegment, focused bool, selected bool, width int
 func joinRowSegments(segments []rowSegment, background lipgloss.TerminalColor) string {
 	var row strings.Builder
 	for _, segment := range segments {
-		if segment.render != nil {
-			row.WriteString(ansi.Strip(segment.render(background)))
-			continue
-		}
-		row.WriteString(ansi.Strip(segment.text))
+		row.WriteString(sanitizedSegmentText(segment, background))
 	}
 	return row.String()
 }
@@ -650,7 +657,13 @@ func activeDetail(group ActiveGroup) string {
 	if group.Status == actions.StatusBroken {
 		return dangerStyle.Render(group.Reason)
 	}
-	return mutedStyle.Render(group.Description)
+	return mutedStyle.Render(singleLineDescription(group.Description))
+}
+
+var descriptionLineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
+func singleLineDescription(description string) string {
+	return descriptionLineBreaks.Replace(description)
 }
 
 func renderStatus(m Model, width int) string {

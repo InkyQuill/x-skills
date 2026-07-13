@@ -1,20 +1,36 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/InkyQuill/x-skills/internal/buildinfo"
 	"github.com/InkyQuill/x-skills/internal/config"
+	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
 )
+
+type staticLatestRelease struct{ version string }
+
+func (s staticLatestRelease) LatestRelease(context.Context) (string, error) {
+	return s.version, nil
+}
+
+type failingLatestRelease struct{}
+
+func (failingLatestRelease) LatestRelease(context.Context) (string, error) {
+	return "", fmt.Errorf("offline")
+}
 
 func makeSkill(t *testing.T, root, name, description string) string {
 	t.Helper()
@@ -79,6 +95,13 @@ func mustModel(t *testing.T, updated tea.Model) Model {
 		t.Fatalf("updated model type = %T, want tui.Model", updated)
 	}
 	return m
+}
+
+func newLoadedModel(t *testing.T, cfg config.Config, opts ...Options) Model {
+	t.Helper()
+	m := New(cfg, opts...)
+	updated, _ := m.Update(m.startupLoadCmd())
+	return mustModel(t, updated)
 }
 
 func plain(value string) string {
@@ -207,7 +230,7 @@ func TestStaleReloadResultIgnored(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	m := New(cfg)
 
-	first := m.beginReload()
+	first := m.startupLoadCmd
 	firstToken := m.reloadToken
 	second := m.beginReload()
 	secondToken := m.reloadToken
@@ -240,10 +263,128 @@ func TestStaleReloadResultIgnored(t *testing.T) {
 	}
 }
 
+func TestEligibleUpdateCheckStoresOnlyNewerStableRelease(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	m := New(cfg, Options{
+		BuildInfo:            buildinfo.New("1.2.3"),
+		LatestReleaseChecker: staticLatestRelease{version: "v1.3.0"},
+	})
+	if m.updateCheckCmd == nil {
+		t.Fatal("release update command = nil")
+	}
+	updated, _ := m.Update(m.updateCheckCmd())
+	m = mustModel(t, updated)
+	if m.latestRelease != "v1.3.0" {
+		t.Fatalf("latest release = %q, want v1.3.0", m.latestRelease)
+	}
+
+	m = New(cfg, Options{
+		BuildInfo:            buildinfo.New("1.2.3"),
+		LatestReleaseChecker: staticLatestRelease{version: "v1.2.3"},
+	})
+	updated, _ = m.Update(m.updateCheckCmd())
+	m = mustModel(t, updated)
+	if m.latestRelease != "" {
+		t.Fatalf("latest release = %q, want no badge for current version", m.latestRelease)
+	}
+}
+
+func TestUpdateCheckErrorsAreSilent(t *testing.T) {
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{
+		BuildInfo:            buildinfo.New("1.2.3"),
+		LatestReleaseChecker: failingLatestRelease{},
+	})
+	m.status = "ready"
+	updated, _ := m.Update(m.updateCheckCmd())
+	m = mustModel(t, updated)
+	if m.latestRelease != "" || m.status != "ready" || m.err != nil {
+		t.Fatalf("update error leaked into model: latest=%q status=%q err=%v", m.latestRelease, m.status, m.err)
+	}
+}
+
+func TestNewReturnsBeforeInitialDataLoadCompletes(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	loader := func(context.Context, config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
+		close(started)
+		<-release
+		return nil, []repo.Skill{{Name: "loaded"}}, nil, map[string][]string{}, nil
+	}
+
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{loadData: loader})
+	select {
+	case <-started:
+		t.Fatal("loader ran during New")
+	default:
+	}
+	if got := plain(m.View()); !strings.Contains(got, "Loading skills data…") {
+		t.Fatalf("initial view missing loading state:\n%s", got)
+	}
+
+	results := make(chan tea.Msg, 1)
+	go func() { results <- m.startupLoadCmd() }()
+	<-started
+	close(release)
+	updated, _ := m.Update(<-results)
+	m = mustModel(t, updated)
+	if m.reloadInFlight || len(m.repo) != 1 || m.repo[0].Name != "loaded" {
+		t.Fatalf("repo after startup = %#v", m.repo)
+	}
+}
+
+func TestQuitCancelsInitialDataLoad(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	loader := func(ctx context.Context, _ config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		return nil, nil, nil, nil, ctx.Err()
+	}
+
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{loadData: loader})
+	results := make(chan tea.Msg, 1)
+	go func() { results <- m.startupLoadCmd() }()
+	<-started
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("ctrl+c command = nil, want quit")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("startup loader was not cancelled within one second")
+	}
+	<-results
+}
+
+func TestHelpRemainsResponsiveWhileInitialDataLoads(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	loader := func(context.Context, config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
+		close(started)
+		<-release
+		return nil, nil, nil, nil, nil
+	}
+
+	m := New(config.Default(t.TempDir(), t.TempDir()), Options{loadData: loader})
+	results := make(chan tea.Msg, 1)
+	go func() { results <- m.startupLoadCmd() }()
+	<-started
+	updated, _ := m.Update(keyRunes("?"))
+	m = mustModel(t, updated)
+	if m.modal == nil {
+		t.Fatal("help modal = nil while startup load is blocked")
+	}
+	close(release)
+	<-results
+}
+
 func TestASCIIOptionUsesASCIISymbols(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "opentui-react", "OpenTUI.")
-	m := New(cfg, Options{ASCII: true})
+	m := newLoadedModel(t, cfg, Options{ASCII: true})
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 
@@ -264,7 +405,7 @@ func TestRowsScrollToKeepCursorVisible(t *testing.T) {
 		makeSkill(t, cfg.ArchiveSkillsRoot(), fmt.Sprintf("skill-%02d", i), "Repo.")
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	m.width = 80
 	m.height = 10
 	updated, _ := m.Update(keyRunes("R"))
@@ -337,7 +478,7 @@ func TestActiveGroupsMergeByFingerprint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	if len(m.active) != 1 {
 		t.Fatalf("active groups = %d, want 1", len(m.active))
 	}
@@ -354,7 +495,7 @@ func TestActiveViewSortsSkillsAlphabeticallyByName(t *testing.T) {
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zeta-skill", "Zeta.")
 	makeSkill(t, cfg.MustActiveRoot("project", "claude"), "alpha-skill", "Alpha.")
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	if len(m.active) < 2 {
 		t.Fatalf("active groups = %#v, want at least 2", m.active)
 	}
@@ -368,7 +509,7 @@ func TestRepoViewSortsSkillsAlphabeticallyByName(t *testing.T) {
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "zeta-skill", "Zeta.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	skills := m.visibleRepoSkills()
@@ -397,7 +538,7 @@ func TestDoctorViewSortsIssuesAlphabeticallyByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 	if len(m.issues) < 2 {

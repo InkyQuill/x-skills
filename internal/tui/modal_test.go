@@ -257,7 +257,7 @@ func TestScrollableModalClampsRepeatedPageDownDuringUpdate(t *testing.T) {
 func TestEnterOpensActiveDetailModal(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
@@ -300,7 +300,7 @@ func TestEnterOpensRepoDetailModal(t *testing.T) {
 	if err := os.Symlink(filepath.Join(cfg.ArchiveSkillsRoot(), "zen-of-go"), active); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 
@@ -337,7 +337,7 @@ func TestEnterOpensDoctorDetailModal(t *testing.T) {
 	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), brokenPath); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 	for i, issue := range m.issues {
@@ -446,7 +446,7 @@ func TestChoiceAndConfirmModalsHighlightSelectedControls(t *testing.T) {
 func TestPreviewModalTogglesRawAndRendered(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(keyRunes("p"))
 	m = mustModel(t, updated)

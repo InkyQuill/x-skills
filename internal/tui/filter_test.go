@@ -15,7 +15,7 @@ func TestFilterNarrowsActiveRowsAndExcludesFullPaths(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
 	makeSkill(t, cfg.MustActiveRoot("project", "claude"), "prompt-master", "Prompts.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(keyRunes("/"))
 	m = mustModel(t, updated)
@@ -37,7 +37,7 @@ func TestFilterNarrowsActiveRowsAndExcludesFullPaths(t *testing.T) {
 func TestFilterClearsOnViewSwitchAfterFilterAccept(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(keyRunes("/"))
 	m = mustModel(t, updated)
@@ -60,7 +60,7 @@ func TestFilterSupportsBackspaceEditing(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zeta-skill", "Zeta.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(keyRunes("/"))
 	m = mustModel(t, updated)
@@ -81,7 +81,7 @@ func TestFilterSupportsBackspaceEditing(t *testing.T) {
 func TestSelectionClearsOnViewSwitch(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = mustModel(t, updated)
@@ -98,7 +98,7 @@ func TestSelectionClearsOnViewSwitch(t *testing.T) {
 func TestClearSelectionKeyClearsCurrentSelection(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "zen-of-go", "Go style.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = mustModel(t, updated)
@@ -122,7 +122,7 @@ func TestDoctorSpaceDoesNotToggleSelection(t *testing.T) {
 	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), filepath.Join(root, "zen-of-go")); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 
@@ -149,7 +149,7 @@ func TestDoctorClearSelectionKeyDoesNothing(t *testing.T) {
 	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), filepath.Join(root, "zen-of-go")); err != nil {
 		t.Fatal(err)
 	}
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("D"))
 	m = mustModel(t, updated)
 
@@ -167,7 +167,7 @@ func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.MustActiveRoot("project", "agents"), "alpha-skill", "Alpha.")
 	makeSkill(t, cfg.MustActiveRoot("project", "claude"), "target-skill", "Target.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 
 	updated, _ := m.Update(keyRunes("/"))
 	m = mustModel(t, updated)
@@ -175,7 +175,7 @@ func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
 	m = mustModel(t, updated)
 
 	view := plain(m.View())
-	if !strings.Contains(view, "› ◇ ◇ target-skill") {
+	if !strings.Contains(view, "› ◇ ○ target-skill") {
 		t.Fatalf("filtered cursor is not drawn on target row:\n%s", view)
 	}
 
@@ -196,7 +196,7 @@ func TestFilterCursorAndActionsUseFilteredRepoRows(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "alpha-skill", "Alpha.")
 	makeSkill(t, cfg.ArchiveSkillsRoot(), "target-skill", "Target.")
-	m := New(cfg)
+	m := newLoadedModel(t, cfg)
 	updated, _ := m.Update(keyRunes("R"))
 	m = mustModel(t, updated)
 	updated, _ = m.Update(keyRunes("/"))

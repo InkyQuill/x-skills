@@ -8,6 +8,10 @@ builds:
     binary: x-skills
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/InkyQuill/x-skills/internal/buildinfo.version={{ .Version }}
     goos:
       - darwin
       - linux
@@ -41,7 +45,14 @@ checksum:
   name_template: checksums.txt
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-next"
+  version_template: >-
+    {{- if index .Env "X_SKILLS_SNAPSHOT_VERSION" -}}
+    {{- index .Env "X_SKILLS_SNAPSHOT_VERSION" -}}
+    {{- else -}}
+    {{- incpatch .Version }}-next
+    {{- end -}}
 
-changelog:
-  disable: true
+release:
+  extra_files:
+    - glob: scripts/install.sh
+    - glob: scripts/install.ps1

@@ -5,19 +5,24 @@ import (
 	"io"
 	"os"
 
+	"github.com/InkyQuill/x-skills/internal/buildinfo"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
+const skipConfigAnnotation = "x-skills.io/skip-config"
+
 type options struct {
-	projectRoot string
-	homeDir     string
-	archiveRoot string
-	yes         bool
-	no          bool
-	noInput     bool
-	json        bool
+	projectRoot          string
+	homeDir              string
+	archiveRoot          string
+	yes                  bool
+	no                   bool
+	noInput              bool
+	json                 bool
+	buildInfo            buildinfo.Info
+	latestReleaseChecker buildinfo.LatestReleaseChecker
 
 	flags  *pflag.FlagSet
 	loaded *config.Config
@@ -44,9 +49,11 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 
 	cfg := config.Default(projectRoot, homeDir)
 	opts := options{
-		projectRoot: cfg.ProjectRoot,
-		homeDir:     cfg.HomeDir,
-		archiveRoot: cfg.ArchiveRoot,
+		projectRoot:          cfg.ProjectRoot,
+		homeDir:              cfg.HomeDir,
+		archiveRoot:          cfg.ArchiveRoot,
+		buildInfo:            buildinfo.Current(),
+		latestReleaseChecker: buildinfo.NewGitHubReleaseChecker(nil),
 	}
 
 	root := &cobra.Command{
@@ -56,6 +63,9 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if opts.yes && opts.no {
 				return fmt.Errorf("--yes and --no are mutually exclusive")
+			}
+			if commandSkipsConfig(cmd) {
+				return nil
 			}
 			_, err := opts.configE()
 			return err
@@ -93,9 +103,15 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		newSyncCommand(&opts),
 		newDoctorCommand(&opts),
 		newTUICommand(&opts),
+		newVersionCommand(opts.buildInfo),
 	)
 
 	return root, nil
+}
+
+func commandSkipsConfig(cmd *cobra.Command) bool {
+	_, ok := cmd.Annotations[skipConfigAnnotation]
+	return ok
 }
 
 func (o *options) config() config.Config {

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
+	"github.com/InkyQuill/x-skills/internal/buildinfo"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
 	"github.com/InkyQuill/x-skills/internal/repo"
@@ -49,6 +50,13 @@ type Model struct {
 	reloadInFlight         bool
 	reloadPending          tea.Cmd
 	reloadReportsStatus    bool
+	buildInfo              buildinfo.Info
+	latestRelease          string
+	startupLoadCmd         tea.Cmd
+	updateCheckCmd         tea.Cmd
+	reloadCancel           context.CancelFunc
+	updateCancel           context.CancelFunc
+	updateToken            int
 	updating               bool
 	doctorFixToken         int
 	doctorFixInFlight      bool
@@ -79,10 +87,25 @@ type reloadResultMsg struct {
 	err       error
 }
 
+type latestReleaseMsg struct {
+	token   int
+	version string
+}
+
 func New(cfg config.Config, opts ...Options) Model {
 	options := defaultOptions()
 	if len(opts) > 0 {
-		options = opts[0]
+		provided := opts[0]
+		options.ASCII = provided.ASCII
+		if provided.BuildInfo != (buildinfo.Info{}) {
+			options.BuildInfo = provided.BuildInfo
+		}
+		if provided.LatestReleaseChecker != nil {
+			options.LatestReleaseChecker = provided.LatestReleaseChecker
+		}
+		if provided.loadData != nil {
+			options.loadData = provided.loadData
+		}
 	}
 	m := Model{
 		cfg:     cfg,
@@ -95,18 +118,26 @@ func New(cfg config.Config, opts ...Options) Model {
 			ViewDoctor:  {},
 			ViewInstall: {},
 		},
-		filter:  newFilterState(),
-		install: newInstallState(),
+		filter:    newFilterState(),
+		install:   newInstallState(),
+		buildInfo: options.BuildInfo,
 	}
-	m.reloadSynchronously()
+	m.startupLoadCmd = m.beginReloadWithStatus(false)
+	if m.opts.LatestReleaseChecker != nil && m.buildInfo.IsRelease() {
+		ctx, cancel := context.WithCancel(context.Background())
+		m.updateCancel = cancel
+		m.updateToken++
+		m.updateCheckCmd = m.latestReleaseCmd(ctx, m.updateToken)
+	}
 	return m
 }
 
 func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.startupLoadCmd, m.updateCheckCmd}
 	if m.animationsEnabled() {
-		return animationTick()
+		cmds = append(cmds, animationTick())
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
@@ -207,6 +238,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		m.repoUsage = msg.repoUsage
 		m.err = msg.err
 		m.reloadInFlight = false
+		m.reloadCancel = nil
 		m.clampCursor()
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -216,6 +248,15 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			m.status = "refreshed"
 		}
 		return m, nil
+	case latestReleaseMsg:
+		if msg.token != m.updateToken {
+			return m, nil
+		}
+		m.updateCancel = nil
+		if version, ok := m.buildInfo.NewerStable(msg.version); ok {
+			m.latestRelease = version
+		}
+		return m, nil
 	default:
 		return m, nil
 	}
@@ -223,6 +264,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		m.cancelStartupWork()
 		m.cancelRenameWork()
 		closeRestoreModalPlan(m.modal)
 		m.cancelInstallWork()
@@ -268,6 +310,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q":
+		m.cancelStartupWork()
 		m.cancelRenameWork()
 		m.cancelInstallWork()
 		m.cancelRestoreWork()
@@ -473,15 +516,16 @@ func (m *Model) reload() {
 }
 
 func (m *Model) reloadSynchronously() {
-	m.active, m.repo, m.issues, m.repoUsage, m.err = loadTUIData(context.Background(), m.cfg)
+	m.active, m.repo, m.issues, m.repoUsage, m.err = m.opts.loadData(context.Background(), m.cfg)
 	m.clampCursor()
 }
 
-func (m *Model) reloadCmd() tea.Cmd {
+func (m *Model) reloadCmd(ctx context.Context) tea.Cmd {
 	token := m.reloadToken
 	cfg := m.cfg
+	loader := m.opts.loadData
 	return func() tea.Msg {
-		active, repoSkills, issues, repoUsage, err := loadTUIData(context.Background(), cfg)
+		active, repoSkills, issues, repoUsage, err := loader(ctx, cfg)
 		return reloadResultMsg{
 			token:     token,
 			active:    active,
@@ -494,11 +538,44 @@ func (m *Model) reloadCmd() tea.Cmd {
 }
 
 func (m *Model) beginReload() tea.Cmd {
+	return m.beginReloadWithStatus(true)
+}
+
+func (m *Model) beginReloadWithStatus(report bool) tea.Cmd {
+	if m.reloadCancel != nil {
+		m.reloadCancel()
+	}
 	m.reloadToken++
 	m.reloadInFlight = true
-	m.reloadReportsStatus = true
-	m.status = "refreshing..."
-	return m.reloadCmd()
+	m.reloadReportsStatus = report
+	if report {
+		m.status = "refreshing..."
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.reloadCancel = cancel
+	return m.reloadCmd(ctx)
+}
+
+func (m Model) latestReleaseCmd(ctx context.Context, token int) tea.Cmd {
+	checker := m.opts.LatestReleaseChecker
+	return func() tea.Msg {
+		version, err := checker.LatestRelease(ctx)
+		if err != nil {
+			return latestReleaseMsg{token: token}
+		}
+		return latestReleaseMsg{token: token, version: version}
+	}
+}
+
+func (m *Model) cancelStartupWork() {
+	if m.reloadCancel != nil {
+		m.reloadCancel()
+		m.reloadCancel = nil
+	}
+	if m.updateCancel != nil {
+		m.updateCancel()
+		m.updateCancel = nil
+	}
 }
 
 func (m *Model) setView(view ViewName) {

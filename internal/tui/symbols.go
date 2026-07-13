@@ -10,7 +10,6 @@ type symbols struct {
 	Managed     string
 	Unmanaged   string
 	Broken      string
-	CountPrefix string
 	BadgeLeft   string
 	BadgeRight  string
 }
@@ -25,7 +24,6 @@ func symbolsFor(opts Options) symbols {
 			Managed:     "+",
 			Unmanaged:   "?",
 			Broken:      "x",
-			CountPrefix: "x",
 			BadgeLeft:   "[",
 			BadgeRight:  "]",
 		}
@@ -35,10 +33,9 @@ func symbolsFor(opts Options) symbols {
 		Cursor:      "›",
 		Unchecked:   "◇",
 		Checked:     "◆",
-		Managed:     "✓",
-		Unmanaged:   "◇",
+		Managed:     "●",
+		Unmanaged:   "○",
 		Broken:      "×",
-		CountPrefix: "×",
 		BadgeLeft:   "",
 		BadgeRight:  "",
 	}

@@ -9,6 +9,8 @@ import (
 
 var (
 	titleStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
+	versionStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	updateStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("110"))
 	tabStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activeTab           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Padding(0, 1)
 	panelStyle          = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1)
@@ -39,6 +41,8 @@ var (
 func init() {
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		titleStyle = titleStyle.UnsetForeground().UnsetBackground()
+		versionStyle = versionStyle.UnsetForeground().UnsetBackground()
+		updateStyle = updateStyle.UnsetForeground().UnsetBackground()
 		tabStyle = tabStyle.UnsetForeground().UnsetBackground()
 		activeTab = activeTab.UnsetForeground().UnsetBackground()
 		panelStyle = panelStyle.UnsetBorderForeground()

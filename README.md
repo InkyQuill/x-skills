@@ -27,6 +27,21 @@ Both installers place the executable in `~/.local/bin` by default. Set
 install a specific tag such as `v1.2.3`. They install `x-skills` and create an
 `xs` shortcut only when that command name is available.
 
+From a source checkout, install the current development build on macOS or Linux:
+
+```bash
+./scripts/install-dev.sh
+```
+
+Or install it on Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-dev.ps1
+```
+
+Both development installers overwrite the normal installation. The installed
+`x-skills version` reports `dev`.
+
 Build or run the Go implementation from a source checkout:
 
 ```bash

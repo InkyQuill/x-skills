@@ -25,7 +25,11 @@ func newTUICommand(rootOptions *options) *cobra.Command {
 				return fmt.Errorf("tui requires an interactive terminal")
 			}
 			program := tea.NewProgram(
-				tui.New(rootOptions.config(), tui.Options{ASCII: opts.ascii}),
+				tui.New(rootOptions.config(), tui.Options{
+					ASCII:                opts.ascii,
+					BuildInfo:            rootOptions.buildInfo,
+					LatestReleaseChecker: rootOptions.latestReleaseChecker,
+				}),
 				tea.WithAltScreen(),
 			)
 			_, err := program.Run()

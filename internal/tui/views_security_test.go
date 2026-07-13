@@ -24,7 +24,7 @@ func TestRenderOverlaySanitizesLayerControlSequences(t *testing.T) {
 }
 
 func TestSelectableRowSanitizesControlSequencesInEveryState(t *testing.T) {
-	malicious := "safe\x1b[31mCSI\x1b]8;;https://evil.test\x07OSC\x1b]8;;\x07"
+	malicious := "\x1b[31mred\x1b[0m\x1b]8;;https://evil.test\x07link\x1b]8;;\x07\x1b[2Jclear"
 	segments := []rowSegment{
 		{text: malicious},
 		{render: func(lipgloss.TerminalColor) string { return malicious }},
@@ -39,8 +39,13 @@ func TestSelectableRowSanitizesControlSequencesInEveryState(t *testing.T) {
 	} {
 		t.Run(state.name, func(t *testing.T) {
 			got := selectableRow(segments, state.focused, state.selected, 40)
-			if strings.ContainsAny(got, "\x1b\x07") {
-				t.Fatalf("selectableRow() retained terminal controls: %q", got)
+			if !strings.Contains(got, "\x1b[31mred\x1b[0m") {
+				t.Fatalf("selectableRow() lost SGR styling: %q", got)
+			}
+			for _, control := range []string{"\x1b]", "\x07", "\x1b[2J"} {
+				if strings.Contains(got, control) {
+					t.Fatalf("selectableRow() retained terminal control %q: %q", control, got)
+				}
 			}
 		})
 	}

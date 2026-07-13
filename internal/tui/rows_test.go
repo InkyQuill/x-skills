@@ -9,6 +9,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/InkyQuill/x-skills/internal/repo"
 	"github.com/InkyQuill/x-skills/internal/roots"
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
@@ -76,7 +77,7 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 
 	rows := renderActiveRows(m, 100)
 	got := strings.Join(rows, "\n")
-	for _, want := range []string{"› ◇ ◇ zen-of-go", ".Ag", "~Cl", "Go style."} {
+	for _, want := range []string{"› ◇ ○ zen-of-go", ".Ag", "~Cl", "Go style."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("row missing %q:\n%s", want, got)
 		}
@@ -99,8 +100,8 @@ func TestStatusRenderersUseExactSymbolsIndependentlyOfRowState(t *testing.T) {
 		wantChip   string
 		wantMarker string
 	}{
-		{name: "unicode managed", status: actions.StatusManaged, wantChip: "✓ managed", wantMarker: "✓"},
-		{name: "unicode unmanaged", status: actions.StatusUnmanaged, wantChip: "◇ unmanaged", wantMarker: "◇"},
+		{name: "unicode managed", status: actions.StatusManaged, wantChip: "● managed", wantMarker: "●"},
+		{name: "unicode unmanaged", status: actions.StatusUnmanaged, wantChip: "○ unmanaged", wantMarker: "○"},
 		{name: "unicode broken", status: actions.StatusBroken, wantChip: "× broken", wantMarker: "×"},
 		{name: "ASCII managed", ascii: true, status: actions.StatusManaged, wantChip: "+ managed", wantMarker: "+"},
 		{name: "ASCII unmanaged", ascii: true, status: actions.StatusUnmanaged, wantChip: "? unmanaged", wantMarker: "?"},
@@ -161,6 +162,73 @@ func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 	want := "› ◆ zen-of-go .Ag ~Cl Go style guide"
 	if plain != want {
 		t.Fatalf("repo row = %q, want %q", plain, want)
+	}
+}
+
+func TestListRowsReplaceDescriptionNewlinesWithSpaces(t *testing.T) {
+	t.Parallel()
+
+	const (
+		description = "First line\nsecond\r\nthird\rfourth"
+		want        = "First line second third fourth"
+	)
+	tests := []struct {
+		name   string
+		render func() []string
+	}{
+		{
+			name: "active",
+			render: func() []string {
+				m := Model{
+					symbols: symbolsFor(Options{}),
+					view:    ViewActive,
+					active: []ActiveGroup{{
+						ID:          "active:one",
+						Name:        "one",
+						Status:      actions.StatusManaged,
+						Description: description,
+					}},
+				}
+				return renderActiveRows(m, 200)
+			},
+		},
+		{
+			name: "repo",
+			render: func() []string {
+				m := Model{
+					symbols: symbolsFor(Options{}),
+					view:    ViewRepo,
+					repo:    []repo.Skill{{Name: "one", Description: description}},
+				}
+				return renderRepoRows(m, 200)
+			},
+		},
+		{
+			name: "install",
+			render: func() []string {
+				m := Model{symbols: symbolsFor(Options{}), view: ViewInstall}
+				m.install.Results = []installResultView{{
+					Result: remote.SearchResult{Name: "one", Description: description},
+				}}
+				return renderInstallRows(m, 200)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := tt.render()
+			if len(rows) != 1 {
+				t.Fatalf("rows = %d, want 1", len(rows))
+			}
+			got := plain(rows[0])
+			if strings.ContainsAny(got, "\r\n") {
+				t.Fatalf("row contains a line break: %q", got)
+			}
+			if !strings.Contains(got, want) {
+				t.Fatalf("row = %q, want description %q", got, want)
+			}
+		})
 	}
 }
 

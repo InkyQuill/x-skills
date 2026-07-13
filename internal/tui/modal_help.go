@@ -69,7 +69,6 @@ func helpLines(m Model) []string {
 		"  " + m.symbols.Cursor + "  cursor position",
 		"  " + m.symbols.Unchecked + "  unselected item",
 		"  " + m.symbols.Checked + "  selected item",
-		"  " + m.symbols.CountPrefix + "N group count badge",
 		"",
 	}
 	lines = append(lines, helpRootLines(m)...)

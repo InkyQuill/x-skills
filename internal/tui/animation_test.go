@@ -11,14 +11,14 @@ import (
 	"github.com/InkyQuill/x-skills/internal/repo"
 )
 
-func TestInitStartsAnimationOnlyWhenUnicode(t *testing.T) {
+func TestInitStartsStartupWorkInBothModes(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 
-	if cmd := New(cfg, Options{ASCII: true}).Init(); cmd != nil {
-		t.Fatal("ASCII Init returned animation command, want nil")
+	if cmd := New(cfg, Options{ASCII: true}).Init(); cmd == nil {
+		t.Fatal("ASCII Init returned nil, want startup work")
 	}
 	if cmd := New(cfg).Init(); cmd == nil {
-		t.Fatal("Unicode Init returned nil, want animation command")
+		t.Fatal("Unicode Init returned nil, want startup work and animation")
 	}
 }
 

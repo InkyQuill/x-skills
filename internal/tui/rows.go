@@ -11,15 +11,16 @@ import (
 )
 
 type ActiveGroup struct {
-	ID          string
-	Name        string
-	Status      string
-	Description string
-	Chips       []string
-	Aliases     []string
-	Members     []actions.ActiveSkill
-	Reason      string
-	Fingerprint string
+	ID           string
+	Identity     string
+	DeclaredName string
+	Status       string
+	Description  string
+	Chips        []string
+	Aliases      []string
+	Members      []actions.ActiveSkill
+	Reason       string
+	Fingerprint  string
 }
 
 func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
@@ -32,7 +33,6 @@ func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
 		if !ok {
 			group = &ActiveGroup{
 				ID:          "active:" + key,
-				Name:        skill.Name,
 				Status:      skill.Status,
 				Description: skill.Description,
 				Reason:      skill.Reason,
@@ -43,9 +43,6 @@ func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
 		}
 		group.Members = append(group.Members, skill)
 		group.Chips = appendUnique(group.Chips, rootLabel(skill.Root))
-		if alias := filepath.Base(skill.Path); alias != "" && alias != group.Name {
-			group.Aliases = appendUnique(group.Aliases, alias)
-		}
 		if group.Description == "" {
 			group.Description = skill.Description
 		}
@@ -57,14 +54,36 @@ func groupActiveSkills(skills []actions.ActiveSkill) []ActiveGroup {
 
 	result := make([]ActiveGroup, 0, len(order))
 	for _, key := range order {
-		sort.Strings(groups[key].Chips)
-		sort.Strings(groups[key].Aliases)
-		result = append(result, *groups[key])
+		group := groups[key]
+		primary := primaryActiveMember(group.Members)
+		group.Identity = primary.Identity
+		group.DeclaredName = primary.DeclaredName
+		for _, member := range group.Members {
+			if member.Identity != group.Identity {
+				group.Aliases = appendUnique(group.Aliases, member.Identity)
+			}
+		}
+		sort.Strings(group.Chips)
+		sort.Strings(group.Aliases)
+		result = append(result, *group)
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return skillNameLess(result[i].Name, result[j].Name)
+		return skillNameLess(result[i].Identity, result[j].Identity)
 	})
 	return result
+}
+
+func primaryActiveMember(members []actions.ActiveSkill) actions.ActiveSkill {
+	candidates := append([]actions.ActiveSkill(nil), members...)
+	sort.Slice(candidates, func(i, j int) bool {
+		leftManaged := candidates[i].Status == actions.StatusManaged
+		rightManaged := candidates[j].Status == actions.StatusManaged
+		if leftManaged != rightManaged {
+			return leftManaged
+		}
+		return skillNameLess(candidates[i].Identity, candidates[j].Identity)
+	})
+	return candidates[0]
 }
 
 func skillNameLess(left, right string) bool {
@@ -125,7 +144,7 @@ func usageByRepoName(groups []ActiveGroup) map[string][]string {
 				continue
 			}
 			chip := rootLabel(member.Root)
-			usage[member.Name] = appendUnique(usage[member.Name], chip)
+			usage[member.Identity] = appendUnique(usage[member.Identity], chip)
 		}
 	}
 	for name := range usage {

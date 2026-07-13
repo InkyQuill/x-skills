@@ -4,11 +4,24 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
+
+func TestActiveDetailShowsDifferingDeclaredNameAsMetadata(t *testing.T) {
+	modal := activeDetailModal(ActiveGroup{
+		Identity:     "composition-patterns",
+		DeclaredName: "vercel-composition-patterns",
+		Status:       actions.StatusUnmanaged,
+	}, symbolsFor(Options{}))
+	view := plain(modal.View(100, 30, Model{}))
+	if !strings.Contains(view, "Declared name: vercel-composition-patterns") {
+		t.Fatalf("detail missing declared name metadata:\n%s", view)
+	}
+}
 
 func TestInspectorRendersKeyValueHierarchy(t *testing.T) {
 	got := renderInspectorDocument("Inspector", []inspectorSection{{

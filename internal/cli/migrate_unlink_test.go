@@ -63,6 +63,24 @@ func TestMigrateFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
 	}
 }
 
+func TestMigrateDeclaredNameSelectorReportsAmbiguousIdentities(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	first := makeSkill(t, filepath.Join(project, ".codex", "skills"), "composition-patterns", "Project.")
+	second := makeSkill(t, filepath.Join(home, ".agents", "skills"), "composition-patterns-copy", "Global.")
+	for _, path := range []string{first, second} {
+		content := "---\nname: vercel-composition-patterns\ndescription: Compose.\n---\n"
+		if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "migrate", "vercel-composition-patterns"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), `multiple active skills named "vercel-composition-patterns"`) {
+		t.Fatalf("error = %v, want declared-name ambiguity", err)
+	}
+}
+
 func TestMigratePromptsForAmbiguousActiveSkillAndConfirmation(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

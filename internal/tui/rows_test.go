@@ -38,18 +38,21 @@ func TestActiveGroupRowsShowRootChipsAliasesAndCount(t *testing.T) {
 	}
 
 	groups := groupActiveSkills([]actions.ActiveSkill{
-		{Name: "zen-of-go", Path: filepath.Join(projectRoot, "zen-of-go"), Root: roots.ActiveRoot{Scope: "project", Target: "agents", Label: ".agents", Path: projectRoot}, Status: actions.StatusManaged, Description: "Go style."},
-		{Name: "zen-of-go", Path: filepath.Join(globalRoot, "go-style"), Root: roots.ActiveRoot{Scope: "global", Target: "claude", Label: "~/.claude", Path: globalRoot}, Status: actions.StatusManaged, Description: "Go style."},
+		{Identity: "go-style", DeclaredName: "declared-go-style", Path: filepath.Join(globalRoot, "go-style"), Root: roots.ActiveRoot{Scope: "global", Target: "claude", Label: "~/.claude", Path: globalRoot}, Status: actions.StatusUnmanaged, Description: "Go style."},
+		{Identity: "zen-of-go", DeclaredName: "declared-go-style", Path: filepath.Join(projectRoot, "zen-of-go"), Root: roots.ActiveRoot{Scope: "project", Target: "agents", Label: ".agents", Path: projectRoot}, Status: actions.StatusManaged, Description: "Go style."},
 	})
 
 	if len(groups) != 1 {
 		t.Fatalf("groups = %d, want 1", len(groups))
 	}
-	if groups[0].Name != "zen-of-go" {
-		t.Fatalf("Name = %q, want zen-of-go", groups[0].Name)
+	if groups[0].Identity != "zen-of-go" {
+		t.Fatalf("Identity = %q, want zen-of-go", groups[0].Identity)
 	}
 	if !containsString(groups[0].Aliases, "go-style") {
 		t.Fatalf("Aliases = %#v, want go-style", groups[0].Aliases)
+	}
+	if containsString(groups[0].Aliases, "declared-go-style") {
+		t.Fatalf("Aliases = %#v, must not contain declared name", groups[0].Aliases)
 	}
 	if !containsString(groups[0].Chips, ".agents") || !containsString(groups[0].Chips, "~/.claude") {
 		t.Fatalf("Chips = %#v, want .agents and ~/.claude", groups[0].Chips)
@@ -67,7 +70,7 @@ func TestRenderActiveRowsUseSpecSymbols(t *testing.T) {
 		},
 		active: []ActiveGroup{{
 			ID:          "active:one",
-			Name:        "zen-of-go",
+			Identity:    "zen-of-go",
 			Status:      actions.StatusUnmanaged,
 			Description: "Go style.",
 			Chips:       []string{".Ag", "~Cl"},
@@ -142,7 +145,7 @@ func TestRepoRowsShowUsageChipsAndSelectionMarkers(t *testing.T) {
 			ViewDoctor: {},
 		},
 		repo: []repo.Skill{{
-			Name:        "zen-of-go",
+			Identity:    "zen-of-go",
 			Description: "Go style guide",
 		}},
 		repoUsage: map[string][]string{"zen-of-go": {".Ag", "~Cl"}},
@@ -184,7 +187,7 @@ func TestListRowsReplaceDescriptionNewlinesWithSpaces(t *testing.T) {
 					view:    ViewActive,
 					active: []ActiveGroup{{
 						ID:          "active:one",
-						Name:        "one",
+						Identity:    "one",
 						Status:      actions.StatusManaged,
 						Description: description,
 					}},
@@ -198,7 +201,7 @@ func TestListRowsReplaceDescriptionNewlinesWithSpaces(t *testing.T) {
 				m := Model{
 					symbols: symbolsFor(Options{}),
 					view:    ViewRepo,
-					repo:    []repo.Skill{{Name: "one", Description: description}},
+					repo:    []repo.Skill{{Identity: "one", Description: description}},
 				}
 				return renderRepoRows(m, 200)
 			},
@@ -243,7 +246,7 @@ func TestHighlightedRepoRowPreservesRootPills(t *testing.T) {
 			ViewDoctor: {},
 		},
 		repo: []repo.Skill{{
-			Name:        "zen-of-go",
+			Identity:    "zen-of-go",
 			Description: "Go style guide",
 		}},
 		repoUsage: map[string][]string{"zen-of-go": {".Ag", "~Cl"}},

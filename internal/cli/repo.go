@@ -28,12 +28,12 @@ func newRepoCommand(rootOptions *options) *cobra.Command {
 func writeRepo(out io.Writer, skills []repo.Skill) error {
 	for _, skill := range skills {
 		if skill.Description == "" {
-			if _, err := fmt.Fprintln(out, skill.Name); err != nil {
+			if _, err := fmt.Fprintln(out, skill.Identity); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(out, "%s  %s\n", skill.Name, skill.Description); err != nil {
+		if _, err := fmt.Fprintf(out, "%s  %s\n", skill.Identity, skill.Description); err != nil {
 			return err
 		}
 	}

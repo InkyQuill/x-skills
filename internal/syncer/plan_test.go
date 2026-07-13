@@ -220,7 +220,7 @@ func TestPreflightRevalidatesCandidateIdentityAndOccurrences(t *testing.T) {
 	}{
 		{name: "group name differs", mutate: func(group *NameGroup) { group.Name = "other" }},
 		{name: "forged ID", mutate: func(group *NameGroup) { group.Variants[0].ID = "review:forged" }},
-		{name: "occurrence name differs", mutate: func(group *NameGroup) { group.Variants[0].Occurrences[0].Name = "other" }},
+		{name: "occurrence name differs", mutate: func(group *NameGroup) { group.Variants[0].Occurrences[0].Identity = "other" }},
 		{name: "occurrence content drifted", mutate: func(group *NameGroup) {
 			_ = os.WriteFile(filepath.Join(group.Variants[0].Occurrences[0].Path, "SKILL.md"), []byte("changed"), 0o644)
 		}},
@@ -401,7 +401,7 @@ func TestPreflightRejectsOverlappingConfiguredDestinations(t *testing.T) {
 			sourceRoot = root
 		}
 	}
-	candidate := Candidate{Name: "review", Occurrences: []actions.ActiveSkill{{Name: "review", Root: sourceRoot, Path: source, Status: actions.StatusUnmanaged}}}
+	candidate := Candidate{Name: "review", Occurrences: []actions.ActiveSkill{{Identity: "review", Root: sourceRoot, Path: source, Status: actions.StatusUnmanaged}}}
 	candidate.Fingerprint = mustPlanFingerprint(t, source)
 	bindPlanCandidate(&candidate)
 
@@ -456,7 +456,7 @@ func TestPreflightRejectsSelectedDestinationAsCandidateSourceIncludingAlias(t *t
 				source = filepath.Join(alias, "review")
 			}
 			candidate := Candidate{Name: "review", Occurrences: []actions.ActiveSkill{{
-				Name: "review", Root: sourceRoot, Path: source, Status: actions.StatusUnmanaged,
+				Identity: "review", Root: sourceRoot, Path: source, Status: actions.StatusUnmanaged,
 			}}}
 			candidate.Fingerprint = mustPlanFingerprint(t, source)
 			bindPlanCandidate(&candidate)
@@ -563,7 +563,7 @@ func planFixture(t *testing.T, name string) (config.Config, Candidate, []roots.A
 	}
 	sourcePath := filepath.Join(cfg.ProjectRoot, ".codex", "skills", name)
 	sourceRoot := roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetCodex, Path: filepath.Dir(sourcePath), Label: ".Cd"}
-	return cfg, Candidate{ID: name + ":candidate", Name: name, Occurrences: []actions.ActiveSkill{{Name: name, Root: sourceRoot, Path: sourcePath, Status: actions.StatusUnmanaged}}}, destinations
+	return cfg, Candidate{ID: name + ":candidate", Name: name, Occurrences: []actions.ActiveSkill{{Identity: name, Root: sourceRoot, Path: sourcePath, Status: actions.StatusUnmanaged}}}, destinations
 }
 
 func makePlanSkill(t *testing.T, root, name, body string) string {

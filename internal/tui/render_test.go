@@ -131,7 +131,7 @@ func TestStatusRowsDistinguishableWithoutColor(t *testing.T) {
 				m.height = 30
 				m.active = []ActiveGroup{{
 					ID:          "active:same-skill",
-					Name:        "same-skill",
+					Identity:    "same-skill",
 					Status:      status,
 					Description: "Same description.",
 					Reason:      "Same description.",
@@ -161,10 +161,10 @@ func TestActiveInspectorShowsBrokenReason(t *testing.T) {
 	m.height = 30
 	m.active = []ActiveGroup{
 		{
-			ID:     "active:broken-skill",
-			Name:   "broken-skill",
-			Status: actions.StatusBroken,
-			Reason: "symlink target missing",
+			ID:       "active:broken-skill",
+			Identity: "broken-skill",
+			Status:   actions.StatusBroken,
+			Reason:   "symlink target missing",
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestActiveInspectorUsesKeyValueRows(t *testing.T) {
 	m.active = []ActiveGroup{
 		{
 			ID:          "active:zen-of-go",
-			Name:        "zen-of-go",
+			Identity:    "zen-of-go",
 			Aliases:     []string{"go", "pro"},
 			Status:      actions.StatusManaged,
 			Description: "Go style.",

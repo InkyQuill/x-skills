@@ -8,8 +8,24 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 )
+
+func TestFilterMatchesDeclaredName(t *testing.T) {
+	m := Model{
+		filter: newFilterState(),
+		active: []ActiveGroup{{
+			Identity:     "composition-patterns",
+			DeclaredName: "vercel-composition-patterns",
+			Status:       actions.StatusUnmanaged,
+		}},
+	}
+	m.filter.Query = "vercel-composition"
+	if got := m.visibleActiveGroups(); len(got) != 1 {
+		t.Fatalf("visible groups = %d, want declared-name match", len(got))
+	}
+}
 
 func TestFilterNarrowsActiveRowsAndExcludesFullPaths(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())

@@ -75,7 +75,7 @@ func planLocalReconciliation(cfg config.Config, old, recommended Manifest) (Mani
 		if occurrence.Status == actions.StatusBroken {
 			continue
 		}
-		name := occurrence.Name
+		name := occurrence.Identity
 		if _, excluded := recommendedNames[name]; excluded {
 			continue
 		}

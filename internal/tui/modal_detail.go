@@ -24,7 +24,7 @@ func newDetailModal(title string, lines []string) modal {
 
 func activeDetailModal(group ActiveGroup, symbols symbols) modal {
 	lines := []string{
-		"Canonical name: " + group.Name,
+		"Canonical name: " + group.Identity,
 		"Status: " + group.Status,
 		"Aliases: " + strings.Join(group.Aliases, ", "),
 		"",
@@ -34,7 +34,10 @@ func activeDetailModal(group ActiveGroup, symbols symbols) modal {
 		lines = append(lines, fmt.Sprintf("  %s  %s", renderRootChip(symbols, rootLabel(member.Root), lipgloss.NoColor{}), member.Path))
 	}
 	lines = append(lines, "", "Debug", "  fingerprint: "+group.Fingerprint)
-	return newDetailModal("Detail: "+group.Name+" (Active)", lines)
+	if group.DeclaredName != "" && group.DeclaredName != group.Identity {
+		lines = append(lines, "Declared name: "+group.DeclaredName)
+	}
+	return newDetailModal("Detail: "+group.Identity+" (Active)", lines)
 }
 
 func repoDetailModal(skill repo.Skill, usages []string, symbols symbols) modal {
@@ -50,7 +53,10 @@ func repoDetailModal(skill repo.Skill, usages []string, symbols symbols) modal {
 		"Usages",
 		"  " + usageText,
 	}
-	return newDetailModal("Detail: "+skill.Name+" (Repo)", lines)
+	if skill.DeclaredName != "" && skill.DeclaredName != skill.Identity {
+		lines = append(lines, "Declared name: "+skill.DeclaredName)
+	}
+	return newDetailModal("Detail: "+skill.Identity+" (Repo)", lines)
 }
 
 func doctorDetailModal(issue doctor.Issue) modal {

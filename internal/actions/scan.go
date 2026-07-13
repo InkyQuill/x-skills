@@ -20,12 +20,13 @@ const (
 )
 
 type ActiveSkill struct {
-	Name        string
-	Root        roots.ActiveRoot
-	Path        string
-	Status      string
-	Description string
-	Reason      string
+	Identity     string
+	DeclaredName string
+	Root         roots.ActiveRoot
+	Path         string
+	Status       string
+	Description  string
+	Reason       string
 }
 
 type ScanFilter struct {
@@ -76,16 +77,14 @@ func scanRoot(cfg config.Config, root roots.ActiveRoot) ([]ActiveSkill, error) {
 			continue
 		}
 
-		skill, err := skills.Read(activePath)
-		if err != nil {
-			return nil, fmt.Errorf("read active skill %q: %w", activePath, err)
-		}
+		document := readDocument(activePath)
 		found = append(found, ActiveSkill{
-			Name:        skill.Name,
-			Root:        root,
-			Path:        activePath,
-			Status:      StatusUnmanaged,
-			Description: skill.Description,
+			Identity:     entry.Name(),
+			DeclaredName: document.DeclaredName,
+			Root:         root,
+			Path:         activePath,
+			Status:       StatusUnmanaged,
+			Description:  document.Description,
 		})
 	}
 
@@ -98,17 +97,15 @@ func scanSymlink(cfg config.Config, root roots.ActiveRoot, activePath, name stri
 		return brokenSkill(root, activePath, name, classification.reason)
 	}
 
-	skill, err := skills.Read(classification.resolvedPath)
-	if err != nil {
-		return brokenSkill(root, activePath, name, fmt.Sprintf("read target metadata: %v", err))
-	}
+	document := readDocument(classification.resolvedPath)
 
 	return ActiveSkill{
-		Name:        skill.Name,
-		Root:        root,
-		Path:        activePath,
-		Status:      classification.status,
-		Description: skill.Description,
+		Identity:     name,
+		DeclaredName: document.DeclaredName,
+		Root:         root,
+		Path:         activePath,
+		Status:       classification.status,
+		Description:  document.Description,
 	}
 }
 
@@ -145,12 +142,24 @@ func classifySymlink(cfg config.Config, activePath, name string) symlinkClassifi
 
 func brokenSkill(root roots.ActiveRoot, path, name, reason string) ActiveSkill {
 	return ActiveSkill{
-		Name:   name,
-		Root:   root,
-		Path:   path,
-		Status: StatusBroken,
-		Reason: reason,
+		Identity: name,
+		Root:     root,
+		Path:     path,
+		Status:   StatusBroken,
+		Reason:   reason,
 	}
+}
+
+func readDocument(path string) skills.Document {
+	data, err := os.ReadFile(filepath.Join(path, "SKILL.md"))
+	if err != nil {
+		return skills.Document{}
+	}
+	document, err := skills.ParseDocument(data)
+	if err != nil {
+		return skills.Document{}
+	}
+	return document
 }
 
 // samePath reports whether a and b refer to the same filesystem location,

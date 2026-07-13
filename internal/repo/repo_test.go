@@ -26,7 +26,7 @@ func TestListRepoSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(skills) != 1 || skills[0].Name != "golang-testing" {
+	if len(skills) != 1 || skills[0].Identity != "golang-testing" {
 		t.Fatalf("skills = %#v", skills)
 	}
 }
@@ -49,8 +49,11 @@ func TestListRepoSkillsUsesArchiveDirectoryName(t *testing.T) {
 	if len(skills) != 1 {
 		t.Fatalf("len(skills) = %d, want 1", len(skills))
 	}
-	if skills[0].Name != "linkable-name" {
-		t.Fatalf("Name = %q, want archive directory name", skills[0].Name)
+	if skills[0].Identity != "linkable-name" {
+		t.Fatalf("Identity = %q, want archive directory name", skills[0].Identity)
+	}
+	if skills[0].DeclaredName != "display-only" {
+		t.Fatalf("DeclaredName = %q, want display-only", skills[0].DeclaredName)
 	}
 	if skills[0].Description != "Test Go." {
 		t.Fatalf("Description = %q", skills[0].Description)
@@ -84,7 +87,7 @@ func TestListRepoSkillsIgnoresNonSkillsAndSortsByName(t *testing.T) {
 	if len(skills) != 2 {
 		t.Fatalf("len(skills) = %d, want 2: %#v", len(skills), skills)
 	}
-	if skills[0].Name != "alpha" || skills[1].Name != "zeta" {
+	if skills[0].Identity != "alpha" || skills[1].Identity != "zeta" {
 		t.Fatalf("skills = %#v", skills)
 	}
 }
@@ -110,9 +113,9 @@ func TestListRepoSkillsSkipsUnreadableSkillMetadata(t *testing.T) {
 	t.Cleanup(func() {
 		readSkill = originalReadSkill
 	})
-	readSkill = func(path string) (skills.Info, error) {
+	readSkill = func(path string) (skills.Document, error) {
 		if filepath.Base(path) == "unreadable" {
-			return skills.Info{}, fmt.Errorf("simulated unreadable metadata")
+			return skills.Document{}, fmt.Errorf("simulated unreadable metadata")
 		}
 		return originalReadSkill(path)
 	}
@@ -121,7 +124,7 @@ func TestListRepoSkillsSkipsUnreadableSkillMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(skills) != 1 || skills[0].Name != "readable" {
+	if len(skills) != 1 || skills[0].Identity != "readable" {
 		t.Fatalf("skills = %#v, want only readable", skills)
 	}
 }

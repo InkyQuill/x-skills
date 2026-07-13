@@ -161,7 +161,7 @@ func activeInspectorSections(m Model) []inspectorSection {
 	}
 
 	return []inspectorSection{{
-		Title: group.Name,
+		Title: group.Identity,
 		Rows:  rows,
 	}}
 }
@@ -360,7 +360,7 @@ func renderActiveRows(m Model, width int) []string {
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderStatusDotWithBackground(m, group.Status, background)
 				}},
-				{text: " " + group.Name + " "},
+				{text: " " + group.Identity + " "},
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderRootChips(m.symbols, group.Chips, background)
 				}},

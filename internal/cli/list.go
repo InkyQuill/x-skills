@@ -80,12 +80,12 @@ func writeList(out io.Writer, skills []actions.ActiveSkill, filter actions.ScanF
 				continue
 			}
 			if skill.Status == actions.StatusBroken {
-				if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Name, skill.Status, skill.Reason); err != nil {
+				if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Identity, skill.Status, skill.Reason); err != nil {
 					return err
 				}
 				continue
 			}
-			if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Name, skill.Status, skill.Description); err != nil {
+			if _, err := fmt.Fprintf(out, "  %s  %s  %s\n", skill.Identity, skill.Status, skill.Description); err != nil {
 				return err
 			}
 		}

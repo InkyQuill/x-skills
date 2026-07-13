@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/InkyQuill/x-skills/internal/buildinfo"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -18,6 +19,7 @@ type options struct {
 	no          bool
 	noInput     bool
 	json        bool
+	buildInfo   buildinfo.Info
 
 	flags  *pflag.FlagSet
 	loaded *config.Config
@@ -47,6 +49,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		projectRoot: cfg.ProjectRoot,
 		homeDir:     cfg.HomeDir,
 		archiveRoot: cfg.ArchiveRoot,
+		buildInfo:   buildinfo.Current(),
 	}
 
 	root := &cobra.Command{
@@ -93,6 +96,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 		newSyncCommand(&opts),
 		newDoctorCommand(&opts),
 		newTUICommand(&opts),
+		newVersionCommand(opts.buildInfo),
 	)
 
 	return root, nil

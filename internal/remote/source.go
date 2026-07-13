@@ -29,13 +29,13 @@ var agentIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 type SourceMetadata struct {
 	SchemaVersion int                   `json:"schema_version"`
-	SourceType    string                `json:"source_type"`
+	SourceType    string                `json:"source_type,omitempty"`
 	Owner         string                `json:"owner,omitempty"`
 	Repo          string                `json:"repo,omitempty"`
-	CloneURL      string                `json:"clone_url"`
+	CloneURL      string                `json:"clone_url,omitempty"`
 	Ref           string                `json:"ref,omitempty"`
-	Commit        string                `json:"commit"`
-	SkillPath     string                `json:"skill_path"`
+	Commit        string                `json:"commit,omitempty"`
+	SkillPath     string                `json:"skill_path,omitempty"`
 	UpstreamName  string                `json:"upstream_name,omitempty"`
 	Compatibility *CompatibilityProfile `json:"compatibility,omitempty"`
 }
@@ -49,6 +49,11 @@ type MetadataError struct {
 	Code  string
 	Field string
 	Err   error
+}
+
+type sourceMetadataPresence struct {
+	hasSourceIdentity bool
+	hasCompatibility  bool
 }
 
 func (e *MetadataError) Error() string {
@@ -83,7 +88,11 @@ func DecodeSourceMetadata(data []byte) (SourceMetadata, error) {
 	if metadata.SchemaVersion == 0 {
 		metadata.SchemaVersion = metadataSchemaV1
 	}
-	if err := ValidateSourceMetadata(metadata); err != nil {
+	presence, err := decodeSourceMetadataPresence(data)
+	if err != nil {
+		return SourceMetadata{}, err
+	}
+	if err := validateSourceMetadata(metadata, presence); err != nil {
 		return SourceMetadata{}, err
 	}
 	if err := normalizeCompatibility(&metadata); err != nil {
@@ -93,6 +102,10 @@ func DecodeSourceMetadata(data []byte) (SourceMetadata, error) {
 }
 
 func ValidateSourceMetadata(metadata SourceMetadata) error {
+	return validateSourceMetadata(metadata, inferredSourceMetadataPresence(metadata))
+}
+
+func validateSourceMetadata(metadata SourceMetadata, presence sourceMetadataPresence) error {
 	schemaVersion := metadata.SchemaVersion
 	if schemaVersion == 0 {
 		schemaVersion = metadataSchemaV1
@@ -104,10 +117,22 @@ func ValidateSourceMetadata(metadata SourceMetadata) error {
 			fmt.Errorf("unsupported source metadata schema version %d", schemaVersion),
 		)
 	}
-	if err := validateSourceIdentity(metadata); err != nil {
-		return err
+	if schemaVersion == metadataSchemaV2 {
+		if presence.hasSourceIdentity {
+			if err := validateSourceIdentity(metadata); err != nil {
+				return err
+			}
+		}
+		if presence.hasCompatibility && metadata.Compatibility == nil {
+			return metadataError(
+				"metadata.compatibility",
+				"compatibility",
+				errors.New("compatibility must not be null"),
+			)
+		}
+		return validateCompatibility(metadata.Compatibility)
 	}
-	return validateCompatibility(metadata.Compatibility)
+	return validateCompatibilitySelection(metadata.Compatibility)
 }
 
 func ReadSourceMetadata(skillDir string) (SourceMetadata, bool, error) {
@@ -128,6 +153,9 @@ func ReadSourceMetadata(skillDir string) (SourceMetadata, bool, error) {
 
 func WriteSourceMetadata(skillDir string, meta SourceMetadata) error {
 	meta.SchemaVersion = metadataSchemaV2
+	if err := validateCompatibility(meta.Compatibility); err != nil {
+		return fmt.Errorf("encode source metadata: %w", err)
+	}
 	if err := normalizeCompatibility(&meta); err != nil {
 		return fmt.Errorf("encode source metadata: %w", err)
 	}
@@ -163,9 +191,6 @@ func normalizeCompatibility(meta *SourceMetadata) error {
 	if meta.Compatibility == nil {
 		return nil
 	}
-	if err := validateCompatibility(meta.Compatibility); err != nil {
-		return err
-	}
 	profile := *meta.Compatibility
 	profile.Agents = slices.Clone(profile.Agents)
 	slices.Sort(profile.Agents)
@@ -174,12 +199,6 @@ func normalizeCompatibility(meta *SourceMetadata) error {
 }
 
 func validateSourceIdentity(metadata SourceMetadata) error {
-	hasSourceIdentity := metadata.SourceType != "" || metadata.Owner != "" || metadata.Repo != "" ||
-		metadata.CloneURL != "" || metadata.Ref != "" || metadata.Commit != "" ||
-		metadata.SkillPath != "" || metadata.UpstreamName != ""
-	if !hasSourceIdentity {
-		return nil
-	}
 	if metadata.SourceType == "" {
 		return sourceFieldRequired("source_type")
 	}
@@ -215,23 +234,48 @@ func validateSourceIdentity(metadata SourceMetadata) error {
 	return nil
 }
 
+func decodeSourceMetadataPresence(data []byte) (sourceMetadataPresence, error) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return sourceMetadataPresence{}, fmt.Errorf("decode source metadata members: %w", err)
+	}
+
+	presence := sourceMetadataPresence{}
+	for _, field := range []string{
+		"source_type",
+		"owner",
+		"repo",
+		"clone_url",
+		"ref",
+		"commit",
+		"skill_path",
+		"upstream_name",
+	} {
+		if _, exists := members[field]; exists {
+			presence.hasSourceIdentity = true
+			break
+		}
+	}
+	_, presence.hasCompatibility = members["compatibility"]
+	return presence, nil
+}
+
+func inferredSourceMetadataPresence(metadata SourceMetadata) sourceMetadataPresence {
+	hasSourceIdentity := metadata.SourceType != "" || metadata.Owner != "" || metadata.Repo != "" ||
+		metadata.CloneURL != "" || metadata.Ref != "" || metadata.Commit != "" ||
+		metadata.SkillPath != "" || metadata.UpstreamName != ""
+	return sourceMetadataPresence{
+		hasSourceIdentity: hasSourceIdentity,
+		hasCompatibility:  metadata.Compatibility != nil,
+	}
+}
+
 func validateCompatibility(profile *CompatibilityProfile) error {
-	if profile == nil {
+	if err := validateCompatibilitySelection(profile); err != nil {
+		return err
+	}
+	if profile == nil || profile.Agnostic {
 		return nil
-	}
-	if profile.Agnostic && len(profile.Agents) > 0 {
-		return metadataError(
-			"metadata.compatibility",
-			"compatibility",
-			errors.New("compatibility must specify exactly one of agnostic or agents"),
-		)
-	}
-	if !profile.Agnostic && len(profile.Agents) == 0 {
-		return metadataError(
-			"metadata.compatibility",
-			"compatibility.agents",
-			errors.New("compatibility agents must name at least one agent"),
-		)
 	}
 
 	seen := make(map[string]struct{}, len(profile.Agents))
@@ -251,6 +295,27 @@ func validateCompatibility(profile *CompatibilityProfile) error {
 			)
 		}
 		seen[agentID] = struct{}{}
+	}
+	return nil
+}
+
+func validateCompatibilitySelection(profile *CompatibilityProfile) error {
+	if profile == nil {
+		return nil
+	}
+	if profile.Agnostic && len(profile.Agents) > 0 {
+		return metadataError(
+			"metadata.compatibility",
+			"compatibility",
+			errors.New("compatibility must specify exactly one of agnostic or agents"),
+		)
+	}
+	if !profile.Agnostic && len(profile.Agents) == 0 {
+		return metadataError(
+			"metadata.compatibility",
+			"compatibility.agents",
+			errors.New("compatibility agents must name at least one agent"),
+		)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package remote
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -52,6 +53,21 @@ func TestDecodeSourceMetadata(t *testing.T) {
 			wantSchema: 1,
 		},
 		{
+			name:       "legacy partial schema v1",
+			data:       `{"source_type":"github","owner":""}`,
+			wantSchema: 1,
+		},
+		{
+			name:       "legacy schema v1 compatibility ids",
+			data:       `{"schema_version":1,"compatibility":{"agents":["Claude","Claude"]}}`,
+			wantSchema: 1,
+		},
+		{
+			name:       "schema v2 with source and compatibility omitted",
+			data:       `{"schema_version":2}`,
+			wantSchema: 2,
+		},
+		{
 			name:         "valid compatibility-only schema v2",
 			data:         `{"schema_version":2,"compatibility":{"agnostic":true}}`,
 			wantSchema:   2,
@@ -80,6 +96,21 @@ func TestDecodeSourceMetadata(t *testing.T) {
 			wantErrString: "source_type",
 		},
 		{
+			name: "empty github identity value",
+			data: `{"schema_version":2,"source_type":"github","owner":null,` +
+				`"repo":"skills","skill_path":"skills/review"}`,
+			wantCode:      "metadata.source",
+			wantField:     "owner",
+			wantErrString: "owner",
+		},
+		{
+			name:          "null git identity value",
+			data:          `{"schema_version":2,"source_type":"git","clone_url":null,"skill_path":"skills/review"}`,
+			wantCode:      "metadata.source",
+			wantField:     "clone_url",
+			wantErrString: "clone_url",
+		},
+		{
 			name:          "unknown source type",
 			data:          `{"schema_version":2,"source_type":"archive"}`,
 			wantCode:      "metadata.source",
@@ -99,6 +130,13 @@ func TestDecodeSourceMetadata(t *testing.T) {
 			wantCode:      "metadata.compatibility",
 			wantField:     "compatibility.agents",
 			wantErrString: "at least one agent",
+		},
+		{
+			name:          "explicit null compatibility",
+			data:          `{"schema_version":2,"compatibility":null}`,
+			wantCode:      "metadata.compatibility",
+			wantField:     "compatibility",
+			wantErrString: "must not be null",
 		},
 		{
 			name:          "invalid agent id",
@@ -156,6 +194,46 @@ func TestDecodeSourceMetadata(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestDecodeSourceMetadataTracksSourceMemberPresence(t *testing.T) {
+	fields := []string{
+		"source_type",
+		"owner",
+		"repo",
+		"clone_url",
+		"ref",
+		"commit",
+		"skill_path",
+		"upstream_name",
+	}
+	values := []struct {
+		name string
+		json string
+	}{
+		{name: "empty string", json: `""`},
+		{name: "null", json: "null"},
+	}
+
+	for _, field := range fields {
+		for _, value := range values {
+			t.Run(field+" "+value.name, func(t *testing.T) {
+				data := fmt.Sprintf(`{"schema_version":2,%q:%s}`, field, value.json)
+				_, err := DecodeSourceMetadata([]byte(data))
+				var metadataErr *MetadataError
+				if !errors.As(err, &metadataErr) {
+					t.Fatalf("error = %v, want *MetadataError", err)
+				}
+				if metadataErr.Code != "metadata.source" || metadataErr.Field != "source_type" {
+					t.Fatalf(
+						"metadata error = {Code: %q, Field: %q}, want source_type error",
+						metadataErr.Code,
+						metadataErr.Field,
+					)
+				}
+			})
+		}
 	}
 }
 

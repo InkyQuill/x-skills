@@ -283,9 +283,13 @@ func executePreview(t *testing.T, content []byte, args ...string) ([]byte, error
 	}
 	runPreviewGit(t, repo, "add", ".")
 	runPreviewGit(t, repo, "commit", "-m", "initial")
+	repoURLPath := filepath.ToSlash(repo)
+	if !strings.HasPrefix(repoURLPath, "/") {
+		repoURLPath = "/" + repoURLPath
+	}
 	localRepoURL := (&url.URL{
 		Scheme: "file",
-		Path:   filepath.ToSlash(repo),
+		Path:   repoURLPath,
 	}).String()
 	runPreviewGit(
 		t,

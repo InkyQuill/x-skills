@@ -63,6 +63,34 @@ func TestMigrateFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
 	}
 }
 
+func TestMigrateResolvesUniqueDeclaredNameToFilesystemIdentity(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	root := filepath.Join(project, ".codex", "skills")
+	active := makeSkill(t, root, "composition-patterns", "Compose.")
+	content := "---\nname: vercel-composition-patterns\ndescription: Compose.\n---\n"
+	if err := os.WriteFile(filepath.Join(active, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute([]string{
+		"--home", home,
+		"--project-root", project,
+		"-y", "migrate", "vercel-composition-patterns",
+		"--at", "project:codex",
+	}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := filepath.Join(home, ".x-skills", "skills", "composition-patterns")
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSamePath(t, resolved, archived)
+}
+
 func TestMigrateDeclaredNameSelectorReportsAmbiguousIdentities(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

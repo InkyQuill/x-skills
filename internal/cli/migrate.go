@@ -108,7 +108,7 @@ func migrateNames(
 			continue
 		}
 		result, err := actions.Migrate(cfg, actions.MigrateRequest{
-			Name:      name,
+			Name:      skill.Identity,
 			Scope:     skill.Root.Scope,
 			Target:    skill.Root.Target,
 			Confirmed: true,

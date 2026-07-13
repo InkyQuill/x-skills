@@ -4,6 +4,7 @@ $Repo = "InkyQuill/x-skills"
 $BinName = "x-skills"
 $InstallDir = if ($env:X_SKILLS_INSTALL_DIR) { $env:X_SKILLS_INSTALL_DIR } else { Join-Path $HOME ".local\bin" }
 $Version = if ($env:X_SKILLS_VERSION) { $env:X_SKILLS_VERSION } else { "latest" }
+# Release binaries embed github.com/InkyQuill/x-skills/internal/buildinfo.version at build time.
 
 function Write-Step {
     param([string]$Message)
@@ -46,7 +47,19 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 $asset = Get-AssetName
 Write-Step "Selected asset $asset"
-if ($Version -eq "latest") {
+if ($env:X_SKILLS_DOWNLOAD_URL) {
+    $downloadUri = $null
+    if (
+        ![System.Uri]::TryCreate(
+            $env:X_SKILLS_DOWNLOAD_URL,
+            [System.UriKind]::Absolute,
+            [ref]$downloadUri
+        ) -or ($downloadUri.Scheme -ne "http" -and $downloadUri.Scheme -ne "https")
+    ) {
+        throw "X_SKILLS_DOWNLOAD_URL must be an absolute http:// or https:// URL"
+    }
+    $url = $downloadUri.AbsoluteUri
+} elseif ($Version -eq "latest") {
     $url = "https://github.com/$Repo/releases/latest/download/$asset"
 } else {
     $url = "https://github.com/$Repo/releases/download/$Version/$asset"
@@ -71,8 +84,21 @@ try {
     }
 
     $installedExe = Join-Path $InstallDir "$BinName.exe"
+    $stagedExe = Join-Path $InstallDir ".$BinName.install.$PID.exe"
     Write-Step "Installing $BinName to $installedExe"
-    Copy-Item -Force $exe $installedExe
+    Copy-Item -Force $exe $stagedExe
+    try {
+        if (Test-Path $installedExe) {
+            Write-Step "existing $BinName found at $installedExe; replacing it"
+            [System.IO.File]::Replace($stagedExe, $installedExe, $null)
+        } else {
+            [System.IO.File]::Move($stagedExe, $installedExe)
+        }
+    } catch [System.IO.IOException] {
+        throw "replace $installedExe failed; close any running x-skills process and retry: $($_.Exception.Message)"
+    } finally {
+        Remove-Item -Force $stagedExe -ErrorAction SilentlyContinue
+    }
     Install-XsShortcut
     Write-Host "installed $BinName to $installedExe"
 } finally {

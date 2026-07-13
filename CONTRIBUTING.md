@@ -24,6 +24,20 @@ go test -race ./...
 go vet ./...
 ```
 
+To build the checkout and overwrite the normal installation on macOS or Linux:
+
+```bash
+./scripts/install-dev.sh
+```
+
+On Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-dev.ps1
+```
+
+The installed `x-skills version` reports `dev`.
+
 ## Development Workflow
 
 1. Fork the repository

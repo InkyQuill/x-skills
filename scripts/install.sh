@@ -4,6 +4,7 @@ set -eu
 REPO="InkyQuill/x-skills"
 BIN_NAME="x-skills"
 INSTALL_DIR="${X_SKILLS_INSTALL_DIR:-$HOME/.local/bin}"
+# Release binaries embed github.com/InkyQuill/x-skills/internal/buildinfo.version at build time.
 
 fail() {
   printf '%s\n' "x-skills install: $*" >&2
@@ -68,7 +69,7 @@ install_xs_link() {
     return 0
   fi
 
-  if [ -e "$link" ]; then
+  if [ -e "$link" ] || [ -L "$link" ]; then
     log "$link already exists; leaving it unchanged"
     return 0
   fi
@@ -82,6 +83,8 @@ main() {
   need uname
   need mktemp
   need tar
+  need install
+  need mv
 
   os="$(detect_os)"
   arch="$(detect_arch)"
@@ -90,11 +93,17 @@ main() {
   log "Detected $os/$arch"
 
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT INT TERM
+  staged=""
+  trap '[ -z "$staged" ] || rm -f "$staged"; rm -rf "$tmp"' EXIT INT TERM
 
   log "Using install directory $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
-  if [ "$version" = "latest" ]; then
+  if [ "${X_SKILLS_DOWNLOAD_URL:-}" ]; then
+    case "$X_SKILLS_DOWNLOAD_URL" in
+      http://* | https://*) url="$X_SKILLS_DOWNLOAD_URL" ;;
+      *) fail "X_SKILLS_DOWNLOAD_URL must be an absolute http:// or https:// URL" ;;
+    esac
+  elif [ "$version" = "latest" ]; then
     url="https://github.com/${REPO}/releases/latest/download/${asset}"
   else
     url="https://github.com/${REPO}/releases/download/${version}/${asset}"
@@ -105,11 +114,18 @@ main() {
   download "$url" "$archive"
   log "Extracting $asset"
   tar -xzf "$archive" -C "$tmp"
-  log "Installing $BIN_NAME to $INSTALL_DIR/$BIN_NAME"
-  install -m 0755 "$tmp/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
-  install_xs_link "$INSTALL_DIR/$BIN_NAME"
+  target="$INSTALL_DIR/$BIN_NAME"
+  staged="$INSTALL_DIR/.${BIN_NAME}.install.$$"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    log "existing $BIN_NAME found at $target; replacing it"
+  fi
+  log "Installing $BIN_NAME to $target"
+  install -m 0755 "$tmp/$BIN_NAME" "$staged"
+  mv -f "$staged" "$target"
+  staged=""
+  install_xs_link "$target"
 
-  printf '%s\n' "installed $BIN_NAME to $INSTALL_DIR/$BIN_NAME"
+  printf '%s\n' "installed $BIN_NAME to $target"
 }
 
 main "$@"

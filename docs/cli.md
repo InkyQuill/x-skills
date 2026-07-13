@@ -38,7 +38,7 @@ Doctor's automatic fixes repair safe link/root problems, archive missing built-i
 
 ## Identity, JSON, and idempotent links
 
-A skill's filesystem identity is its active-entry or archive-directory name. The `name` declared in `SKILL.md` is display and filter metadata; it never replaces identity for filesystem behavior. Human `list` and `repo` output annotates a mismatch as `identity (declared: declared-name)` and omits the annotation when the values match.
+Filesystem identity comes from the active entry or archive directory; the declared frontmatter name is display and filter metadata only. It never replaces identity for filesystem behavior. Human `list` and `repo` output annotates a mismatch as `identity (declared: declared-name)` and omits the annotation when the values match.
 
 `list --json` and `repo --json` return typed arrays, including `[]` when empty. Active records contain `identity`, an optional differing `declared_name`, `description`, `status`, active `path`, root `scope`/`target`/`label`/`path`, and an optional broken `reason`. Repo records contain `identity`, an optional differing `declared_name`, `description`, archive `path`, and available `source` metadata. `list-roots --json` exposes canonical locations, labels, paths, consumers, and built-in/enabled flags. `search --json` returns the query, optional owner, results, and a reproducible `add_command`.
 
@@ -54,11 +54,11 @@ A `SKILL.md` input validates its parent; a directory containing `SKILL.md` valid
 
 Portable `SKILL.md` checks accept LF or CRLF frontmatter delimiters, require YAML mapping frontmatter with non-empty `name` and `description` strings, and require a non-empty body. Names must be lowercase hyphen-case, at most 64 characters, with no leading, trailing, or consecutive hyphens. Descriptions are limited to 1024 characters and cannot contain angle brackets. Unknown frontmatter keys are allowed. A directory identity/declared name mismatch is a warning.
 
-If `.x-skills.json` exists, decoding is strict: unknown or trailing fields and invalid schemas, source identities, or compatibility declarations are errors in validation and ordinary metadata reads. Schema-v2 `compatibility` must be nested and contain exactly one of `{"agnostic": true}` or a non-empty `{"agents": [...]}`. Agent IDs must be unique and match `^[a-z][a-z0-9-]*$`. Without `--at`, valid IDs are portable; repeated `--at` selectors validate them against the union of configured consumers for the selected roots. Remote provenance is optional, but when present it must include a complete, internally consistent source identity.
+If `.x-skills.json` exists, decoding is strict: unknown or trailing fields and invalid schemas, source identities, or compatibility declarations are errors in validation and ordinary metadata reads. Schema-v1 legacy metadata remains accepted. Schema-v2 `compatibility` must be nested and contain exactly one of `{"agnostic": true}` or a non-empty `{"agents": [...]}`. Agent IDs must be unique and match `^[a-z][a-z0-9-]*$`. Without `--at`, valid IDs are portable; repeated `--at` selectors validate them against the union of configured consumers for the selected roots. Complete remote source provenance is required only for schema v2 when any source identity is present.
 
 This structured `.x-skills.json.compatibility` contract is distinct from a `compatibility` field in `SKILL.md` frontmatter. The latter is free-text vendor metadata and is not interpreted as an x-skills Compatibility Profile.
 
-Validation aggregates all diagnostics. Human output groups them by skill and ends with counts; JSON returns `valid`, `summary` (`skills`, `errors`, and `warnings`), and typed `diagnostics` (`path`, `level`, `code`, `message`, and optional field/related path). Warnings alone exit zero. Any validation error, path/configuration error, or selector failure exits nonzero after all validatable inputs have been checked.
+Validation input and skill diagnostics are aggregated before the report is written. Human output groups them by skill and ends with counts; JSON returns `valid`, `summary` (`skills`, `errors`, and `warnings`), and typed `diagnostics` (`path`, `level`, `code`, `message`, and optional field/related path). Warnings alone exit zero; validation errors exit nonzero after all validatable inputs have been checked. Configuration loading and `--at` selector resolution happen before validation; failures return nonzero without a validation report.
 
 ## Remote preview
 

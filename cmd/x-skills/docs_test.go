@@ -300,8 +300,17 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 	if err := validateReleaseWorkflow(workflow); err != nil {
 		t.Error(err)
 	}
-	if err := validateReleaseWorkflow(strings.ReplaceAll(workflow, "\n", "\r\n")); err != nil {
-		t.Errorf("validate CRLF release workflow: %v", err)
+	lineEndingSources := map[string]string{
+		"LF source":   workflow,
+		"CRLF source": strings.ReplaceAll(workflow, "\n", "\r\n"),
+	}
+	for name, source := range lineEndingSources {
+		t.Run(name, func(t *testing.T) {
+			crlfWorkflow := strings.ReplaceAll(normalizeLineEndings(source), "\n", "\r\n")
+			if err := validateReleaseWorkflow(crlfWorkflow); err != nil {
+				t.Errorf("validate CRLF release workflow: %v", err)
+			}
+		})
 	}
 	invalidWorkflows := []struct {
 		name    string
@@ -334,7 +343,7 @@ func TestReleaseAndInstallerConfiguration(t *testing.T) {
 }
 
 func validateReleaseWorkflow(workflow string) error {
-	workflow = strings.ReplaceAll(workflow, "\r\n", "\n")
+	workflow = normalizeLineEndings(workflow)
 	actionIndex := strings.Index(workflow, "uses: goreleaser/goreleaser-action@v7")
 	if actionIndex == -1 {
 		return fmt.Errorf("release workflow must use goreleaser/goreleaser-action@v7")
@@ -351,6 +360,10 @@ func validateReleaseWorkflow(workflow string) error {
 		return fmt.Errorf("release workflow must install GoReleaser before invoking semantic-release")
 	}
 	return nil
+}
+
+func normalizeLineEndings(value string) string {
+	return strings.ReplaceAll(value, "\r\n", "\n")
 }
 
 func TestDevelopmentInstallerReplacesExistingBinary(t *testing.T) {

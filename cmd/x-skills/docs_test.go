@@ -71,6 +71,28 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 		"docs/tui.md":           readFile(t, "docs/tui.md"),
 		"docs/remote-skills.md": readFile(t, "docs/remote-skills.md"),
 	}
+	for _, required := range []string{
+		"x-skills validate PATH... [--at LOCATION...] [--json]",
+		"x-skills preview OWNER/REPO SKILL [--lines N] [--json]",
+		"identity",
+		"declared name",
+		"already_linked",
+	} {
+		if !strings.Contains(maintainedDocs["docs/cli.md"], required) {
+			t.Errorf("docs/cli.md must contain %q", required)
+		}
+	}
+	for _, required := range []string{
+		"Active/Repo",
+		"Enter",
+		"Doctor Enter",
+		"loading animation",
+		"Escape cancellation",
+	} {
+		if !strings.Contains(maintainedDocs["docs/tui.md"], required) {
+			t.Errorf("docs/tui.md must contain %q", required)
+		}
+	}
 	for _, link := range []string{
 		"[CLI guide](docs/cli.md)",
 		"[TUI guide](docs/tui.md)",

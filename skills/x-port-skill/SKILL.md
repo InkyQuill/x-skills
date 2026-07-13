@@ -19,10 +19,18 @@ Port a skill by changing only its agent-specific contract. Preserve its triggers
    - no equivalent: preserve the limitation explicitly or stop and ask the user. Never invent a tool or silently remove behavior.
 5. Make every rewrite and metadata change only in the staged copy. Draft the smallest semantic-preserving change. Keep frontmatter triggers accurate, resource paths valid, scripts executable, and required safety or approval gates intact.
 6. Verify the staged port with static checks and repository-owned validators: re-read every changed file, validate internal links and invocations, and confirm the workflow remains usable by every claimed consumer ID. Do not execute validators or representative scripts bundled with the source or staged skill automatically; require explicit user approval and run them in a sandbox before execution.
-7. Only after that verification, update `.x-skills.json` in the staged copy. Preserve every existing source field and set schema version 2. Use `{"agnostic": true}` only when no agent-exclusive dependency remains; otherwise use `{"agents": [...]}` with sorted, unique IDs that match `^[a-z][a-z0-9-]*$` and are present in the requested destinations' configured consumer sets. Exactly one of `agnostic: true` or a non-empty `agents` list is allowed. Never substitute a product/vendor/display name for a consumer ID or claim compatibility from wording changes alone.
-8. Validate the staged metadata by parsing the complete JSON, checking the profile rules above and configured-ID membership, and running any repository or x-skills metadata validator available in the working environment. A JSON syntax check alone is insufficient.
+7. Only after that verification, update `.x-skills.json` in the staged copy. Preserve every existing source/provenance field intact and set schema version 2. The compatibility metadata must have exactly one of these nested shapes: `{"schema_version": 2, "compatibility": {"agnostic": true}}` when no agent-exclusive dependency remains, or `{"schema_version": 2, "compatibility": {"agents": ["claude", "codex"]}}` with the actual sorted, unique IDs that match `^[a-z][a-z0-9-]*$` and are present in the requested destinations' configured consumer sets. Never substitute a product/vendor/display name for a consumer ID or claim compatibility from wording changes alone.
+8. Validate the staged metadata by parsing the complete JSON, checking the profile rules above and configured-ID membership, then run:
+   ```bash
+   x-skills validate <staged-skill> --at <destination> --json
+   ```
+   A JSON syntax check alone is insufficient.
 9. Diff the untouched source against the staged copy. Show the complete proposed diff and summarize substitutions, unresolved limitations, validation results, consumer ID evidence, and the proposed Compatibility Profile.
-10. Obtain explicit approval for that reviewed diff. Only then apply the staged changes to the approved source or separate destination and re-run validation on the applied result. If approval is withheld, leave every destination unchanged and delete the temporary copy unless the user explicitly asks to retain it for later review.
+10. Obtain explicit approval for that reviewed diff. Only then apply the staged changes to the approved source or separate destination and re-run validation on the applied result:
+    ```bash
+    x-skills validate <applied-skill> --at <destination> --json
+    ```
+    If approval is withheld, leave every destination unchanged and delete the temporary copy unless the user explicitly asks to retain it for later review.
 
 ## Completion Contract
 

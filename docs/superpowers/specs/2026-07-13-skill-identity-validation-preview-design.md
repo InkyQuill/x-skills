@@ -91,6 +91,10 @@ Internal skill records must stop using one ambiguous `Name` field for two meanin
 updated at compile time rather than retaining an ambiguous compatibility alias. Broken active
 skills, whose metadata cannot be read, have an identity and an empty declared name.
 
+Scanning must not obtain `DeclaredName` through the current `skills.Read` basename fallback. The
+metadata boundary used here must distinguish an actually declared frontmatter name from a fallback
+identity so unreadable or unparseable metadata cannot recreate the conflation this model removes.
+
 For active entries, scanning derives identity from the root entry. For archived entries,
 `repo.List` derives identity from the archive directory entry. Frontmatter parsing supplies only
 declared metadata.
@@ -247,6 +251,10 @@ Compatibility rules are:
   configuration;
 - with repeated `--at`, each declared agent must appear in the union of consumer IDs for the
   selected enabled roots.
+
+These rules apply only to the structured `compatibility` object in `.x-skills.json`. A
+`compatibility` field in `SKILL.md` frontmatter is unrelated vendor metadata, may be a free-text
+string, and is not interpreted as an x-skills Compatibility Profile.
 
 Unknown fields become errors in ordinary `ReadSourceMetadata` calls too. Schema versioning, not
 silent field dropping, is the extension mechanism.

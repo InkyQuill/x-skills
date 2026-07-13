@@ -159,6 +159,22 @@ func TestValidatePathsPortableSkillDocument(t *testing.T) {
 	}
 }
 
+func TestValidateSkillAggregatesMetadataWhenSkillDocumentReadFails(t *testing.T) {
+	skill := filepath.Join(t.TempDir(), "portable")
+	if err := os.Mkdir(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(skill, "SKILL.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(skill, ".x-skills.json"), "{")
+
+	diagnostics := validateSkill(skill, nil, false)
+	report := Report{Diagnostics: diagnostics}
+	assertDiagnostic(t, report, LevelError, CodeFrontmatterMalformed, "")
+	assertDiagnostic(t, report, LevelError, CodeMetadataInvalid, "")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

@@ -85,6 +85,48 @@ func TestValidatePathsRejectsDirectoryNamedSkillMarkdown(t *testing.T) {
 	}
 }
 
+func TestValidatePathsDoesNotDeduplicateEmptyInputWithCurrentDirectory(t *testing.T) {
+	skill := makeSkill(t, t.TempDir(), "portable", validSkill("portable"))
+	t.Chdir(skill)
+
+	report := ValidatePaths([]string{"", " ", "."}, Options{})
+	assertDiagnostic(t, report, LevelError, CodeInputUnsupported, "")
+	if report.Summary.Skills != 1 {
+		t.Fatalf("skills = %d, want current directory skill counted once", report.Summary.Skills)
+	}
+	if report.Summary.Errors != 1 {
+		t.Fatalf("errors = %d, want duplicate empty inputs reported once", report.Summary.Errors)
+	}
+}
+
+func TestImmediateSkillDirsReturnsReadDirError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "collection.txt")
+	writeFile(t, path, "not a directory")
+
+	_, err := immediateSkillDirs(path)
+	if err == nil {
+		t.Fatal("immediateSkillDirs() error = nil, want os.ReadDir error")
+	}
+}
+
+func TestImmediateSkillDirReturnsStatError(t *testing.T) {
+	_, err := isImmediateSkillDir(string([]byte{0}))
+	if err == nil {
+		t.Fatal("isImmediateSkillDir() error = nil, want os.Stat error")
+	}
+}
+
+func TestAddSkillPathReturnsCanonicalizationError(t *testing.T) {
+	paths := map[string]string{}
+	err := addSkillPath(paths, filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Fatal("addSkillPath() error = nil, want canonicalization error")
+	}
+	if len(paths) != 0 {
+		t.Fatalf("paths = %#v, want no silently added path", paths)
+	}
+}
+
 func TestValidatePathsTranslatesMetadataErrors(t *testing.T) {
 	tests := []struct {
 		name      string

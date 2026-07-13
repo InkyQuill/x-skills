@@ -2,6 +2,7 @@ package validation
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -73,6 +74,21 @@ func ValidatePaths(paths []string, opts Options) Report {
 	sortedPaths := slices.Clone(paths)
 	slices.Sort(sortedPaths)
 	for _, path := range sortedPaths {
+		if strings.TrimSpace(path) == "" {
+			const emptyInputKey = "\x00empty-input"
+			if _, exists := seenInputs[emptyInputKey]; exists {
+				continue
+			}
+			seenInputs[emptyInputKey] = struct{}{}
+			diagnostics = append(diagnostics, Diagnostic{
+				Path:    "<empty>",
+				Level:   LevelError,
+				Code:    CodeInputUnsupported,
+				Message: "input path must not be empty",
+			})
+			continue
+		}
+
 		inputPath, info, err := classifyInput(path)
 		if err != nil {
 			key := inputDiagnosticPath(path)
@@ -80,18 +96,10 @@ func ValidatePaths(paths []string, opts Options) Report {
 				continue
 			}
 			seenInputs[key] = struct{}{}
-			code := CodeInputUnsupported
-			message := "input path is unsupported"
-			if errors.Is(err, os.ErrNotExist) {
-				code = CodeInputMissing
-				message = "input path does not exist"
-			}
-			diagnostics = append(diagnostics, Diagnostic{
-				Path:    key,
-				Level:   LevelError,
-				Code:    code,
-				Message: message,
-			})
+			diagnostics = append(
+				diagnostics,
+				pathErrorDiagnostic(key, "inspect input path", err),
+			)
 			continue
 		}
 
@@ -110,23 +118,49 @@ func ValidatePaths(paths []string, opts Options) Report {
 			continue
 		}
 
-		if isSkillDir(inputPath) {
-			addSkillPath(skillPaths, inputPath)
+		isSkill, err := isSkillDir(inputPath)
+		if err != nil {
+			diagnostics = append(
+				diagnostics,
+				pathErrorDiagnostic(inputPath, "inspect skill directory", err),
+			)
+			continue
+		}
+		if isSkill {
+			if err := addSkillPath(skillPaths, inputPath); err != nil {
+				diagnostics = append(
+					diagnostics,
+					pathErrorDiagnostic(inputPath, "canonicalize skill directory", err),
+				)
+			}
 			continue
 		}
 
-		children := immediateSkillDirs(inputPath)
+		children, discoveryErr := immediateSkillDirs(inputPath)
+		if discoveryErr != nil {
+			diagnostics = append(
+				diagnostics,
+				pathErrorDiagnostic(inputPath, "inspect collection", discoveryErr),
+			)
+		}
 		if len(children) == 0 {
-			diagnostics = append(diagnostics, Diagnostic{
-				Path:    inputPath,
-				Level:   LevelError,
-				Code:    CodeCollectionEmpty,
-				Message: "collection contains no immediate child skills",
-			})
+			if discoveryErr == nil {
+				diagnostics = append(diagnostics, Diagnostic{
+					Path:    inputPath,
+					Level:   LevelError,
+					Code:    CodeCollectionEmpty,
+					Message: "collection contains no immediate child skills",
+				})
+			}
 			continue
 		}
 		for _, child := range children {
-			addSkillPath(skillPaths, child)
+			if err := addSkillPath(skillPaths, child); err != nil {
+				diagnostics = append(
+					diagnostics,
+					pathErrorDiagnostic(child, "canonicalize discovered skill", err),
+				)
+			}
 		}
 	}
 
@@ -193,35 +227,62 @@ func inputDiagnosticPath(path string) string {
 	return filepath.Clean(abs)
 }
 
-func isSkillDir(path string) bool {
+func isSkillDir(path string) (bool, error) {
 	info, err := os.Stat(filepath.Join(path, "SKILL.md"))
-	return err == nil && info.Mode().IsRegular()
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat SKILL.md: %w", err)
+	}
+	return info.Mode().IsRegular(), nil
 }
 
-func immediateSkillDirs(collection string) []string {
+func immediateSkillDirs(collection string) ([]string, error) {
 	entries, err := os.ReadDir(collection)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read collection: %w", err)
 	}
 	result := []string{}
+	inspectionErrors := []error{}
 	for _, entry := range entries {
 		child := filepath.Join(collection, entry.Name())
-		info, err := os.Stat(child)
-		if err != nil || !info.IsDir() || !isSkillDir(child) {
+		isSkill, err := isImmediateSkillDir(child)
+		if err != nil {
+			inspectionErrors = append(inspectionErrors, err)
+			continue
+		}
+		if !isSkill {
 			continue
 		}
 		result = append(result, child)
 	}
 	slices.Sort(result)
-	return result
+	return result, errors.Join(inspectionErrors...)
 }
 
-func addSkillPath(paths map[string]string, path string) {
+func isImmediateSkillDir(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, fmt.Errorf("stat collection child %q: %w", path, err)
+	}
+	if !info.IsDir() {
+		return false, nil
+	}
+	isSkill, err := isSkillDir(path)
+	if err != nil {
+		return false, fmt.Errorf("inspect collection child %q: %w", path, err)
+	}
+	return isSkill, nil
+}
+
+func addSkillPath(paths map[string]string, path string) error {
 	canonical, err := pathidentity.Canonical(path)
 	if err != nil {
-		return
+		return fmt.Errorf("canonicalize %q: %w", path, err)
 	}
 	paths[canonical] = canonical
+	return nil
 }
 
 func rootConsumers(activeRoots []roots.ActiveRoot) []string {
@@ -245,4 +306,17 @@ func rootConsumers(activeRoots []roots.ActiveRoot) []string {
 func diagnosticKey(diagnostic Diagnostic) string {
 	return diagnostic.Path + "\x00" + string(diagnostic.Level) + "\x00" + diagnostic.Code +
 		"\x00" + diagnostic.Field + "\x00" + diagnostic.RelatedPath + "\x00" + diagnostic.Message
+}
+
+func pathErrorDiagnostic(path, action string, err error) Diagnostic {
+	code := CodeInputUnsupported
+	if errors.Is(err, os.ErrNotExist) {
+		code = CodeInputMissing
+	}
+	return Diagnostic{
+		Path:    path,
+		Level:   LevelError,
+		Code:    code,
+		Message: fmt.Sprintf("%s: %v", action, err),
+	}
 }

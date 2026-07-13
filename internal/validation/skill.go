@@ -18,12 +18,13 @@ func validateSkill(skillDir string, consumers []string, checkConsumers bool) []D
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
-		return []Diagnostic{{
+		diagnostics := []Diagnostic{{
 			Path:    skillDir,
 			Level:   LevelError,
 			Code:    CodeFrontmatterMalformed,
 			Message: fmt.Sprintf("cannot read SKILL.md: %v", err),
 		}}
+		return append(diagnostics, validateSource(skillDir, consumers, checkConsumers)...)
 	}
 
 	document, parseErr := skills.ParseDocument(data)

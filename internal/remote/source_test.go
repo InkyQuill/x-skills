@@ -1,12 +1,183 @@
 package remote
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDecodeSourceMetadata(t *testing.T) {
+	tests := []struct {
+		name          string
+		data          string
+		wantSchema    int
+		wantAgnostic  bool
+		wantCode      string
+		wantField     string
+		wantErrString string
+	}{
+		{
+			name:          "unknown field",
+			data:          `{"schema_version":2,"unexpected":true}`,
+			wantCode:      "metadata.unknown_field",
+			wantField:     "unexpected",
+			wantErrString: "unknown field",
+		},
+		{
+			name:          "trailing json value",
+			data:          `{"schema_version":2} {}`,
+			wantCode:      "metadata.trailing_json",
+			wantErrString: "multiple JSON values",
+		},
+		{
+			name:          "mistaken top-level agnostic",
+			data:          `{"schema_version":2,"agnostic":true}`,
+			wantCode:      "metadata.unknown_field",
+			wantField:     "agnostic",
+			wantErrString: "unknown field",
+		},
+		{
+			name:          "mistaken top-level agents",
+			data:          `{"schema_version":2,"agents":["codex"]}`,
+			wantCode:      "metadata.unknown_field",
+			wantField:     "agents",
+			wantErrString: "unknown field",
+		},
+		{
+			name:       "valid schema v1",
+			data:       `{"source_type":"github","owner":"acme","repo":"skills","skill_path":"skills/review"}`,
+			wantSchema: 1,
+		},
+		{
+			name:         "valid compatibility-only schema v2",
+			data:         `{"schema_version":2,"compatibility":{"agnostic":true}}`,
+			wantSchema:   2,
+			wantAgnostic: true,
+		},
+		{
+			name: "valid full github source",
+			data: `{"schema_version":2,"source_type":"github","owner":"acme",` +
+				`"repo":"skills","clone_url":"https://github.com/acme/skills.git",` +
+				`"ref":"main","commit":"abc","skill_path":"skills/review",` +
+				`"upstream_name":"review"}`,
+			wantSchema: 2,
+		},
+		{
+			name:          "partial source identity",
+			data:          `{"schema_version":2,"source_type":"github","owner":"acme"}`,
+			wantCode:      "metadata.source",
+			wantField:     "repo",
+			wantErrString: "repo",
+		},
+		{
+			name:          "source field without source type",
+			data:          `{"schema_version":2,"commit":"abc"}`,
+			wantCode:      "metadata.source",
+			wantField:     "source_type",
+			wantErrString: "source_type",
+		},
+		{
+			name:          "unknown source type",
+			data:          `{"schema_version":2,"source_type":"archive"}`,
+			wantCode:      "metadata.source",
+			wantField:     "source_type",
+			wantErrString: "unknown source type",
+		},
+		{
+			name:          "compatibility exclusivity",
+			data:          `{"schema_version":2,"compatibility":{"agnostic":true,"agents":["codex"]}}`,
+			wantCode:      "metadata.compatibility",
+			wantField:     "compatibility",
+			wantErrString: "exactly one",
+		},
+		{
+			name:          "empty agents",
+			data:          `{"schema_version":2,"compatibility":{"agents":[]}}`,
+			wantCode:      "metadata.compatibility",
+			wantField:     "compatibility.agents",
+			wantErrString: "at least one agent",
+		},
+		{
+			name:          "invalid agent id",
+			data:          `{"schema_version":2,"compatibility":{"agents":["Claude"]}}`,
+			wantCode:      "metadata.compatibility",
+			wantField:     "compatibility.agents",
+			wantErrString: "invalid agent id",
+		},
+		{
+			name:          "duplicate agent id",
+			data:          `{"schema_version":2,"compatibility":{"agents":["codex","codex"]}}`,
+			wantCode:      "metadata.compatibility",
+			wantField:     "compatibility.agents",
+			wantErrString: "duplicate agent id",
+		},
+		{
+			name:          "unsupported schema",
+			data:          `{"schema_version":3}`,
+			wantCode:      "metadata.schema",
+			wantField:     "schema_version",
+			wantErrString: "unsupported source metadata schema version 3",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := DecodeSourceMetadata([]byte(test.data))
+			if test.wantCode == "" {
+				if err != nil {
+					t.Fatalf("DecodeSourceMetadata() error = %v", err)
+				}
+				if got.SchemaVersion != test.wantSchema {
+					t.Fatalf("schema version = %d, want %d", got.SchemaVersion, test.wantSchema)
+				}
+				if test.wantAgnostic && (got.Compatibility == nil || !got.Compatibility.Agnostic) {
+					t.Fatalf("compatibility = %#v, want agnostic", got.Compatibility)
+				}
+				return
+			}
+
+			if err == nil || !strings.Contains(err.Error(), test.wantErrString) {
+				t.Fatalf("error = %v, want error containing %q", err, test.wantErrString)
+			}
+			var metadataErr *MetadataError
+			if !errors.As(err, &metadataErr) {
+				t.Fatalf("error type = %T, want *MetadataError", err)
+			}
+			if metadataErr.Code != test.wantCode || metadataErr.Field != test.wantField {
+				t.Fatalf(
+					"metadata error = {Code: %q, Field: %q}, want {Code: %q, Field: %q}",
+					metadataErr.Code,
+					metadataErr.Field,
+					test.wantCode,
+					test.wantField,
+				)
+			}
+		})
+	}
+}
+
+func TestReadSourceMetadataIgnoresSkillFrontmatterCompatibility(t *testing.T) {
+	dir := t.TempDir()
+	skill := "---\nname: review\ndescription: Review code\ncompatibility: Designed for Claude Code\n---\nBody\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{"schema_version":2,"compatibility":{"agnostic":true}}`)
+	if err := os.WriteFile(filepath.Join(dir, MetadataFile), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := ReadSourceMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got.Compatibility == nil || !got.Compatibility.Agnostic {
+		t.Fatalf("metadata = %#v, ok = %v; want agnostic compatibility", got, ok)
+	}
+}
 
 func TestSourceMetadataRoundTrip(t *testing.T) {
 	dir := t.TempDir()

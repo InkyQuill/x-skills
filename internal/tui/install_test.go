@@ -953,7 +953,12 @@ func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/react-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	m := New(cfg)
@@ -3275,7 +3280,12 @@ func TestInstallArchiveOnlyNameConflictRenameIncoming(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3407,7 +3417,12 @@ func TestInstallAndUseNameConflictReplaceThenContinuesToDestinations(t *testing.
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3462,7 +3477,12 @@ func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/react-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	m := New(cfg)
@@ -3574,7 +3594,12 @@ func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) 
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/react-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	m := New(cfg)
@@ -3779,7 +3804,12 @@ func TestInstallAndUseBatchMissingSkillContinuesWithTail(t *testing.T) {
 func TestInstallAndUseUpdateAcceptIncomingThenContinuesToDestinations(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -3837,7 +3867,12 @@ func TestInstallAndUseUpdateAcceptIncomingThenContinuesToDestinations(t *testing
 func TestInstallAndUseUpdateKeepArchiveThenContinuesToDestinations(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -3899,7 +3934,12 @@ func TestInstallAndUseNameConflictEscClearsPendingUse(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
+	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "someone-else",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3947,7 +3987,12 @@ func TestInstallAndUseNameConflictEscClearsPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateQClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4006,7 +4051,12 @@ func TestInstallAndUseUpdateQClearsPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateStaleDiffClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4065,7 +4115,12 @@ func TestInstallAndUseUpdateStaleDiffClearsPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateRepeatedRequestKeepsNewestPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4120,7 +4175,12 @@ func TestInstallAndUseUpdateRepeatedRequestKeepsNewestPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateDiffErrorClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4809,7 +4869,12 @@ func TestInstallUseBatchUpdateDiffMissingSkillContinuesWithTail(t *testing.T) {
 func TestInstallSameSourceUpdateAcceptIncomingReplacesArchive(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4861,7 +4926,12 @@ func TestInstallSameSourceUpdateAcceptIncomingReplacesArchive(t *testing.T) {
 func TestInstallSameSourceUpdateKeepArchiveLeavesArchive(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)

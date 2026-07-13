@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"unicode/utf8"
 
 	"github.com/InkyQuill/x-skills/internal/remote"
 	"github.com/spf13/cobra"
@@ -130,6 +131,9 @@ func writePreviewJSON(
 	requestedLines int,
 	truncated bool,
 ) error {
+	if !utf8.Valid(content) {
+		return fmt.Errorf("preview content is not valid UTF-8; omit --json for raw output")
+	}
 	payload := previewJSON{
 		Repository:     result.Repository,
 		RequestedSkill: result.RequestedName,

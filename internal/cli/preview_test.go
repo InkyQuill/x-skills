@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -205,6 +206,32 @@ func TestPreviewJSONContainsExactFieldsAndRawContent(t *testing.T) {
 	}
 }
 
+func TestPreviewRejectsInvalidUTF8OnlyForJSON(t *testing.T) {
+	content := []byte("---\nname: preview-skill\n---\nbody ")
+	content = append(content, 0xff)
+
+	raw, err := executePreview(t, content, "preview", "owner/repo", "preview-skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRaw := append(append([]byte{}, content...), '\n')
+	if !bytes.Equal(raw, wantRaw) {
+		t.Fatalf("raw preview = %q, want byte-preserving %q", raw, wantRaw)
+	}
+
+	jsonOutput, err := executePreview(
+		t,
+		content,
+		"--json", "preview", "owner/repo", "preview-skill",
+	)
+	if err == nil || !strings.Contains(err.Error(), "preview content is not valid UTF-8") {
+		t.Fatalf("error = %v, want actionable invalid UTF-8 error", err)
+	}
+	if len(jsonOutput) != 0 {
+		t.Fatalf("JSON stdout = %q, want empty", jsonOutput)
+	}
+}
+
 func TestPreviewResolverErrorWritesNoPartialOutput(t *testing.T) {
 	content := []byte("---\nname: other-skill\n---\nbody\n")
 	out, err := executePreview(t, content, "preview", "owner/repo", "missing-skill")
@@ -256,7 +283,10 @@ func executePreview(t *testing.T, content []byte, args ...string) ([]byte, error
 	}
 	runPreviewGit(t, repo, "add", ".")
 	runPreviewGit(t, repo, "commit", "-m", "initial")
-	localRepoURL := "file://" + filepath.ToSlash(repo)
+	localRepoURL := (&url.URL{
+		Scheme: "file",
+		Path:   filepath.ToSlash(repo),
+	}).String()
 	runPreviewGit(
 		t,
 		"",

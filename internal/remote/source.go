@@ -153,7 +153,7 @@ func ReadSourceMetadata(skillDir string) (SourceMetadata, bool, error) {
 
 func WriteSourceMetadata(skillDir string, meta SourceMetadata) error {
 	meta.SchemaVersion = metadataSchemaV2
-	if err := validateCompatibility(meta.Compatibility); err != nil {
+	if err := validateSourceMetadata(meta, inferredSourceMetadataPresence(meta)); err != nil {
 		return fmt.Errorf("encode source metadata: %w", err)
 	}
 	if err := normalizeCompatibility(&meta); err != nil {

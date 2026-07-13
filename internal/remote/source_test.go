@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -344,6 +345,90 @@ func TestSourceMetadataRoundTripAgnosticCompatibility(t *testing.T) {
 	}
 	if got.Compatibility == nil || !got.Compatibility.Agnostic || len(got.Compatibility.Agents) != 0 {
 		t.Fatalf("compatibility = %#v, want agnostic profile", got.Compatibility)
+	}
+}
+
+func TestWriteSourceMetadataRoundTripsCompatibilityOnly(t *testing.T) {
+	dir := t.TempDir()
+	meta := SourceMetadata{
+		Compatibility: &CompatibilityProfile{Agents: []string{"codex", "claude"}},
+	}
+	if err := WriteSourceMetadata(dir, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := ReadSourceMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("metadata not found")
+	}
+	if got.SchemaVersion != metadataSchemaV2 {
+		t.Fatalf("schema version = %d, want %d", got.SchemaVersion, metadataSchemaV2)
+	}
+	if got.Compatibility == nil {
+		t.Fatal("compatibility = nil, want agents profile")
+	}
+	wantAgents := []string{"claude", "codex"}
+	if !reflect.DeepEqual(got.Compatibility.Agents, wantAgents) {
+		t.Fatalf("compatibility agents = %#v, want %#v", got.Compatibility.Agents, wantAgents)
+	}
+}
+
+func TestWriteSourceMetadataRejectsInvalidSourceIdentityBeforeWriting(t *testing.T) {
+	tests := []struct {
+		name             string
+		meta             SourceMetadata
+		existingMetadata []byte
+		wantError        string
+	}{
+		{
+			name: "partial GitHub identity does not create metadata",
+			meta: SourceMetadata{
+				SourceType: SourceTypeGitHub,
+				Owner:      "acme",
+			},
+			wantError: "source metadata field \"repo\" is required",
+		},
+		{
+			name: "unknown source type does not replace metadata",
+			meta: SourceMetadata{
+				SourceType: "registry",
+			},
+			existingMetadata: []byte("existing metadata\n"),
+			wantError:        `unknown source type "registry"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			metadataPath := filepath.Join(dir, MetadataFile)
+			if tt.existingMetadata != nil {
+				if err := os.WriteFile(metadataPath, tt.existingMetadata, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			err := WriteSourceMetadata(dir, tt.meta)
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error = %v, want %q", err, tt.wantError)
+			}
+			if !strings.Contains(err.Error(), "encode source metadata") {
+				t.Fatalf("error = %v, want encode context", err)
+			}
+
+			got, readErr := os.ReadFile(metadataPath)
+			switch {
+			case tt.existingMetadata == nil && !errors.Is(readErr, os.ErrNotExist):
+				t.Fatalf("read metadata error = %v, want not exist", readErr)
+			case tt.existingMetadata != nil && readErr != nil:
+				t.Fatal(readErr)
+			case tt.existingMetadata != nil && !bytes.Equal(got, tt.existingMetadata):
+				t.Fatalf("metadata = %q, want unchanged %q", got, tt.existingMetadata)
+			}
+		})
 	}
 }
 

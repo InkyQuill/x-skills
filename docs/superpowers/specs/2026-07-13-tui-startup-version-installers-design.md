@@ -59,10 +59,15 @@ initial loading.
 
 ### Version and release wiring
 
-The binary currently has no runtime build-version source. The release workflow also builds snapshot
-artifacts before semantic-release determines the next version. Version injection must therefore be
-connected to the semantic-release result, rather than inferred from the previous tag or snapshot
-version.
+The binary currently has no runtime build-version source. The release workflow builds snapshot
+artifacts before semantic-release determines the next version, but snapshot mode never publishes
+them. Semantic-release then creates a GitHub release without attaching the archives from `dist/`.
+The current pipeline therefore produces an unversioned binary build that is discarded and a release
+with no platform binaries.
+
+Version injection and artifact publishing must both be connected to the semantic-release tag. There
+should be one release publisher rather than separate tools racing to create or mutate the same
+GitHub release.
 
 ### Installer behavior
 
@@ -172,6 +177,10 @@ ASCII mode remains explicit and distinct:
 | Unchecked selection | `[ ]` |
 | Checked selection | `[x]` |
 
+`CountPrefix` is not a live marker. The active-row group-count badge was removed in commit
+`4a8d3b3`; only the symbol field and its help legend entry remain. Remove both remnants instead of
+assigning another glyph or documenting a feature that is no longer rendered.
+
 ### Safe canonical row rendering
 
 Selectable-row rendering must preserve semantic styles emitted by trusted Lip Gloss renderers while
@@ -189,17 +198,36 @@ terminal output.
 
 ## Release pipeline
 
-Release artifacts must be built after semantic-release has calculated the next version. The release
-workflow should expose that exact version to GoReleaser, and GoReleaser should inject it into the
-`internal/buildinfo` linker variable for every platform artifact.
+GoReleaser becomes the sole GitHub release and artifact publisher. Semantic-release remains the
+authority that analyzes commits and creates the next semantic-version tag.
+
+The release job uses this sequence:
+
+1. Check out full Git history and tags, set up Go, and run the test suite.
+2. Use `goreleaser/goreleaser-action@v7` with `install-only: true` to put the pinned GoReleaser v2
+   binary on `PATH` without building a snapshot.
+3. Set up Node and run semantic-release with commit analysis and `@semantic-release/exec`.
+4. Semantic-release determines the next version and creates/pushes its `v<version>` tag.
+5. The exec plugin's `publishCmd` runs `goreleaser release --clean`. Publish commands run after the
+   semantic-release tag has been created, so GoReleaser reads the exact new version from that tag.
+6. GoReleaser builds all configured platform archives, injects `.Version` into
+   `internal/buildinfo` with a build `ldflags` entry, creates the GitHub release, and uploads the
+   archives and checksum.
+7. GoReleaser's `release.extra_files` uploads `scripts/install.sh` and `scripts/install.ps1` as
+   standalone release assets alongside the archives.
+
+Remove `@semantic-release/github` as a publisher so it cannot create an empty release before
+GoReleaser. GoReleaser owns release notes as well: enable its changelog generation instead of the
+current `changelog.disable: true`. The semantic-release configuration needs only the commit analyzer
+and exec publisher for this workflow; release-note generation is not duplicated across tools.
+
+The release job passes `GITHUB_TOKEN` to semantic-release, and the exec child inherits it for
+GoReleaser publication. A failure to tag, build, checksum, or upload fails the single release job.
+There is no preliminary snapshot whose artifacts can be mistaken for the published output.
 
 The implementation must not derive a release version from the previous tag, commit distance, or the
-current snapshot template. Development builds retain the source default `dev` unless a caller
-explicitly injects another value.
-
-The release sequence remains responsible for tests, cross-platform archives, checksums, installers,
-GitHub release notes, and uploaded assets. Its ordering changes so versioned artifacts and the
-release metadata agree.
+snapshot template. Development builds retain the source default `dev` unless a caller explicitly
+injects another value.
 
 ## Installer behavior
 
@@ -273,6 +301,7 @@ Use table-driven tests for:
 - Assert that quit and help work during initial loading.
 - Cover header badges at wide and narrow terminal sizes.
 - Assert the Unicode and ASCII marker contracts.
+- Assert that help no longer advertises a removed group-count badge.
 - Assert meaningful status shapes under `NO_COLOR`.
 - Force a color-capable profile and assert that row SGR foreground styling survives.
 - In ordinary, focused, and selected rows, assert that unsafe OSC, non-SGR CSI, and control bytes
@@ -285,18 +314,26 @@ Use table-driven tests for:
 - Replace a release-labeled binary through the development installer and assert that
   `x-skills version` returns `dev`.
 - Exercise Unix and PowerShell behavior in their respective existing CI matrix jobs.
-- Assert that GoReleaser contains the expected build-info linker flag and that release artifacts use
-  the semantic-release-selected version.
+- Assert that GoReleaser contains the expected build-info linker flag, installer `extra_files`, and
+  enabled changelog generation.
+- Assert that the release workflow installs GoReleaser without a snapshot build and that
+  semantic-release invokes the real GoReleaser release from its publish lifecycle.
+- Assert that `@semantic-release/github` is no longer configured as a competing publisher.
+- Exercise a local snapshot only as a non-publishing configuration/build smoke test; inspect its
+  binary with an injected test version rather than treating its archives as release assets.
 
 ## Completion criteria
 
 - The TUI frame appears before skill scanning completes and visibly reports loading.
 - Row state colors render normally while `NO_COLOR` remains respected.
 - Managed, unmanaged, broken, and selection markers match the approved contract.
+- The obsolete group-count symbol and help legend entry are removed.
 - Release and development versions appear correctly in both the CLI and TUI.
 - A newer stable GitHub release produces a non-blocking update badge.
 - Offline startup remains quiet and functional.
 - Re-running either installer intentionally replaces the existing binary.
+- A tagged release contains every configured platform archive, the checksum, and both standalone
+  installer scripts.
 - `go test ./...` passes on Linux, macOS, and Windows CI.
 - `go test -race ./internal/tui/...` and `go vet ./...` pass.
 - Representative release and development builds report their injected versions correctly.

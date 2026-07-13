@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
+const skipConfigAnnotation = "x-skills.io/skip-config"
+
 type options struct {
 	projectRoot          string
 	homeDir              string
@@ -62,6 +64,9 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 			if opts.yes && opts.no {
 				return fmt.Errorf("--yes and --no are mutually exclusive")
 			}
+			if commandSkipsConfig(cmd) {
+				return nil
+			}
 			_, err := opts.configE()
 			return err
 		},
@@ -102,6 +107,11 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, 
 	)
 
 	return root, nil
+}
+
+func commandSkipsConfig(cmd *cobra.Command) bool {
+	_, ok := cmd.Annotations[skipConfigAnnotation]
+	return ok
 }
 
 func (o *options) config() config.Config {

@@ -192,6 +192,108 @@ func TestLinkAcceptsMultipleNames(t *testing.T) {
 	}
 }
 
+func TestLinkAlreadyLinkedBatchReportsSeparateStatus(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "first-skill", "First.")
+	second := makeSkill(t, cfg.ArchiveSkillsRoot(), "second-skill", "Second.")
+	secondDestination := filepath.Join(cfg.MustActiveRoot("project", "codex"), "second-skill")
+	if err := os.MkdirAll(filepath.Dir(secondDestination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(second, secondDestination); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "link", "first-skill", "second-skill", "--at", "project:codex"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"linked: first-skill", "already linked: second-skill"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("link output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestLinkJSONReportsStableStatuses(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "first-skill", "First.")
+	second := makeSkill(t, cfg.ArchiveSkillsRoot(), "second-skill", "Second.")
+	secondDestination := filepath.Join(cfg.MustActiveRoot("project", "codex"), "second-skill")
+	if err := os.MkdirAll(filepath.Dir(secondDestination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(second, secondDestination); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "--json", "link", "first-skill", "second-skill", "--at", "project:codex"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var results []struct {
+		Name   string
+		Status string
+	}
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatalf("unmarshal link JSON: %v\n%s", err, out.String())
+	}
+	if len(results) != 2 {
+		t.Fatalf("results = %#v, want two", results)
+	}
+	if results[0].Name != "first-skill" || results[0].Status != "linked" {
+		t.Fatalf("first result = %#v", results[0])
+	}
+	if results[1].Name != "second-skill" || results[1].Status != "already_linked" {
+		t.Fatalf("second result = %#v", results[1])
+	}
+}
+
+func TestLinkAlreadyLinkedStillReconcilesProject(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "typescript-expert", "TypeScript.")
+	destination := filepath.Join(cfg.MustActiveRoot("project", "codex"), "typescript-expert")
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(archivePath, destination); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "link", "typescript-expert", "--at", "project:codex"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "already linked: typescript-expert") {
+		t.Fatalf("link output:\n%s", out.String())
+	}
+	assertLocalManifestHasIdentity(t, cfg, "typescript-expert")
+}
+
 func TestLinkReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := setupActiveIdentityMismatch(t, home, project)

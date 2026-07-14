@@ -13,6 +13,7 @@ import (
 	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 	"github.com/InkyQuill/x-skills/internal/doctor"
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
 
 func TestModalConsumesBackgroundKeys(t *testing.T) {
@@ -284,7 +285,11 @@ func TestActivePreviewUsesManagedPrimaryMember(t *testing.T) {
 		t.Fatalf("title = %q, want managed primary identity", preview.title)
 	}
 	wantPath := filepath.Join(managedPath, "SKILL.md")
-	if preview.path != wantPath {
+	equivalent, err := pathidentity.EquivalentE(preview.path, wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equivalent {
 		t.Fatalf("path = %q, want %q", preview.path, wantPath)
 	}
 }

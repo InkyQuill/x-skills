@@ -27,7 +27,7 @@ func newLinkCommand(rootOptions *options) *cobra.Command {
 
 			results, failures := linkNames(cmd, rootOptions, args, opts)
 			if rootOptions.json {
-				if err := writeLinkJSON(cmd.OutOrStdout(), results); err != nil {
+				if err := writeLinkJSON(cmd.OutOrStdout(), results, failures); err != nil {
 					return err
 				}
 				if len(failures) > 0 {
@@ -145,11 +145,30 @@ func linkHumanStatus(status string) string {
 	return status
 }
 
-func writeLinkJSON(out io.Writer, results []actions.MutationResult) error {
+func writeLinkJSON(
+	out io.Writer,
+	results []actions.MutationResult,
+	failures []mutationFailure,
+) error {
 	if results == nil {
 		results = []actions.MutationResult{}
 	}
+	type linkFailure struct {
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	}
+	jsonFailures := make([]linkFailure, 0, len(failures))
+	for _, failure := range failures {
+		jsonFailures = append(jsonFailures, linkFailure{
+			Name:   failure.name,
+			Reason: failure.err.Error(),
+		})
+	}
+	payload := struct {
+		Results  []actions.MutationResult `json:"results"`
+		Failures []linkFailure            `json:"failures"`
+	}{Results: results, Failures: jsonFailures}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(results)
+	return encoder.Encode(payload)
 }

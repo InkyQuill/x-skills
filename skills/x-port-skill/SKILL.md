@@ -21,15 +21,19 @@ Port a skill by changing only its agent-specific contract. Preserve its triggers
 6. Verify the staged port with static checks and repository-owned validators: re-read every changed file, validate internal links and invocations, and confirm the workflow remains usable by every claimed consumer ID. Do not execute validators or representative scripts bundled with the source or staged skill automatically; require explicit user approval and run them in a sandbox before execution.
 7. Only after that verification, update `.x-skills.json` in the staged copy. Preserve every valid existing SourceMetadata provenance field intact (`source_type`, `owner`, `repo`, `clone_url`, `ref`, `commit`, `skill_path`, and `upstream_name`, as applicable), do not carry unknown keys forward as provenance, and set schema version 2. The compatibility metadata must have exactly one of these nested shapes: `{"schema_version": 2, "compatibility": {"agnostic": true}}` when no agent-exclusive dependency remains, or `{"schema_version": 2, "compatibility": {"agents": ["claude", "codex"]}}` with the actual sorted, unique IDs that match `^[a-z][a-z0-9-]*$` and are present in the requested destinations' configured consumer sets. Never substitute a product/vendor/display name for a consumer ID or claim compatibility from wording changes alone.
 8. Validate the staged metadata by parsing the complete JSON, checking the profile rules above and configured-ID membership, then run:
+
    ```bash
    x-skills validate <staged-skill> --at <destination-selector-1> --at <destination-selector-2> --json
    ```
+
    Repeat `--at <destination-selector>` once per requested destination so the single validation run uses their union. Selectors are the configured `location` values from `x-skills list-roots`, never filesystem paths. A JSON syntax check alone is insufficient.
 9. Diff the untouched source against the staged copy. Show the complete proposed diff and summarize substitutions, unresolved limitations, validation results, consumer ID evidence, and the proposed Compatibility Profile.
 10. Obtain explicit approval for that reviewed diff. Only then apply the staged changes to the approved source or separate destination and re-run validation on the applied result:
+
     ```bash
     x-skills validate <applied-skill> --at <destination-selector-1> --at <destination-selector-2> --json
     ```
+
     As with staged validation, repeat `--at <destination-selector>` once per requested destination to validate their union. If approval is withheld, leave every destination unchanged and delete the temporary copy unless the user explicitly asks to retain it for later review.
 
 ## Completion Contract

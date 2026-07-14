@@ -128,6 +128,8 @@ func reconciledSkill(cfg config.Config, identity, activePath, status string) (Sk
 	}
 	skill.Source.Path = meta.SkillPath
 	switch meta.SourceType {
+	case "":
+		return skill, nil
 	case remote.SourceTypeGitHub:
 		if meta.Owner == "" || meta.Repo == "" || meta.SkillPath == "" {
 			return Skill{Name: identity, Source: Source{Type: SourceArchive}, Fingerprint: fp}, nil

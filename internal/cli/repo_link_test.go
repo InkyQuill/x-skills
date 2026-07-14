@@ -247,21 +247,70 @@ func TestLinkJSONReportsStableStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var results []struct {
-		Name   string
-		Status string
+	var payload struct {
+		Results []struct {
+			Name   string
+			Status string
+		}
+		Failures []struct {
+			Name   string
+			Reason string
+		}
 	}
-	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal link JSON: %v\n%s", err, out.String())
 	}
-	if len(results) != 2 {
-		t.Fatalf("results = %#v, want two", results)
+	if len(payload.Results) != 2 {
+		t.Fatalf("results = %#v, want two", payload.Results)
 	}
-	if results[0].Name != "first-skill" || results[0].Status != "linked" {
-		t.Fatalf("first result = %#v", results[0])
+	if payload.Results[0].Name != "first-skill" || payload.Results[0].Status != "linked" {
+		t.Fatalf("first result = %#v", payload.Results[0])
 	}
-	if results[1].Name != "second-skill" || results[1].Status != "already_linked" {
-		t.Fatalf("second result = %#v", results[1])
+	if payload.Results[1].Name != "second-skill" || payload.Results[1].Status != "already_linked" {
+		t.Fatalf("second result = %#v", payload.Results[1])
+	}
+	if len(payload.Failures) != 0 {
+		t.Fatalf("failures = %#v, want empty", payload.Failures)
+	}
+}
+
+func TestLinkJSONIncludesFailuresAfterSuccessfulResults(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	cfg := config.Default(project, home)
+	makeSkill(t, cfg.ArchiveSkillsRoot(), "found", "Found.")
+
+	var out bytes.Buffer
+	err := Execute(
+		[]string{"--home", home, "--project-root", project, "--json", "link", "found", "missing", "--at", "project:codex"},
+		strings.NewReader(""),
+		&out,
+		&bytes.Buffer{},
+	)
+	if err == nil {
+		t.Fatal("link error = nil, want partial failure")
+	}
+	var payload struct {
+		Results []struct {
+			Name   string
+			Status string
+		}
+		Failures []struct {
+			Name   string
+			Reason string
+		}
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal link JSON: %v\n%s", err, out.String())
+	}
+	if len(payload.Results) != 1 || payload.Results[0].Name != "found" {
+		t.Fatalf("results = %#v, want successful found result", payload.Results)
+	}
+	if len(payload.Failures) != 1 || payload.Failures[0].Name != "missing" {
+		t.Fatalf("failures = %#v, want missing failure", payload.Failures)
+	}
+	if !strings.Contains(payload.Failures[0].Reason, `repo skill "missing" not found`) {
+		t.Fatalf("failure reason = %q", payload.Failures[0].Reason)
 	}
 }
 

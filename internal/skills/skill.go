@@ -86,11 +86,6 @@ func parseFrontmatter(content string) (string, string) {
 	return document.DeclaredName, document.Description
 }
 
-func frontmatterBlock(content string) (string, bool) {
-	frontmatter, _, ok := documentParts(content)
-	return frontmatter, ok
-}
-
 func documentParts(content string) (string, string, bool) {
 	content = strings.TrimPrefix(content, "\ufeff")
 	if !strings.HasPrefix(content, "---") {

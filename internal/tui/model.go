@@ -442,7 +442,8 @@ func (m *Model) openPreviewModal() {
 	case ViewActive:
 		groups := m.visibleActiveGroups()
 		if m.cursor >= 0 && m.cursor < len(groups) && len(groups[m.cursor].Members) > 0 {
-			m.modal = newPreviewModal("Preview: "+groups[m.cursor].Identity, resolvedSkillPath(groups[m.cursor].Members[0].Path))
+			primary := primaryActiveMember(groups[m.cursor].Members)
+			m.modal = newPreviewModal("Preview: "+primary.Identity, resolvedSkillPath(primary.Path))
 		}
 	case ViewRepo:
 		skills := m.visibleRepoSkills()

@@ -944,6 +944,21 @@ func commandMessage[T tea.Msg](t *testing.T, cmd tea.Cmd) T {
 	return zero
 }
 
+func writeConflictingSourceMetadata(
+	t *testing.T,
+	path, owner, repoName, skillPath string,
+) {
+	t.Helper()
+	if err := remote.WriteSourceMetadata(path, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      owner,
+		Repo:       repoName,
+		SkillPath:  skillPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
@@ -953,14 +968,9 @@ func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/react-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/react-coder",
+	)
 	m := New(cfg)
 	m.setView(ViewInstall)
 	m.width = 120
@@ -1713,7 +1723,15 @@ func TestInstallPreviewErrorStaysInActionableModal(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	updated, _ = m.Update(cmd().(remotePreviewMsg))
+	if cmd == nil {
+		t.Fatal("preview command is nil")
+	}
+	msg := cmd()
+	previewMsg, ok := msg.(remotePreviewMsg)
+	if !ok {
+		t.Fatalf("preview command message = %T, want remotePreviewMsg", msg)
+	}
+	updated, _ = m.Update(previewMsg)
 	m = mustModel(t, updated)
 	if m.modal == nil || m.previewLoading {
 		t.Fatalf("modal=%T previewLoading=%v, want open completed modal", m.modal, m.previewLoading)
@@ -1967,13 +1985,14 @@ func TestInstallPreviewIgnoresStaleAndNonInstallMessages(t *testing.T) {
 		t.Fatalf("status changed for stale preview: %q", m.status)
 	}
 
-	m.setView(ViewActive)
+	previewModal := m.modal
+	m.view = ViewActive
 	updated, _ = m.Update(remotePreviewMsg{token: 2, result: remote.PreviewResult{
 		RequestedName: "skill", SkillDir: skillDir, SkillPath: filepath.Join(skillDir, "SKILL.md"),
 	}})
 	m = mustModel(t, updated)
-	if m.modal != nil {
-		t.Fatal("non-install preview opened modal")
+	if m.modal != previewModal || !m.previewLoading {
+		t.Fatalf("non-install preview altered modal: modal=%T loading=%v", m.modal, m.previewLoading)
 	}
 	if m.status != "before" {
 		t.Fatalf("status changed outside install view: %q", m.status)
@@ -3395,14 +3414,9 @@ func TestInstallArchiveOnlyNameConflictReplaceArchive(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3472,14 +3486,9 @@ func TestInstallArchiveOnlyNameConflictRenameExisting(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3534,14 +3543,9 @@ func TestInstallArchiveOnlyNameConflictRenameExistingRollsBackOnApplyFailure(t *
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	originalApplyArchive := installApplyArchive
 	installApplyArchive = func(remote.AddRequest) (remote.AddResult, error) {
@@ -3597,14 +3601,9 @@ func TestInstallArchiveOnlyNameConflictRenameIncoming(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3734,14 +3733,9 @@ func TestInstallAndUseNameConflictReplaceThenContinuesToDestinations(t *testing.
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3794,14 +3788,9 @@ func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/react-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/react-coder",
+	)
 	m := New(cfg)
 	m.setView(ViewInstall)
 	m.width = 120
@@ -3911,14 +3900,9 @@ func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) 
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/react-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/react-coder",
+	)
 	m := New(cfg)
 	m.setView(ViewInstall)
 	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
@@ -4251,14 +4235,9 @@ func TestInstallAndUseNameConflictEscClearsPendingUse(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -4662,14 +4641,9 @@ func TestInstallArchiveOnlyRechecksStaleRowNameConflictWithoutReplacingArchive(t
 	}
 
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	msg := cmd().(installArchiveMsg)
 	updated, _ = m.Update(msg)
@@ -4723,14 +4697,9 @@ func TestInstallArchiveOnlyAsyncConflictRefreshesStaleRowState(t *testing.T) {
 	}
 
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	msg := cmd().(installArchiveMsg)
 	updated, _ = m.Update(msg)
@@ -4747,14 +4716,9 @@ func TestInstallArchiveOnlyAsyncConflictRefreshesStaleRowState(t *testing.T) {
 func TestInstallArchiveOnlyAsyncConflictUpdatesOnlyMatchingDuplicateSource(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Archived help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "owner-two",
-		Repo:       "skills-two",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "owner-two", "skills-two", "skills/svelte-coder",
+	)
 
 	first := remote.SearchResult{
 		Name:  "svelte-coder",

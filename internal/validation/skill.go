@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/InkyQuill/x-skills/internal/skills"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,7 +26,6 @@ func validateSkill(skillDir string, consumers []string, checkConsumers bool) []D
 		return append(diagnostics, validateSource(skillDir, consumers, checkConsumers)...)
 	}
 
-	document, parseErr := skills.ParseDocument(data)
 	frontmatter, body, hasFrontmatter := portableDocumentParts(string(data))
 	if !hasFrontmatter {
 		message := "SKILL.md must contain valid YAML frontmatter"
@@ -54,9 +52,6 @@ func validateSkill(skillDir string, consumers []string, checkConsumers bool) []D
 	}
 
 	diagnostics := []Diagnostic{}
-	if parseErr == nil {
-		body = document.Body
-	}
 	name, isNameString := fields["name"].(string)
 	if !isNameString || strings.TrimSpace(name) == "" {
 		diagnostics = append(diagnostics, Diagnostic{

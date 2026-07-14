@@ -265,6 +265,30 @@ func TestActiveEnterAndPreviewKeyOpenPreviewModal(t *testing.T) {
 	}
 }
 
+func TestActivePreviewUsesManagedPrimaryMember(t *testing.T) {
+	cfg := config.Default(t.TempDir(), t.TempDir())
+	unmanagedPath := makeSkill(t, t.TempDir(), "shared", "Shared.")
+	managedPath := makeSkill(t, t.TempDir(), "shared", "Shared.")
+	m := New(cfg)
+	m.active = groupActiveSkills([]actions.ActiveSkill{
+		{Identity: "unmanaged-name", Path: unmanagedPath, Status: actions.StatusUnmanaged},
+		{Identity: "managed-name", Path: managedPath, Status: actions.StatusManaged},
+	})
+
+	m.openPreviewModal()
+	preview, ok := m.modal.(*previewModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *previewModal", m.modal)
+	}
+	if preview.title != "Preview: managed-name" {
+		t.Fatalf("title = %q, want managed primary identity", preview.title)
+	}
+	wantPath := filepath.Join(managedPath, "SKILL.md")
+	if preview.path != wantPath {
+		t.Fatalf("path = %q, want %q", preview.path, wantPath)
+	}
+}
+
 func TestRepoEnterAndPreviewKeyOpenPreviewModal(t *testing.T) {
 	home, err := os.MkdirTemp("", "xskills-archive-home-")
 	if err != nil {

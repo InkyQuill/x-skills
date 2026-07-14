@@ -8,8 +8,24 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/InkyQuill/x-skills/internal/actions"
 	"github.com/InkyQuill/x-skills/internal/config"
 )
+
+func TestFilterMatchesDeclaredName(t *testing.T) {
+	m := Model{
+		filter: newFilterState(),
+		active: []ActiveGroup{{
+			Identity:     "composition-patterns",
+			DeclaredName: "vercel-composition-patterns",
+			Status:       actions.StatusUnmanaged,
+		}},
+	}
+	m.filter.Query = "vercel-composition"
+	if got := m.visibleActiveGroups(); len(got) != 1 {
+		t.Fatalf("visible groups = %d, want declared-name match", len(got))
+	}
+}
 
 func TestFilterNarrowsActiveRowsAndExcludesFullPaths(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
@@ -184,11 +200,11 @@ func TestFilterCursorAndActionsUseFilteredActiveRows(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 	if m.modal == nil {
-		t.Fatal("expected detail modal")
+		t.Fatal("expected preview modal")
 	}
-	detail := m.modal.View(100, 30, m)
-	if !strings.Contains(detail, "Detail: target-skill") {
-		t.Fatalf("detail opened wrong skill:\n%s", detail)
+	preview := m.modal.View(100, 30, m)
+	if !strings.Contains(preview, "Preview: target-skill") || !strings.Contains(preview, "Target.") {
+		t.Fatalf("preview opened wrong skill:\n%s", preview)
 	}
 }
 

@@ -71,6 +71,34 @@ func TestDocumentationDescribesSupportedDistribution(t *testing.T) {
 		"docs/tui.md":           readFile(t, "docs/tui.md"),
 		"docs/remote-skills.md": readFile(t, "docs/remote-skills.md"),
 	}
+	for _, required := range []string{
+		"x-skills validate PATH... [--at LOCATION...] [--json]",
+		"x-skills preview OWNER/REPO SKILL [--lines N] [--json]",
+		"Filesystem identity comes from the active entry or archive directory; " +
+			"the declared frontmatter name is display and filter metadata only.",
+		"already_linked",
+		"Schema-v1 legacy metadata remains accepted.",
+		"Complete remote source provenance is required only for schema v2 when any source identity is present.",
+		"Validation input and skill diagnostics are aggregated before the report is written.",
+		"Configuration loading and `--at` selector resolution happen before validation; " +
+			"failures return nonzero without a validation report.",
+	} {
+		if !strings.Contains(maintainedDocs["docs/cli.md"], required) {
+			t.Errorf("docs/cli.md must contain %q", required)
+		}
+	}
+	for _, required := range []string{
+		"On Active and Repo, Enter and `p` open the local `SKILL.md` preview.",
+		"Doctor Enter opens the focused issue's detail modal.",
+		"Search Enter opens an animated loading preview immediately, before checkout completes.",
+		"Search preview errors remain in the modal as actionable errors.",
+		"Escape during Search preview loading cancels quietly and closes the modal.",
+		"The checkout cache is reused only for the same repository and ref.",
+	} {
+		if !strings.Contains(maintainedDocs["docs/tui.md"], required) {
+			t.Errorf("docs/tui.md must contain %q", required)
+		}
+	}
 	for _, link := range []string{
 		"[CLI guide](docs/cli.md)",
 		"[TUI guide](docs/tui.md)",

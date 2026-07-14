@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+func TestParseDocumentDoesNotInventDeclaredName(t *testing.T) {
+	document, err := ParseDocument([]byte("---\ndescription: usable\n---\nbody\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document.DeclaredName != "" {
+		t.Fatalf("DeclaredName = %q, want empty", document.DeclaredName)
+	}
+	if document.Description != "usable" {
+		t.Fatalf("Description = %q, want usable", document.Description)
+	}
+	if document.Body != "body\n" {
+		t.Fatalf("Body = %q, want body", document.Body)
+	}
+}
+
 func TestReadSkillDescription(t *testing.T) {
 	dir := t.TempDir()
 	skill := filepath.Join(dir, "react-state")

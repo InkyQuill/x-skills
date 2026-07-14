@@ -161,7 +161,7 @@ func activeInspectorSections(m Model) []inspectorSection {
 	}
 
 	return []inspectorSection{{
-		Title: group.Name,
+		Title: group.Identity,
 		Rows:  rows,
 	}}
 }
@@ -360,7 +360,7 @@ func renderActiveRows(m Model, width int) []string {
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderStatusDotWithBackground(m, group.Status, background)
 				}},
-				{text: " " + group.Name + " "},
+				{text: " " + group.Identity + " "},
 				{render: func(background lipgloss.TerminalColor) string {
 					return renderRootChips(m.symbols, group.Chips, background)
 				}},
@@ -689,7 +689,7 @@ func commandPalette(m Model) string {
 	switch m.view {
 	case ViewRepo:
 		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
-			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "enter", Unicode: "↵", Label: "preview"},
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
 			{ASCII: "l", Label: "link"},
@@ -724,7 +724,7 @@ func commandPalette(m Model) string {
 		})
 	default:
 		return tuiui.FooterLine(m.opts.ASCII, kbdStyle, mutedStyle, []tuiui.Shortcut{
-			{ASCII: "enter", Unicode: "↵", Label: "details"},
+			{ASCII: "enter", Unicode: "↵", Label: "preview"},
 			{ASCII: "/", Label: "filter"},
 			{ASCII: "p", Label: "preview"},
 			{ASCII: "m", Label: "migrate"},

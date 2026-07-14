@@ -74,7 +74,7 @@ func DiscoverContext(ctx context.Context, cfg config.Config, destinations []root
 		if err != nil {
 			return nil, fmt.Errorf("fingerprint active skill %q: %w", occurrence.Path, err)
 		}
-		name := filepath.Base(occurrence.Path)
+		name := occurrence.Identity
 		variants := grouped[name]
 		if variants == nil {
 			variants = make(map[string]*Candidate)

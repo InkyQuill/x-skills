@@ -49,8 +49,8 @@ func TestScanActiveStatusesAndBrokenReasons(t *testing.T) {
 	status := map[string]string{}
 	reason := map[string]string{}
 	for _, skill := range skills {
-		status[skill.Name] = skill.Status
-		reason[skill.Name] = skill.Reason
+		status[skill.Identity] = skill.Status
+		reason[skill.Identity] = skill.Reason
 	}
 	if status["managed-codex"] != StatusManaged {
 		t.Fatalf("managed-codex status = %q", status["managed-codex"])
@@ -63,6 +63,58 @@ func TestScanActiveStatusesAndBrokenReasons(t *testing.T) {
 	}
 	if reason["broken-agents"] == "" {
 		t.Fatal("missing broken reason")
+	}
+}
+
+func TestScanKeepsIdentitySeparateFromDeclaredName(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	root := cfg.MustActiveRoot("project", "agents")
+	dir := filepath.Join(root, "composition-patterns")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: vercel-composition-patterns\ndescription: Compose.\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ScanActive(cfg, ScanFilter{Scope: "project", Target: "agents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(skills) = %d, want 1", len(got))
+	}
+	if got[0].Identity != "composition-patterns" {
+		t.Fatalf("Identity = %q, want composition-patterns", got[0].Identity)
+	}
+	if got[0].DeclaredName != "vercel-composition-patterns" {
+		t.Fatalf("DeclaredName = %q, want vercel-composition-patterns", got[0].DeclaredName)
+	}
+}
+
+func TestScanMalformedDocumentRetainsIdentity(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default(t.TempDir(), home)
+	root := cfg.MustActiveRoot("project", "agents")
+	dir := filepath.Join(root, "malformed")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: [\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ScanActive(cfg, ScanFilter{Scope: "project", Target: "agents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(skills) = %d, want 1", len(got))
+	}
+	if got[0].Identity != "malformed" || got[0].DeclaredName != "" {
+		t.Fatalf("skill = %#v, want basename identity and empty declared name", got[0])
 	}
 }
 

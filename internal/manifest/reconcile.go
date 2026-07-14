@@ -75,18 +75,18 @@ func planLocalReconciliation(cfg config.Config, old, recommended Manifest) (Mani
 		if occurrence.Status == actions.StatusBroken {
 			continue
 		}
-		name := occurrence.Name
-		if _, excluded := recommendedNames[name]; excluded {
+		identity := occurrence.Identity
+		if _, excluded := recommendedNames[identity]; excluded {
 			continue
 		}
-		skill, err := reconciledSkill(cfg, name, occurrence.Path, occurrence.Status)
+		skill, err := reconciledSkill(cfg, identity, occurrence.Path, occurrence.Status)
 		if err != nil {
 			return Manifest{}, err
 		}
-		if previous, exists := observed[name]; exists && !sameIdentity(previous, skill) {
-			return Manifest{}, fmt.Errorf("project skill %q has divergent identities across Skills Folders; reconcile the active copies before retrying", name)
+		if previous, exists := observed[identity]; exists && !sameIdentity(previous, skill) {
+			return Manifest{}, fmt.Errorf("project skill %q has divergent identities across Skills Folders; reconcile the active copies before retrying", identity)
 		}
-		observed[name] = skill
+		observed[identity] = skill
 	}
 	for _, skill := range observed {
 		retained[skill.Name] = skill
@@ -101,22 +101,22 @@ func planLocalReconciliation(cfg config.Config, old, recommended Manifest) (Mani
 	return next, nil
 }
 
-func reconciledSkill(cfg config.Config, name, activePath, status string) (Skill, error) {
+func reconciledSkill(cfg config.Config, identity, activePath, status string) (Skill, error) {
 	sourcePath := activePath
 	if status == actions.StatusManaged {
-		sourcePath = filepath.Join(cfg.ArchiveSkillsRoot(), name)
+		sourcePath = filepath.Join(cfg.ArchiveSkillsRoot(), identity)
 	}
 	fp, err := fingerprint.Directory(sourcePath)
 	if err != nil {
-		return Skill{}, fmt.Errorf("fingerprint skill %q: %w", name, err)
+		return Skill{}, fmt.Errorf("fingerprint skill %q: %w", identity, err)
 	}
-	skill := Skill{Name: name, Source: Source{Type: SourceArchive}, Fingerprint: fp}
+	skill := Skill{Name: identity, Source: Source{Type: SourceArchive}, Fingerprint: fp}
 	if status != actions.StatusManaged {
 		return skill, nil
 	}
 	meta, ok, err := remote.ReadSourceMetadata(sourcePath)
 	if err != nil {
-		return Skill{}, fmt.Errorf("read source metadata for %q: %w", name, err)
+		return Skill{}, fmt.Errorf("read source metadata for %q: %w", identity, err)
 	}
 	if !ok {
 		return skill, nil
@@ -128,20 +128,22 @@ func reconciledSkill(cfg config.Config, name, activePath, status string) (Skill,
 	}
 	skill.Source.Path = meta.SkillPath
 	switch meta.SourceType {
+	case "":
+		return skill, nil
 	case remote.SourceTypeGitHub:
 		if meta.Owner == "" || meta.Repo == "" || meta.SkillPath == "" {
-			return Skill{Name: name, Source: Source{Type: SourceArchive}, Fingerprint: fp}, nil
+			return Skill{Name: identity, Source: Source{Type: SourceArchive}, Fingerprint: fp}, nil
 		}
 		skill.Source.Type = SourceGitHub
 		skill.Source.Repository = meta.Owner + "/" + meta.Repo
 	case remote.SourceTypeGit:
 		if meta.CloneURL == "" || meta.SkillPath == "" {
-			return Skill{Name: name, Source: Source{Type: SourceArchive}, Fingerprint: fp}, nil
+			return Skill{Name: identity, Source: Source{Type: SourceArchive}, Fingerprint: fp}, nil
 		}
 		skill.Source.Type = SourceGit
 		skill.Source.Repository = meta.CloneURL
 	default:
-		return Skill{}, fmt.Errorf("skill %q has unsupported source type %q", name, meta.SourceType)
+		return Skill{}, fmt.Errorf("skill %q has unsupported source type %q", identity, meta.SourceType)
 	}
 	return skill, nil
 }

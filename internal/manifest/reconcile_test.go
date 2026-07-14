@@ -39,6 +39,26 @@ func TestReconcileLocalUsesUnionOfProjectRootsAndExcludesGlobalAndRecommended(t 
 	}
 }
 
+func TestReconcileLocalUsesFilesystemIdentityWhenDeclaredNameDiffers(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeReconcileArchive(t, cfg, "composition-patterns", nil)
+	archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), "composition-patterns")
+	content := []byte("---\nname: vercel-composition-patterns\ndescription: test\n---\n")
+	if err := os.WriteFile(filepath.Join(archivePath, "SKILL.md"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkReconcileSkill(t, cfg, config.ScopeProject, config.TargetAgents, "composition-patterns")
+
+	result, err := ReconcileLocal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Skills) != 1 || result.Skills[0].Name != "composition-patterns" {
+		t.Fatalf("skills = %#v, want composition-patterns", result.Skills)
+	}
+}
+
 func TestReconcileLocalUsesCommitWhenSourceRefIsEmpty(t *testing.T) {
 	project, home := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)
@@ -56,6 +76,30 @@ func TestReconcileLocalUsesCommitWhenSourceRefIsEmpty(t *testing.T) {
 	}
 	if len(got.Skills) != 1 || got.Skills[0].Source.Ref != "abc123" {
 		t.Fatalf("skills = %#v, want commit fallback ref", got.Skills)
+	}
+}
+
+func TestReconcileLocalAcceptsCompatibilityOnlyMetadata(t *testing.T) {
+	project, home := t.TempDir(), t.TempDir()
+	cfg := config.Default(project, home)
+	makeReconcileArchive(t, cfg, "portable", &remote.SourceMetadata{
+		Compatibility: &remote.CompatibilityProfile{Agnostic: true},
+	})
+	linkReconcileSkill(t, cfg, config.ScopeProject, config.TargetAgents, "portable")
+
+	result, err := ReconcileLocal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Skills) != 1 {
+		t.Fatalf("skills = %#v, want one", result.Skills)
+	}
+	got := result.Skills[0]
+	if got.Source.Type != SourceArchive || got.Fingerprint == "" {
+		t.Fatalf("skill = %#v, want fingerprinted archive source", got)
+	}
+	if got.Compatibility == nil || !got.Compatibility.Agnostic {
+		t.Fatalf("compatibility = %#v, want agnostic", got.Compatibility)
 	}
 }
 

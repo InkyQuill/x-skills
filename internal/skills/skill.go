@@ -15,6 +15,33 @@ type Info struct {
 	Description string
 }
 
+type Document struct {
+	DeclaredName string
+	Description  string
+	Body         string
+}
+
+func ParseDocument(data []byte) (Document, error) {
+	frontmatter, body, ok := documentParts(string(data))
+	if !ok {
+		return Document{Body: string(data)}, nil
+	}
+
+	var fields struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &fields); err != nil {
+		return Document{}, fmt.Errorf("parse skill metadata: %w", err)
+	}
+
+	return Document{
+		DeclaredName: fields.Name,
+		Description:  fields.Description,
+		Body:         body,
+	}, nil
+}
+
 func Read(path string) (Info, error) {
 	skillPath := filepath.Join(path, "SKILL.md")
 	data, err := os.ReadFile(skillPath)
@@ -22,7 +49,11 @@ func Read(path string) (Info, error) {
 		return Info{}, fmt.Errorf("read skill metadata: %w", err)
 	}
 
-	name, description := parseFrontmatter(string(data))
+	document, err := ParseDocument(data)
+	if err != nil {
+		return Info{}, err
+	}
+	name := document.DeclaredName
 	if name == "" {
 		name = filepath.Base(path)
 	}
@@ -30,7 +61,7 @@ func Read(path string) (Info, error) {
 	return Info{
 		Name:        name,
 		Path:        path,
-		Description: description,
+		Description: document.Description,
 	}, nil
 }
 
@@ -48,26 +79,17 @@ func IsDir(path string) bool {
 }
 
 func parseFrontmatter(content string) (string, string) {
-	frontmatter, ok := frontmatterBlock(content)
-	if !ok {
+	document, err := ParseDocument([]byte(content))
+	if err != nil {
 		return "", ""
 	}
-
-	var fields struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-	}
-	if err := yaml.Unmarshal([]byte(frontmatter), &fields); err != nil {
-		return "", ""
-	}
-
-	return fields.Name, fields.Description
+	return document.DeclaredName, document.Description
 }
 
-func frontmatterBlock(content string) (string, bool) {
+func documentParts(content string) (string, string, bool) {
 	content = strings.TrimPrefix(content, "\ufeff")
 	if !strings.HasPrefix(content, "---") {
-		return "", false
+		return "", "", false
 	}
 	afterStart := content[3:]
 	if strings.HasPrefix(afterStart, "\r\n") {
@@ -75,18 +97,18 @@ func frontmatterBlock(content string) (string, bool) {
 	} else if strings.HasPrefix(afterStart, "\n") {
 		afterStart = afterStart[1:]
 	} else {
-		return "", false
+		return "", "", false
 	}
 	for _, marker := range []string{"\r\n---\r\n", "\r\n---\n", "\n---\r\n", "\n---\n"} {
-		if before, _, ok := strings.Cut(afterStart, marker); ok {
-			return before, true
+		if before, after, ok := strings.Cut(afterStart, marker); ok {
+			return before, after, true
 		}
 	}
 	if strings.HasSuffix(afterStart, "\r\n---") {
-		return strings.TrimSuffix(afterStart, "\r\n---"), true
+		return strings.TrimSuffix(afterStart, "\r\n---"), "", true
 	}
 	if strings.HasSuffix(afterStart, "\n---") {
-		return strings.TrimSuffix(afterStart, "\n---"), true
+		return strings.TrimSuffix(afterStart, "\n---"), "", true
 	}
-	return "", false
+	return "", "", false
 }

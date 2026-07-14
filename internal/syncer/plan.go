@@ -354,7 +354,7 @@ func validateSelectedCandidates(cfg config.Config, candidates []Candidate, desti
 		}
 		archivePath := filepath.Join(cfg.ArchiveSkillsRoot(), candidate.Name)
 		for _, occurrence := range candidate.Occurrences {
-			if occurrence.Name != candidate.Name || filepath.Base(filepath.Clean(occurrence.Path)) != candidate.Name {
+			if occurrence.Identity != candidate.Name || filepath.Base(filepath.Clean(occurrence.Path)) != candidate.Name {
 				return fmt.Errorf("occurrence %q does not match candidate %q", occurrence.Path, candidate.Name)
 			}
 			resolved, err := filepath.EvalSymlinks(occurrence.Path)

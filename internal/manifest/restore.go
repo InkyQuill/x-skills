@@ -426,7 +426,7 @@ func planRestoreRemovals(cfg config.Config, destinations []roots.ActiveRoot, des
 			if filepath.Clean(skill.Root.Path) != filepath.Clean(destination.Path) {
 				continue
 			}
-			occurrenceName := filepath.Base(skill.Path)
+			occurrenceName := skill.Identity
 			if _, keep := desired[occurrenceName]; keep {
 				continue
 			}

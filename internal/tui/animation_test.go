@@ -118,7 +118,7 @@ func animationRenderModel(opts Options) Model {
 			ViewInstall: {},
 		},
 		repo: []repo.Skill{{
-			Name:        "zen-of-go",
+			Identity:    "zen-of-go",
 			Description: "Go style guide",
 		}},
 		repoUsage: map[string][]string{"zen-of-go": {".Ag"}},

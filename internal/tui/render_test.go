@@ -82,11 +82,11 @@ func TestActiveViewRendersConfiguredRootLabel(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 	if m.modal == nil {
-		t.Fatal("detail modal is nil")
+		t.Fatal("preview modal is nil")
 	}
-	detail := plain(m.modal.View(120, 40, m))
-	if !strings.Contains(detail, ".Oc") {
-		t.Fatalf("active detail missing configured label:\n%s", detail)
+	preview := plain(m.modal.View(120, 40, m))
+	if !strings.Contains(preview, "Preview: zen-of-go") || !strings.Contains(preview, "Go style.") {
+		t.Fatalf("active preview missing skill content:\n%s", preview)
 	}
 }
 
@@ -131,7 +131,7 @@ func TestStatusRowsDistinguishableWithoutColor(t *testing.T) {
 				m.height = 30
 				m.active = []ActiveGroup{{
 					ID:          "active:same-skill",
-					Name:        "same-skill",
+					Identity:    "same-skill",
 					Status:      status,
 					Description: "Same description.",
 					Reason:      "Same description.",
@@ -161,10 +161,10 @@ func TestActiveInspectorShowsBrokenReason(t *testing.T) {
 	m.height = 30
 	m.active = []ActiveGroup{
 		{
-			ID:     "active:broken-skill",
-			Name:   "broken-skill",
-			Status: actions.StatusBroken,
-			Reason: "symlink target missing",
+			ID:       "active:broken-skill",
+			Identity: "broken-skill",
+			Status:   actions.StatusBroken,
+			Reason:   "symlink target missing",
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestActiveInspectorUsesKeyValueRows(t *testing.T) {
 	m.active = []ActiveGroup{
 		{
 			ID:          "active:zen-of-go",
-			Name:        "zen-of-go",
+			Identity:    "zen-of-go",
 			Aliases:     []string{"go", "pro"},
 			Status:      actions.StatusManaged,
 			Description: "Go style.",
@@ -320,7 +320,7 @@ func TestRepoFooterShowsRepoActions(t *testing.T) {
 	m.setView(ViewRepo)
 
 	view := plain(m.View())
-	want := "↵ details  / filter  p preview  l link  r recommend  u unlink  d delete  c clear  ^R refresh"
+	want := "↵ preview  / filter  p preview  l link  r recommend  u unlink  d delete  c clear  ^R refresh"
 	if !strings.Contains(view, want) {
 		t.Fatalf("repo footer missing repo actions:\n%s", view)
 	}

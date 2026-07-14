@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/InkyQuill/x-skills/internal/actions"
@@ -119,7 +118,7 @@ func unlinkNamesWithOptions(
 			continue
 		}
 		result, err := actions.Unlink(cfg, actions.UnlinkRequest{
-			Name:            filepath.Base(skill.Path),
+			Name:            skill.Identity,
 			Scope:           skill.Root.Scope,
 			Target:          skill.Root.Target,
 			Confirmed:       true,

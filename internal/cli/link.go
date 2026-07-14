@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -25,8 +26,22 @@ func newLinkCommand(rootOptions *options) *cobra.Command {
 			}
 
 			results, failures := linkNames(cmd, rootOptions, args, opts)
+			if rootOptions.json {
+				if err := writeLinkJSON(cmd.OutOrStdout(), results, failures); err != nil {
+					return err
+				}
+				if len(failures) > 0 {
+					return fmt.Errorf("link failed for %d skill(s)", len(failures))
+				}
+				return nil
+			}
 			if len(results) == 1 && len(failures) == 0 {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "linked: %s\n", results[0].Name)
+				_, _ = fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"%s: %s\n",
+					linkHumanStatus(results[0].Status),
+					results[0].Name,
+				)
 				return nil
 			}
 			if len(args) == 1 && len(failures) == 1 && len(results) == 0 {
@@ -107,14 +122,53 @@ func writeLinkSummary(
 	failures []mutationFailure,
 ) {
 	_, _ = fmt.Fprintln(out, "Summary:")
-	if len(results) > 0 {
-		names := make([]string, 0, len(results))
+	for _, status := range []string{actions.ResultLinked, actions.ResultAlreadyLinked} {
+		names := make([]string, 0)
 		for _, result := range results {
-			names = append(names, result.Name)
+			if result.Status == status {
+				names = append(names, result.Name)
+			}
 		}
-		_, _ = fmt.Fprintf(out, "linked: %s\n", strings.Join(names, ", "))
+		if len(names) > 0 {
+			_, _ = fmt.Fprintf(out, "%s: %s\n", linkHumanStatus(status), strings.Join(names, ", "))
+		}
 	}
 	for _, failure := range failures {
 		_, _ = fmt.Fprintf(out, "failed: %s (%v)\n", failure.name, failure.err)
 	}
+}
+
+func linkHumanStatus(status string) string {
+	if status == actions.ResultAlreadyLinked {
+		return "already linked"
+	}
+	return status
+}
+
+func writeLinkJSON(
+	out io.Writer,
+	results []actions.MutationResult,
+	failures []mutationFailure,
+) error {
+	if results == nil {
+		results = []actions.MutationResult{}
+	}
+	type linkFailure struct {
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	}
+	jsonFailures := make([]linkFailure, 0, len(failures))
+	for _, failure := range failures {
+		jsonFailures = append(jsonFailures, linkFailure{
+			Name:   failure.name,
+			Reason: failure.err.Error(),
+		})
+	}
+	payload := struct {
+		Results  []actions.MutationResult `json:"results"`
+		Failures []linkFailure            `json:"failures"`
+	}{Results: results, Failures: jsonFailures}
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(payload)
 }

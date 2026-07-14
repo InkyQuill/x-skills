@@ -56,7 +56,7 @@ func (m Model) visibleActiveGroups() []ActiveGroup {
 	}
 	var groups []ActiveGroup
 	for _, group := range m.active {
-		if m.filter.matches(group.Name, group.Description, group.Status, strings.Join(group.Chips, " "), strings.Join(group.Aliases, " ")) {
+		if m.filter.matches(group.Identity, group.DeclaredName, group.Description, group.Status, strings.Join(group.Chips, " "), strings.Join(group.Aliases, " ")) {
 			groups = append(groups, group)
 		}
 	}
@@ -66,8 +66,8 @@ func (m Model) visibleActiveGroups() []ActiveGroup {
 func (m Model) visibleRepoSkills() []repoSkillView {
 	var skills []repoSkillView
 	for _, skill := range m.repo {
-		if m.filter.matches(skill.Name, skill.Description, strings.Join(m.repoUsage[skill.Name], " ")) {
-			skills = append(skills, repoSkillView{Name: skill.Name, Description: skill.Description})
+		if m.filter.matches(skill.Identity, skill.DeclaredName, skill.Description, strings.Join(m.repoUsage[skill.Identity], " ")) {
+			skills = append(skills, repoSkillView{Name: skill.Identity, Description: skill.Description})
 		}
 	}
 	return skills

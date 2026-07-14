@@ -13,13 +13,20 @@ import (
 )
 
 type Skill struct {
-	Name        string
-	Path        string
-	Description string
-	Source      *remote.SourceMetadata
+	Identity     string
+	DeclaredName string
+	Path         string
+	Description  string
+	Source       *remote.SourceMetadata
 }
 
-var readSkill = skills.Read
+var readSkill = func(path string) (skills.Document, error) {
+	data, err := os.ReadFile(filepath.Join(path, "SKILL.md"))
+	if err != nil {
+		return skills.Document{}, err
+	}
+	return skills.ParseDocument(data)
+}
 
 func List(cfg config.Config) ([]Skill, error) {
 	root := cfg.ArchiveSkillsRoot()
@@ -52,15 +59,16 @@ func List(cfg config.Config) ([]Skill, error) {
 			sourcePtr = &source
 		}
 		found = append(found, Skill{
-			Name:        entry.Name(),
-			Path:        info.Path,
-			Description: info.Description,
-			Source:      sourcePtr,
+			Identity:     entry.Name(),
+			DeclaredName: info.DeclaredName,
+			Path:         path,
+			Description:  info.Description,
+			Source:       sourcePtr,
 		})
 	}
 
 	sort.Slice(found, func(i, j int) bool {
-		return found[i].Name < found[j].Name
+		return found[i].Identity < found[j].Identity
 	})
 
 	return found, nil

@@ -944,6 +944,21 @@ func commandMessage[T tea.Msg](t *testing.T, cmd tea.Cmd) T {
 	return zero
 }
 
+func writeConflictingSourceMetadata(
+	t *testing.T,
+	path, owner, repoName, skillPath string,
+) {
+	t.Helper()
+	if err := remote.WriteSourceMetadata(path, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      owner,
+		Repo:       repoName,
+		SkillPath:  skillPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 	repoDir := makeTUITestGitRepo(t)
 	writeTUITestRemoteSkill(t, repoDir, "skills/svelte-coder", "svelte-coder", "Svelte help.")
@@ -953,9 +968,9 @@ func TestInstallArchiveBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/react-coder",
+	)
 	m := New(cfg)
 	m.setView(ViewInstall)
 	m.width = 120
@@ -1579,7 +1594,7 @@ func TestInstallEnterPreviewsRemoteSkill(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	msg := cmd().(installPreviewMsg)
+	msg := cmd().(remotePreviewMsg)
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.modal == nil {
@@ -1589,6 +1604,249 @@ func TestInstallEnterPreviewsRemoteSkill(t *testing.T) {
 	if !strings.Contains(view, "Preview: svelte-coder") || !strings.Contains(view, "Svelte help.") {
 		t.Fatalf("preview missing remote content:\n%s", view)
 	}
+}
+
+func TestInstallPreviewOpensLoadingModalSynchronously(t *testing.T) {
+	started := make(chan struct{})
+	m := installPreviewTestModel(t)
+	m.resolvePreview = func(
+		ctx context.Context,
+		_ *remote.CheckoutCache,
+		_ remote.PreviewRequest,
+	) (remote.PreviewResult, error) {
+		close(started)
+		<-ctx.Done()
+		return remote.PreviewResult{}, ctx.Err()
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("preview command is nil")
+	}
+	if !m.previewLoading {
+		t.Fatal("previewLoading = false, want true")
+	}
+	preview, ok := m.modal.(*remotePreviewModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *remotePreviewModal", m.modal)
+	}
+	view := plain(preview.View(100, 30, m))
+	for _, want := range []string{"vercel-labs/skills", "svelte-coder"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("loading preview missing %q:\n%s", want, view)
+		}
+	}
+
+	before := view
+	updated, _ = m.Update(animationTickMsg(time.Time{}))
+	m = mustModel(t, updated)
+	after := plain(m.modal.View(100, 30, m))
+	if before == after {
+		t.Fatalf("loading indicator did not animate:\n%s", after)
+	}
+
+	ascii := installPreviewTestModel(t)
+	ascii.opts.ASCII = true
+	ascii.symbols = symbolsFor(ascii.opts)
+	ascii.resolvePreview = m.resolvePreview
+	updated, _ = ascii.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	ascii = mustModel(t, updated)
+	if got := plain(ascii.modal.View(100, 30, ascii)); !strings.Contains(got, ascii.symbols.ProductMark) {
+		t.Fatalf("ASCII loading preview missing fallback indicator %q:\n%s", ascii.symbols.ProductMark, got)
+	}
+}
+
+func TestInstallPreviewCompletionTransitionsSameModal(t *testing.T) {
+	m := installPreviewTestModel(t)
+	m.resolvePreview = func(
+		context.Context,
+		*remote.CheckoutCache,
+		remote.PreviewRequest,
+	) (remote.PreviewResult, error) {
+		return remote.PreviewResult{
+			Repository:    "vercel-labs/skills",
+			RequestedName: "svelte-coder",
+			SkillPath:     "skills/svelte-coder/SKILL.md",
+			SkillMD: []byte(
+				"---\nname: svelte-coder\n---\n# Svelte\nRemote help.\n" +
+					strings.Repeat("More remote preview content.\n", 30),
+			),
+		}, nil
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	loading := m.modal
+	msg := cmd().(remotePreviewMsg)
+	updated, _ = m.Update(msg)
+	m = mustModel(t, updated)
+	if m.modal != loading {
+		t.Fatal("preview completion replaced the modal instead of transitioning it")
+	}
+	if m.previewLoading {
+		t.Fatal("previewLoading = true after completion")
+	}
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"Preview: svelte-coder", "Svelte", "Remote help."} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("completed preview missing %q:\n%s", want, view)
+		}
+	}
+	updated, _ = m.Update(keyRunes("r"))
+	m = mustModel(t, updated)
+	raw := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(raw, "raw SKILL.md") || !strings.Contains(raw, "name: svelte-coder") {
+		t.Fatalf("remote preview did not preserve raw toggle:\n%s", raw)
+	}
+	previewModal := m.modal
+	cursor := m.cursor
+	updated, _ = m.Update(keyRunes("j"))
+	m = mustModel(t, updated)
+	if m.modal != previewModal || m.cursor != cursor {
+		t.Fatalf("completed preview yielded cursor key: modal=%T cursor=%d", m.modal, m.cursor)
+	}
+	if scrolled := plain(m.modal.View(100, 30, m)); scrolled == raw {
+		t.Fatalf("completed remote preview did not scroll:\n%s", scrolled)
+	}
+}
+
+func TestInstallPreviewErrorStaysInActionableModal(t *testing.T) {
+	m := installPreviewTestModel(t)
+	m.resolvePreview = func(
+		context.Context,
+		*remote.CheckoutCache,
+		remote.PreviewRequest,
+	) (remote.PreviewResult, error) {
+		return remote.PreviewResult{}, errors.New("authentication failed")
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if cmd == nil {
+		t.Fatal("preview command is nil")
+	}
+	msg := cmd()
+	previewMsg, ok := msg.(remotePreviewMsg)
+	if !ok {
+		t.Fatalf("preview command message = %T, want remotePreviewMsg", msg)
+	}
+	updated, _ = m.Update(previewMsg)
+	m = mustModel(t, updated)
+	if m.modal == nil || m.previewLoading {
+		t.Fatalf("modal=%T previewLoading=%v, want open completed modal", m.modal, m.previewLoading)
+	}
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"authentication failed", "vercel-labs/skills", "Esc"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("error preview missing actionable text %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestInstallPreviewIgnoresLateResultAfterOpeningNewPreview(t *testing.T) {
+	m := installPreviewTestModel(t)
+	var sawCancelledContext atomic.Bool
+	m.resolvePreview = func(
+		ctx context.Context,
+		_ *remote.CheckoutCache,
+		request remote.PreviewRequest,
+	) (remote.PreviewResult, error) {
+		if ctx.Err() != nil {
+			sawCancelledContext.Store(true)
+		}
+		return remote.PreviewResult{
+			Repository:    "vercel-labs/skills",
+			RequestedName: request.Name,
+			SkillPath:     "skills/" + request.Name + "/SKILL.md",
+			SkillMD:       []byte("# " + request.Name + "\n"),
+		}, nil
+	}
+
+	updated, firstCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	firstToken := m.previewToken
+	firstModal := m.modal
+	updated, secondCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	if secondCmd == nil {
+		t.Fatal("second preview command is nil")
+	}
+	second := m.modal
+	if second == firstModal || m.previewToken == firstToken {
+		t.Fatalf("replacement preview did not invalidate first: modal=%T token=%d", m.modal, m.previewToken)
+	}
+
+	updated, _ = m.Update(firstCmd())
+	m = mustModel(t, updated)
+	if !sawCancelledContext.Load() {
+		t.Fatal("replacement preview did not cancel first resolver context")
+	}
+	if m.modal != second || !m.previewLoading {
+		t.Fatalf("late result altered new preview: modal=%T loading=%v", m.modal, m.previewLoading)
+	}
+	view := plain(m.modal.View(100, 30, m))
+	if !strings.Contains(view, "svelte-coder") || strings.Contains(view, "# svelte-coder") {
+		t.Fatalf("late result replaced new preview:\n%s", view)
+	}
+}
+
+func TestInstallPreviewEscapeCancelsIndependentlyAndIgnoresResult(t *testing.T) {
+	started := make(chan struct{})
+	m := installPreviewTestModel(t)
+	var operationCancelled atomic.Bool
+	operationCancel := func() { operationCancelled.Store(true) }
+	m.install.operationCancel = operationCancel
+	m.resolvePreview = func(
+		ctx context.Context,
+		_ *remote.CheckoutCache,
+		_ remote.PreviewRequest,
+	) (remote.PreviewResult, error) {
+		close(started)
+		<-ctx.Done()
+		return remote.PreviewResult{}, ctx.Err()
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	result := make(chan tea.Msg, 1)
+	go func() { result <- cmd() }()
+	<-started
+	token := m.previewToken
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mustModel(t, updated)
+	if m.modal != nil || m.previewLoading || m.previewCancel != nil {
+		t.Fatalf("modal=%T loading=%v cancel=%v after escape", m.modal, m.previewLoading, m.previewCancel != nil)
+	}
+	if m.previewToken == token {
+		t.Fatal("preview token was not invalidated")
+	}
+	if operationCancelled.Load() || m.install.operationCancel == nil {
+		t.Fatal("preview cancellation touched install operation cancellation")
+	}
+
+	updated, _ = m.Update(<-result)
+	m = mustModel(t, updated)
+	if m.modal != nil || m.status != "" {
+		t.Fatalf("cancelled preview result altered UI: modal=%T status=%q", m.modal, m.status)
+	}
+}
+
+func installPreviewTestModel(t *testing.T) Model {
+	t.Helper()
+	m := New(config.Default(t.TempDir(), t.TempDir()))
+	m.setView(ViewInstall)
+	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
+	m.install.Results = []installResultView{{
+		Result: remote.SearchResult{
+			Name:  "svelte-coder",
+			Owner: "vercel-labs",
+			Repo:  "skills",
+			Path:  "skills/svelte-coder",
+		},
+		ArchiveState: remote.ArchiveStateNotArchived,
+	}}
+	return m
 }
 
 func TestInstallPreviewInitializesAndReusesCheckoutCache(t *testing.T) {
@@ -1609,16 +1867,16 @@ func TestInstallPreviewInitializesAndReusesCheckoutCache(t *testing.T) {
 	if m.install.checkouts == nil {
 		t.Fatal("checkout cache is nil after preview starts")
 	}
-	firstMsg := cmd().(installPreviewMsg)
+	firstMsg := cmd().(remotePreviewMsg)
 	updated, _ = m.Update(firstMsg)
 	m = mustModel(t, updated)
 	m.modal = nil
 
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	secondMsg := cmd().(installPreviewMsg)
-	if secondMsg.path != firstMsg.path {
-		t.Fatalf("preview checkout path = %q, want reused path %q", secondMsg.path, firstMsg.path)
+	secondMsg := cmd().(remotePreviewMsg)
+	if secondMsg.result.SkillDir != firstMsg.result.SkillDir {
+		t.Fatalf("preview checkout path = %q, want reused path %q", secondMsg.result.SkillDir, firstMsg.result.SkillDir)
 	}
 }
 
@@ -1635,17 +1893,20 @@ func TestInstallPreviewMissingSourceRepository(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil")
 	}
-	msg := cmd().(installPreviewMsg)
+	msg := cmd().(remotePreviewMsg)
 	if msg.err == nil {
 		t.Fatal("preview error is nil")
 	}
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
-	if m.status != "missing source repository for no-source" {
-		t.Fatalf("status = %q", m.status)
+	if m.modal == nil {
+		t.Fatal("error modal is nil")
 	}
-	if m.modal != nil {
-		t.Fatal("modal opened for missing source")
+	view := plain(m.modal.View(100, 30, m))
+	for _, want := range []string{"missing source repository for no-source", "Check the repository", "Esc"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("error modal missing %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -1676,7 +1937,7 @@ func TestInstallPreviewMissingSkillInRepoShowsStaleRegistryModal(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	msg := cmd().(installPreviewMsg)
+	msg := cmd().(remotePreviewMsg)
 	if msg.err == nil {
 		t.Fatal("preview error is nil")
 	}
@@ -1687,12 +1948,11 @@ func TestInstallPreviewMissingSkillInRepoShowsStaleRegistryModal(t *testing.T) {
 	}
 	view := plain(m.modal.View(120, 35, m))
 	for _, want := range []string{
-		"Uh-oh...",
-		"Couldn't find the requested skill in repo.",
-		"You might want to check the repo contents.",
+		"Could not load this preview.",
+		"skill \"next-best-practices\" not found",
 		"xskills-stale-repo-",
-		"Remember that this sometimes happens with skills.sh - it's stale data.",
-		"[ OK ]",
+		"Check the repository, skill path, and your access",
+		"Esc",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("modal missing %q:\n%s", want, view)
@@ -1709,23 +1969,30 @@ func TestInstallPreviewIgnoresStaleAndNonInstallMessages(t *testing.T) {
 
 	m := New(config.Default(t.TempDir(), t.TempDir()))
 	m.setView(ViewInstall)
-	m.install.previewToken = 2
+	m.previewToken = 2
+	m.previewLoading = true
+	m.modal = &remotePreviewModal{token: 2, title: "Preview: skill", repository: "owner/repo", skill: "skill"}
 	m.status = "before"
 
-	updated, _ := m.Update(installPreviewMsg{token: 1, name: "skill", path: skillDir})
+	updated, _ := m.Update(remotePreviewMsg{token: 1, result: remote.PreviewResult{
+		RequestedName: "skill", SkillDir: skillDir, SkillPath: filepath.Join(skillDir, "SKILL.md"),
+	}})
 	m = mustModel(t, updated)
-	if m.modal != nil {
-		t.Fatal("stale preview opened modal")
+	if _, ok := m.modal.(*remotePreviewModal); !ok || !m.previewLoading {
+		t.Fatalf("stale preview altered loading modal: modal=%T loading=%v", m.modal, m.previewLoading)
 	}
 	if m.status != "before" {
 		t.Fatalf("status changed for stale preview: %q", m.status)
 	}
 
-	m.setView(ViewActive)
-	updated, _ = m.Update(installPreviewMsg{token: 2, name: "skill", path: skillDir})
+	previewModal := m.modal
+	m.view = ViewActive
+	updated, _ = m.Update(remotePreviewMsg{token: 2, result: remote.PreviewResult{
+		RequestedName: "skill", SkillDir: skillDir, SkillPath: filepath.Join(skillDir, "SKILL.md"),
+	}})
 	m = mustModel(t, updated)
-	if m.modal != nil {
-		t.Fatal("non-install preview opened modal")
+	if m.modal != previewModal || !m.previewLoading {
+		t.Fatalf("non-install preview altered modal: modal=%T loading=%v", m.modal, m.previewLoading)
 	}
 	if m.status != "before" {
 		t.Fatalf("status changed outside install view: %q", m.status)
@@ -1781,18 +2048,19 @@ func TestInstallPreviewIgnoresResultAfterInputEdit(t *testing.T) {
 			if previewCmd == nil {
 				t.Fatal("preview cmd is nil")
 			}
-			previewToken := m.install.previewToken
+			previewToken := m.previewToken
+			m.modal = nil
 
 			updated, _ = m.Update(tt.openInputKey)
 			m = mustModel(t, updated)
 			updated, _ = m.Update(tt.editKey)
 			m = mustModel(t, updated)
-			if m.install.previewToken == previewToken {
-				t.Fatalf("previewToken = %d, want increment after input edit", m.install.previewToken)
+			if m.previewToken == previewToken {
+				t.Fatalf("previewToken = %d, want increment after input edit", m.previewToken)
 			}
 			m.status = "after edit"
 
-			previewMsg := previewCmd().(installPreviewMsg)
+			previewMsg := previewCmd().(remotePreviewMsg)
 			updated, _ = m.Update(previewMsg)
 			m = mustModel(t, updated)
 			if m.status != "after edit" {
@@ -1821,10 +2089,19 @@ func TestInstallPreviewIgnoresResultAfterLeavingAndReturning(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
-	msg := cmd().(installPreviewMsg)
 
-	m.setView(ViewActive)
-	m.setView(ViewInstall)
+	token := m.previewToken
+	updated, _ = m.Update(keyRunes(keyActive))
+	m = mustModel(t, updated)
+	if m.view != ViewActive || m.modal != nil || m.previewCancel != nil || m.previewToken == token {
+		t.Fatalf("view key did not close preview: view=%s modal=%T cancel=%v token=%d", m.view, m.modal, m.previewCancel != nil, m.previewToken)
+	}
+	updated, _ = m.Update(keyRunes(keyInstall))
+	m = mustModel(t, updated)
+	msg := cmd().(remotePreviewMsg)
+	if !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("late preview error = %v, want context.Canceled", msg.err)
+	}
 	updated, _ = m.Update(msg)
 	m = mustModel(t, updated)
 	if m.modal != nil {
@@ -1849,22 +2126,79 @@ func TestInstallPreviewIgnoresResultAfterNewSearch(t *testing.T) {
 	}}
 	m.install.testCloneURL = repoDir
 
-	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = mustModel(t, updated)
-
 	m.install.InputMode = installInputQuery
 	m.install.Query = "react"
 	updated, searchCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
+	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mustModel(t, updated)
+	previewToken := m.previewToken
 	searchMsg := searchCmd().(installSearchResultMsg)
 	updated, _ = m.Update(searchMsg)
 	m = mustModel(t, updated)
+	if m.modal != nil || m.previewToken == previewToken {
+		t.Fatalf("search result did not invalidate old-row preview: modal=%T token=%d", m.modal, m.previewToken)
+	}
 
-	previewMsg := previewCmd().(installPreviewMsg)
+	previewMsg := previewCmd().(remotePreviewMsg)
 	updated, _ = m.Update(previewMsg)
 	m = mustModel(t, updated)
 	if m.modal != nil {
 		t.Fatal("preview modal opened after new search")
+	}
+}
+
+func TestInstallPreviewIgnoresLateCompletionAfterMatchingSearchResult(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "error", err: errors.New("late preview failure")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := installPreviewTestModel(t)
+			m.install.searchToken = 7
+			m.resolvePreview = func(
+				context.Context,
+				*remote.CheckoutCache,
+				remote.PreviewRequest,
+			) (remote.PreviewResult, error) {
+				return remote.PreviewResult{
+					Repository:    "vercel-labs/skills",
+					RequestedName: "svelte-coder",
+					SkillPath:     "skills/svelte-coder/SKILL.md",
+					SkillMD:       []byte("# stale preview\n"),
+				}, test.err
+			}
+
+			updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = mustModel(t, updated)
+			previewToken := m.previewToken
+			updated, _ = m.Update(installSearchResultMsg{
+				token: 7,
+				query: "react",
+				results: []remote.SearchResult{{
+					Name:  "react-coder",
+					Owner: "vercel-labs",
+					Repo:  "skills",
+					Path:  "skills/react-coder",
+				}},
+			})
+			m = mustModel(t, updated)
+			if m.modal != nil || m.previewToken == previewToken {
+				t.Fatalf("matching search result did not close preview: modal=%T token=%d", m.modal, m.previewToken)
+			}
+
+			updated, _ = m.Update(previewCmd())
+			m = mustModel(t, updated)
+			if m.modal != nil || strings.Contains(m.status, "late preview") {
+				t.Fatalf("late %s altered UI: modal=%T status=%q", test.name, m.modal, m.status)
+			}
+			if len(m.install.Results) != 1 || m.install.Results[0].Result.Name != "react-coder" {
+				t.Fatalf("results = %#v, want replacement search row", m.install.Results)
+			}
+		})
 	}
 }
 
@@ -1892,13 +2226,20 @@ func TestInstallPreviewIgnoresResultAfterSelectionChange(t *testing.T) {
 	updated, previewCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustModel(t, updated)
 
+	token := m.previewToken
 	updated, _ = m.Update(keyRunes("j"))
 	m = mustModel(t, updated)
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1", m.cursor)
 	}
+	if m.modal != nil || m.previewCancel != nil || m.previewToken == token {
+		t.Fatalf("cursor key did not close preview: modal=%T cancel=%v token=%d", m.modal, m.previewCancel != nil, m.previewToken)
+	}
 
-	previewMsg := previewCmd().(installPreviewMsg)
+	previewMsg := previewCmd().(remotePreviewMsg)
+	if !errors.Is(previewMsg.err, context.Canceled) {
+		t.Fatalf("late preview error = %v, want context.Canceled", previewMsg.err)
+	}
 	updated, _ = m.Update(previewMsg)
 	m = mustModel(t, updated)
 	if m.modal != nil {
@@ -3073,14 +3414,9 @@ func TestInstallArchiveOnlyNameConflictReplaceArchive(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3150,14 +3486,9 @@ func TestInstallArchiveOnlyNameConflictRenameExisting(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3212,14 +3543,9 @@ func TestInstallArchiveOnlyNameConflictRenameExistingRollsBackOnApplyFailure(t *
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	originalApplyArchive := installApplyArchive
 	installApplyArchive = func(remote.AddRequest) (remote.AddResult, error) {
@@ -3275,9 +3601,9 @@ func TestInstallArchiveOnlyNameConflictRenameIncoming(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3407,9 +3733,9 @@ func TestInstallAndUseNameConflictReplaceThenContinuesToDestinations(t *testing.
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3462,9 +3788,9 @@ func TestInstallAndUseBatchContinuesAfterMiddleNameConflict(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/react-coder",
+	)
 	m := New(cfg)
 	m.setView(ViewInstall)
 	m.width = 120
@@ -3574,9 +3900,9 @@ func TestInstallAndUseBatchRenameIncomingLinksResolvedArchiveName(t *testing.T) 
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "react-coder", "Existing React help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/react-coder",
+	)
 	m := New(cfg)
 	m.setView(ViewInstall)
 	m.install.checkouts = remote.NewCheckoutCache(filepath.Join(t.TempDir(), "cache"))
@@ -3779,7 +4105,12 @@ func TestInstallAndUseBatchMissingSkillContinuesWithTail(t *testing.T) {
 func TestInstallAndUseUpdateAcceptIncomingThenContinuesToDestinations(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -3837,7 +4168,12 @@ func TestInstallAndUseUpdateAcceptIncomingThenContinuesToDestinations(t *testing
 func TestInstallAndUseUpdateKeepArchiveThenContinuesToDestinations(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -3899,9 +4235,9 @@ func TestInstallAndUseNameConflictEscClearsPendingUse(t *testing.T) {
 
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "someone-else"}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	m := New(cfg)
 	m.setView(ViewInstall)
@@ -3947,7 +4283,12 @@ func TestInstallAndUseNameConflictEscClearsPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateQClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4006,7 +4347,12 @@ func TestInstallAndUseUpdateQClearsPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateStaleDiffClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4065,7 +4411,12 @@ func TestInstallAndUseUpdateStaleDiffClearsPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateRepeatedRequestKeepsNewestPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4120,7 +4471,12 @@ func TestInstallAndUseUpdateRepeatedRequestKeepsNewestPendingUse(t *testing.T) {
 func TestInstallAndUseUpdateDiffErrorClearsPendingUse(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4285,14 +4641,9 @@ func TestInstallArchiveOnlyRechecksStaleRowNameConflictWithoutReplacingArchive(t
 	}
 
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	msg := cmd().(installArchiveMsg)
 	updated, _ = m.Update(msg)
@@ -4346,14 +4697,9 @@ func TestInstallArchiveOnlyAsyncConflictRefreshesStaleRowState(t *testing.T) {
 	}
 
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Existing help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "someone-else",
-		Repo:       "skills",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "someone-else", "skills", "skills/svelte-coder",
+	)
 
 	msg := cmd().(installArchiveMsg)
 	updated, _ = m.Update(msg)
@@ -4370,14 +4716,9 @@ func TestInstallArchiveOnlyAsyncConflictRefreshesStaleRowState(t *testing.T) {
 func TestInstallArchiveOnlyAsyncConflictUpdatesOnlyMatchingDuplicateSource(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archivePath := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Archived help.")
-	if err := remote.WriteSourceMetadata(archivePath, remote.SourceMetadata{
-		SourceType: remote.SourceTypeGitHub,
-		Owner:      "owner-two",
-		Repo:       "skills-two",
-		SkillPath:  "skills/svelte-coder",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictingSourceMetadata(
+		t, archivePath, "owner-two", "skills-two", "skills/svelte-coder",
+	)
 
 	first := remote.SearchResult{
 		Name:  "svelte-coder",
@@ -4809,7 +5150,12 @@ func TestInstallUseBatchUpdateDiffMissingSkillContinuesWithTail(t *testing.T) {
 func TestInstallSameSourceUpdateAcceptIncomingReplacesArchive(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)
@@ -4861,7 +5207,12 @@ func TestInstallSameSourceUpdateAcceptIncomingReplacesArchive(t *testing.T) {
 func TestInstallSameSourceUpdateKeepArchiveLeavesArchive(t *testing.T) {
 	cfg := config.Default(t.TempDir(), t.TempDir())
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "svelte-coder", "Old.")
-	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{SourceType: remote.SourceTypeGitHub, Owner: "vercel-labs"}); err != nil {
+	if err := remote.WriteSourceMetadata(archived, remote.SourceMetadata{
+		SourceType: remote.SourceTypeGitHub,
+		Owner:      "vercel-labs",
+		Repo:       "skills",
+		SkillPath:  "skills/svelte-coder",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	repoDir := makeTUITestGitRepo(t)

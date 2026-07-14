@@ -665,7 +665,7 @@ func TestActiveMigrateConflictResolutionReloadsActiveList(t *testing.T) {
 		t.Fatalf("active groups = %d, want 1", len(m.active))
 	}
 	group := m.active[0]
-	if group.Name != "alpha-skill" || len(group.Members) != 1 {
+	if group.Identity != "alpha-skill" || len(group.Members) != 1 {
 		t.Fatalf("active group = %#v", group)
 	}
 	member := group.Members[0]
@@ -1336,12 +1336,12 @@ func TestRepoDeleteSkipsArchiveDeletionWhenUnlinkFails(t *testing.T) {
 	archived := makeSkill(t, cfg.ArchiveSkillsRoot(), "zen-of-go", "Go style.")
 	m := newLoadedModel(t, cfg)
 	m.active = []ActiveGroup{{
-		Name: "zen-of-go",
+		Identity: "zen-of-go",
 		Members: []actions.ActiveSkill{{
-			Name:   "zen-of-go",
-			Path:   filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go"),
-			Root:   roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents},
-			Status: actions.StatusManaged,
+			Identity: "zen-of-go",
+			Path:     filepath.Join(cfg.MustActiveRoot("project", "agents"), "zen-of-go"),
+			Root:     roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents},
+			Status:   actions.StatusManaged,
 		}},
 	}}
 
@@ -1374,9 +1374,9 @@ func TestRepoDeleteReconcilesSuccessfulProjectUnlinkWhenLaterUnlinkFails(t *test
 		t.Fatal(err)
 	}
 	m := newLoadedModel(t, cfg)
-	m.active = []ActiveGroup{{Name: "zen-of-go", Members: []actions.ActiveSkill{
-		{Name: "zen-of-go", Path: projectPath, Root: roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents}, Status: actions.StatusManaged},
-		{Name: "zen-of-go", Path: filepath.Join(cfg.GlobalAgentsRoot, "missing"), Root: roots.ActiveRoot{Scope: config.ScopeGlobal, Target: config.TargetAgents}, Status: actions.StatusManaged},
+	m.active = []ActiveGroup{{Identity: "zen-of-go", Members: []actions.ActiveSkill{
+		{Identity: "zen-of-go", Path: projectPath, Root: roots.ActiveRoot{Scope: config.ScopeProject, Target: config.TargetAgents}, Status: actions.StatusManaged},
+		{Identity: "zen-of-go", Path: filepath.Join(cfg.GlobalAgentsRoot, "missing"), Root: roots.ActiveRoot{Scope: config.ScopeGlobal, Target: config.TargetAgents}, Status: actions.StatusManaged},
 	}}}
 
 	m.applyRepoDelete("zen-of-go")

@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -113,11 +112,11 @@ func chooseUnmanagedUnlinkAction(cmd *cobra.Command, opts *options, skill action
 	if opts.noInput {
 		return false, false, fmt.Errorf(
 			"unmanaged active skill %q requires a choice; archive then unlink with -y or remove without archiving with --delete-unmanaged -y",
-			skill.Name,
+			skill.Identity,
 		)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%q is an unmanaged active skill at %s.\n", skill.Name, skill.Path)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%q is an unmanaged active skill at %s.\n", skill.Identity, skill.Path)
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Choose unlink action:")
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  1. archive in repo, then unlink")
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  2. remove active copy without archiving")
@@ -144,11 +143,16 @@ func matchingActiveSkills(cfg config.Config, name string, filter actions.ScanFil
 	}
 	var matches []actions.ActiveSkill
 	for _, skill := range skills {
-		if skill.Name == name || filepath.Base(skill.Path) == name {
+		if matchesSkill(name, skill) {
 			matches = append(matches, skill)
 		}
 	}
 	return matches, nil
+}
+
+func matchesSkill(selector string, skill actions.ActiveSkill) bool {
+	return selector == skill.Identity ||
+		(skill.DeclaredName != "" && selector == skill.DeclaredName)
 }
 
 func destinationCommands(action, name string, candidates []roots.ActiveRoot) []string {

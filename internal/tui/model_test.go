@@ -221,7 +221,7 @@ func TestRefreshReturnsCommand(t *testing.T) {
 	if m.status != "refreshed" {
 		t.Fatalf("status = %q, want refreshed after result", m.status)
 	}
-	if !slices.ContainsFunc(m.repo, func(skill repo.Skill) bool { return skill.Name == "new-skill" }) {
+	if !slices.ContainsFunc(m.repo, func(skill repo.Skill) bool { return skill.Identity == "new-skill" }) {
 		t.Fatalf("repo = %#v, want refreshed snapshot to contain new-skill", m.repo)
 	}
 }
@@ -240,7 +240,7 @@ func TestStaleReloadResultIgnored(t *testing.T) {
 
 	updated, _ := m.Update(reloadResultMsg{
 		token: firstToken,
-		repo:  []repo.Skill{{Name: "stale"}},
+		repo:  []repo.Skill{{Identity: "stale"}},
 	})
 	m = mustModel(t, updated)
 	if len(m.repo) != 0 {
@@ -252,10 +252,10 @@ func TestStaleReloadResultIgnored(t *testing.T) {
 
 	updated, _ = m.Update(reloadResultMsg{
 		token: secondToken,
-		repo:  []repo.Skill{{Name: "current"}},
+		repo:  []repo.Skill{{Identity: "current"}},
 	})
 	m = mustModel(t, updated)
-	if len(m.repo) != 1 || m.repo[0].Name != "current" {
+	if len(m.repo) != 1 || m.repo[0].Identity != "current" {
 		t.Fatalf("repo = %#v, want current snapshot applied", m.repo)
 	}
 	if m.reloadInFlight {
@@ -308,7 +308,7 @@ func TestNewReturnsBeforeInitialDataLoadCompletes(t *testing.T) {
 	loader := func(context.Context, config.Config) ([]ActiveGroup, []repo.Skill, []doctor.Issue, map[string][]string, error) {
 		close(started)
 		<-release
-		return nil, []repo.Skill{{Name: "loaded"}}, nil, map[string][]string{}, nil
+		return nil, []repo.Skill{{Identity: "loaded"}}, nil, map[string][]string{}, nil
 	}
 
 	m := New(config.Default(t.TempDir(), t.TempDir()), Options{loadData: loader})
@@ -327,7 +327,7 @@ func TestNewReturnsBeforeInitialDataLoadCompletes(t *testing.T) {
 	close(release)
 	updated, _ := m.Update(<-results)
 	m = mustModel(t, updated)
-	if m.reloadInFlight || len(m.repo) != 1 || m.repo[0].Name != "loaded" {
+	if m.reloadInFlight || len(m.repo) != 1 || m.repo[0].Identity != "loaded" {
 		t.Fatalf("repo after startup = %#v", m.repo)
 	}
 }
@@ -452,7 +452,7 @@ func TestFooterShortcutsStayVisibleWithStatusAndModal(t *testing.T) {
 	if !strings.Contains(view, "installed opentui-react") {
 		t.Fatalf("view missing status:\n%s", view)
 	}
-	if !strings.Contains(view, "↵ details  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
+	if !strings.Contains(view, "↵ preview  / filter  p preview  m migrate  u unlink  c clear  ^R refresh") {
 		t.Fatalf("view missing footer shortcuts:\n%s", view)
 	}
 }
@@ -499,8 +499,8 @@ func TestActiveViewSortsSkillsAlphabeticallyByName(t *testing.T) {
 	if len(m.active) < 2 {
 		t.Fatalf("active groups = %#v, want at least 2", m.active)
 	}
-	if m.active[0].Name != "alpha-skill" || m.active[1].Name != "zeta-skill" {
-		t.Fatalf("active order = %#v, want alphabetical by name", []string{m.active[0].Name, m.active[1].Name})
+	if m.active[0].Identity != "alpha-skill" || m.active[1].Identity != "zeta-skill" {
+		t.Fatalf("active order = %#v, want alphabetical by identity", []string{m.active[0].Identity, m.active[1].Identity})
 	}
 }
 

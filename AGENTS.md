@@ -35,6 +35,12 @@ Tests are located in the `tests/` directory and use `pytest`.
 
 - Run all tests: `uv run pytest`
 
+For Go changes, run `go test ./...`, relevant `go test -race` packages, and `go vet ./...`
+before pushing. Cross-compile affected test packages for Windows when the host is not Windows.
+Because Linux cannot execute native macOS or Windows tests, every pushed Go change must also wait
+for both `Go macos-latest` and `Go windows-latest` CI jobs. Do not mark the work ready or merge it
+until both jobs pass; fix failures and re-check the replacement run.
+
 ## Code Style
 
 Python code style is enforced by `ruff`.

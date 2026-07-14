@@ -48,6 +48,35 @@ func TestRestoreAdditiveLeavesExtrasAndPrintsGroupedPlan(t *testing.T) {
 	}
 }
 
+func TestRestoreReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	writeRestoreCLISkill(t, cfg, "other")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
+	active := filepath.Join(cfg.MustActiveRoot(config.ScopeProject, config.TargetCodex), "other")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"-y", "restore",
+			"--at", "project:codex",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatalf("restored skill %q: %v", active, err)
+	}
+	assertSamePath(t, resolved, archive)
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
+}
+
 func TestRestoreFullPrintsPlanAndRequiresConfirmation(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	cfg := config.Default(project, home)

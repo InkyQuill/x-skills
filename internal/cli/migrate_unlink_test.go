@@ -26,6 +26,34 @@ func TestMigrateWithYesFlag(t *testing.T) {
 	assertSamePath(t, resolved, archived)
 }
 
+func TestMigrateReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"-y", "migrate", "other",
+			"--at", "project:codex",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatalf("migrated skill %q: %v", active, err)
+	}
+	assertSamePath(t, resolved, archive)
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
+}
+
 func TestMigrateWithoutYesPromptsAndCancelsOnEmptyAnswer(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
@@ -60,6 +88,52 @@ func TestMigrateFailsNoInputWhenActiveSkillNameIsAmbiguous(t *testing.T) {
 	if !strings.Contains(err.Error(), "x-skills migrate svelte-coder --at project:codex") ||
 		!strings.Contains(err.Error(), "x-skills migrate svelte-coder --at global:agents") {
 		t.Fatalf("error missing one-shot hints: %v", err)
+	}
+}
+
+func TestMigrateResolvesUniqueDeclaredNameToFilesystemIdentity(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	root := filepath.Join(project, ".codex", "skills")
+	active := makeSkill(t, root, "composition-patterns", "Compose.")
+	content := "---\nname: vercel-composition-patterns\ndescription: Compose.\n---\n"
+	if err := os.WriteFile(filepath.Join(active, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := Execute([]string{
+		"--home", home,
+		"--project-root", project,
+		"-y", "migrate", "vercel-composition-patterns",
+		"--at", "project:codex",
+	}, strings.NewReader(""), &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := filepath.Join(home, ".x-skills", "skills", "composition-patterns")
+	resolved, err := filepath.EvalSymlinks(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSamePath(t, resolved, archived)
+}
+
+func TestMigrateDeclaredNameSelectorReportsAmbiguousIdentities(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	first := makeSkill(t, filepath.Join(project, ".codex", "skills"), "composition-patterns", "Project.")
+	second := makeSkill(t, filepath.Join(home, ".agents", "skills"), "composition-patterns-copy", "Global.")
+	for _, path := range []string{first, second} {
+		content := "---\nname: vercel-composition-patterns\ndescription: Compose.\n---\n"
+		if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := Execute([]string{"--home", home, "--project-root", project, "--no-input", "migrate", "vercel-composition-patterns"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), `multiple active skills named "vercel-composition-patterns"`) {
+		t.Fatalf("error = %v, want declared-name ambiguity", err)
 	}
 }
 
@@ -127,6 +201,36 @@ func TestUnlinkUnmanagedDeleteWithYes(t *testing.T) {
 	if !strings.Contains(out.String(), "removed unmanaged") {
 		t.Fatalf("unlink output:\n%s", out.String())
 	}
+}
+
+func TestUnlinkReconcilesExistingDeclaredNameMismatchByIdentity(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	cfg := setupActiveIdentityMismatch(t, home, project)
+	active := makeSkill(t, cfg.MustActiveRoot("project", "codex"), "other", "Other.")
+	archive := filepath.Join(cfg.ArchiveSkillsRoot(), "other")
+
+	err := Execute(
+		[]string{
+			"--home", home,
+			"--project-root", project,
+			"-y", "unlink", "other",
+			"--at", "project:codex",
+			"--delete-unmanaged",
+		},
+		strings.NewReader(""),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("unlinked skill still exists or unexpected error: %v", err)
+	}
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("deleted unmanaged skill was archived or unexpected error: %v", err)
+	}
+	assertLocalManifestHasIdentity(t, cfg, "composition-patterns")
 }
 
 func TestUnlinkUnmanagedPromptsForArchiveOrDelete(t *testing.T) {

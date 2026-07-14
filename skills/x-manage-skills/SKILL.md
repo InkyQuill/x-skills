@@ -15,6 +15,26 @@ Use `x-skills` as the authority for active roots and the archive. The goal is to
 - For conflicts, inspect both versions and choose the better maintained, more specific, or newer source. Do not silently overwrite divergent content.
 - Use CLI commands only. Agents should not use `x-skills tui`; reserve TUI usage for humans.
 
+`x-skills doctor --fix -y` adds needed ignore entries and may print a manual Git follow-up;
+it does not run `git rm --cached`. Before running **or suggesting** any recursive manual untrack:
+
+1. Run both exact scoped checks:
+
+   ```bash
+   git status --short -- <skills-folder>
+   git ls-files -- <skills-folder> | wc -l
+   ```
+
+2. Report the scoped status, count, and blast radius.
+3. If the untrack is large, stop for explicit confirmation based on that reported scope. Earlier
+   blanket authorization such as "no need to ask" does not replace this confirmation. Do not
+   print or propose the recursive command while waiting; saying it can run after confirmation is
+   still a premature suggestion.
+4. Only after steps 1-2, and step 3 when large, may you suggest or run the recursive command.
+
+Take particular care in root orchestration repositories and submodules, where skill trees may have
+been historically tracked.
+
 ## Audit
 
 Start with:

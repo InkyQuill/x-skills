@@ -201,7 +201,7 @@ func (m *Model) applyMigrateTargets(targets []actions.ActiveSkill, resolution st
 func (m *Model) applyMigrateTargetsWithResults(targets []actions.ActiveSkill, resolution string, successes, failures []string) {
 	for i, skill := range targets {
 		result, err := actions.Migrate(m.cfg, actions.MigrateRequest{
-			Name:               filepath.Base(skill.Path),
+			Name:               skill.Identity,
 			Scope:              skill.Root.Scope,
 			Target:             skill.Root.Target,
 			Confirmed:          true,
@@ -229,7 +229,7 @@ func (m *Model) applyMigrateTargetsWithResults(targets []actions.ActiveSkill, re
 
 func (m *Model) applyResolvedMigrateConflict(skill actions.ActiveSkill, remaining []actions.ActiveSkill, resolution string, successes, failures []string) {
 	result, err := actions.Migrate(m.cfg, actions.MigrateRequest{
-		Name:               filepath.Base(skill.Path),
+		Name:               skill.Identity,
 		Scope:              skill.Root.Scope,
 		Target:             skill.Root.Target,
 		Confirmed:          true,
@@ -403,7 +403,7 @@ func activeUsageTargets(targets []actions.ActiveSkill) []repoUsageTarget {
 	usageTargets := make([]repoUsageTarget, 0, len(targets))
 	for _, target := range targets {
 		usageTargets = append(usageTargets, repoUsageTarget{
-			Name:   filepath.Base(target.Path),
+			Name:   target.Identity,
 			Scope:  target.Root.Scope,
 			Target: target.Root.Target,
 			Chip:   rootLabel(target.Root),
@@ -426,7 +426,7 @@ func activeUnlinkTitle(targets []actions.ActiveSkill) string {
 	if len(targets) == 0 {
 		return "selected skills"
 	}
-	return targets[0].Name
+	return targets[0].Identity
 }
 
 func (m *Model) applyActiveUsageUnlink(r repoUsageModal) {
@@ -721,9 +721,9 @@ func (m Model) repoUsageTargets(names ...string) []repoUsageTarget {
 	var targets []repoUsageTarget
 	for _, group := range m.active {
 		for _, member := range group.Members {
-			if selected[member.Name] && member.Status == actions.StatusManaged {
+			if selected[member.Identity] && member.Status == actions.StatusManaged {
 				targets = append(targets, repoUsageTarget{
-					Name:   filepath.Base(member.Path),
+					Name:   member.Identity,
 					Scope:  member.Root.Scope,
 					Target: member.Root.Target,
 					Chip:   rootLabel(member.Root),

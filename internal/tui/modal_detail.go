@@ -1,14 +1,9 @@
 package tui
 
 import (
-	"fmt"
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/InkyQuill/x-skills/internal/doctor"
-	"github.com/InkyQuill/x-skills/internal/repo"
 	tuiui "github.com/InkyQuill/x-skills/internal/tui/ui"
 )
 
@@ -20,37 +15,6 @@ type detailModal struct {
 
 func newDetailModal(title string, lines []string) modal {
 	return detailModal{title: title, lines: lines}
-}
-
-func activeDetailModal(group ActiveGroup, symbols symbols) modal {
-	lines := []string{
-		"Canonical name: " + group.Name,
-		"Status: " + group.Status,
-		"Aliases: " + strings.Join(group.Aliases, ", "),
-		"",
-		"Active members",
-	}
-	for _, member := range group.Members {
-		lines = append(lines, fmt.Sprintf("  %s  %s", renderRootChip(symbols, rootLabel(member.Root), lipgloss.NoColor{}), member.Path))
-	}
-	lines = append(lines, "", "Debug", "  fingerprint: "+group.Fingerprint)
-	return newDetailModal("Detail: "+group.Name+" (Active)", lines)
-}
-
-func repoDetailModal(skill repo.Skill, usages []string, symbols symbols) modal {
-	usageText := "none"
-	if len(usages) > 0 {
-		usageText = renderRootChips(symbols, usages, lipgloss.NoColor{})
-	}
-	lines := []string{
-		"Archive path",
-		"  " + skill.Path,
-		"Description",
-		"  " + skill.Description,
-		"Usages",
-		"  " + usageText,
-	}
-	return newDetailModal("Detail: "+skill.Name+" (Repo)", lines)
 }
 
 func doctorDetailModal(issue doctor.Issue) modal {

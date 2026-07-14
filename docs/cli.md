@@ -18,6 +18,8 @@ The Go CLI is cwd-based. Unless `--project-root` is supplied, project Skills Fol
 | `restore [--full] --at ...` | Applies the effective manifest to explicit project destinations. Default restore preserves extras; full restore exactly reconciles selected folders only. |
 | `sync` | Aggregates project occurrences, then interactively selects variants and destinations. `--all` or repeatable `--skill` provides non-interactive skill selection; `--at` supplies destinations. |
 | `doctor [--fix]` | Diagnoses roots, broken links, built-ins, manifests, compatibility, and Git hygiene; safe repair does not stage or untrack files. |
+| `validate PATH... [--at LOCATION...] [--json]` | Validates skill documents and strict source metadata, optionally against destination consumers. |
+| `preview OWNER/REPO SKILL [--lines N] [--json]` | Resolves a GitHub skill and prints raw `SKILL.md` content. |
 | `tui` | Opens the guided manager; `--ascii` replaces Unicode symbols and `--no-input` refuses to open it. |
 
 Archive rename is currently a Repo-page TUI action, not a Cobra command. It atomically renames the archive, rewrites managed links and both manifests, and rolls back the logical change on failure.
@@ -34,8 +36,40 @@ Default restore adds or repairs desired managed links but preserves extra manage
 
 Doctor's automatic fixes repair safe link/root problems, archive missing built-in skills, and append literal project ignore rules. Built-ins are linked only to explicitly selected global folders; project destinations are rejected. Git index commands remain suggestions. Mutating logical operations revalidate and use staging/rollback where atomicity is required; independent multi-name batches report partial success.
 
-## JSON support
+## Identity, JSON, and idempotent links
 
-`--json` is currently supported by the read-only `list-roots` and `search` commands. `list-roots` exposes canonical locations, labels, paths, consumers, and built-in/enabled flags. `search` returns the query, optional owner, results, and a reproducible `add_command`. Other commands retain human output.
+Filesystem identity comes from the active entry or archive directory; the declared frontmatter name is display and filter metadata only. It never replaces identity for filesystem behavior. Human `list` and `repo` output annotates a mismatch as `identity (declared: declared-name)` and omits the annotation when the values match.
+
+`list --json` and `repo --json` return typed arrays, including `[]` when empty. Active records contain `identity`, an optional differing `declared_name`, `description`, `status`, active `path`, root `scope`/`target`/`label`/`path`, and an optional broken `reason`. Repo records contain `identity`, an optional differing `declared_name`, `description`, archive `path`, and available `source` metadata. `list-roots --json` exposes canonical locations, labels, paths, consumers, and built-in/enabled flags. `search --json` returns the query, optional owner, results, and a reproducible `add_command`.
+
+`link` is idempotent only when an existing destination symlink resolves to the intended archive path: that item succeeds without mutation and reports `already linked` in human output or the stable `already_linked` status in JSON. A real file, directory, broken link, or link to another target remains untouched and returns a destination-exists error.
+
+## Validation
+
+```text
+x-skills validate PATH... [--at LOCATION...] [--json]
+```
+
+A `SKILL.md` input validates its parent; a directory containing `SKILL.md` validates one skill; any other directory is a collection whose immediate child skill directories are validated without deeper recursion. Missing paths, unrelated files, unreadable inputs, and empty collections are errors. Repeated and overlapping inputs are deduplicated by canonical path.
+
+Portable `SKILL.md` checks accept LF or CRLF frontmatter delimiters, require YAML mapping frontmatter with non-empty `name` and `description` strings, and require a non-empty body. Names must be lowercase hyphen-case, at most 64 characters, with no leading, trailing, or consecutive hyphens. Descriptions are limited to 1024 characters and cannot contain angle brackets. Unknown frontmatter keys are allowed. A directory identity/declared name mismatch is a warning.
+
+If `.x-skills.json` exists, decoding is strict: unknown fields, trailing JSON values, and invalid schemas, source identities, or compatibility declarations are errors in validation and ordinary metadata reads. Schema-v1 legacy metadata remains accepted. When schema-v2 `compatibility` is present, it must be nested and contain exactly one of `{"agnostic": true}` or a non-empty `{"agents": [...]}`. Agent IDs must be unique and match `^[a-z][a-z0-9-]*$`. Without `--at`, valid IDs are portable; repeated `--at` selectors validate them against the union of configured consumers for the selected roots. Complete remote source provenance is required only for schema v2 when any source identity is present.
+
+This structured `.x-skills.json.compatibility` contract is distinct from a `compatibility` field in `SKILL.md` frontmatter. The latter is free-text vendor metadata and is not interpreted as an x-skills Compatibility Profile.
+
+Validation input and skill diagnostics are aggregated before the report is written. Human output groups them by skill and ends with counts; JSON returns `valid`, `summary` (`skills`, `errors`, and `warnings`), and typed `diagnostics` (`path`, `level`, `code`, `message`, and optional field/related path). Warnings alone exit zero; validation errors exit nonzero after all validatable inputs have been checked. Configuration loading and `--at` selector resolution happen before validation; failures return nonzero without a validation report.
+
+## Remote preview
+
+```text
+x-skills preview OWNER/REPO SKILL [--lines N] [--json]
+```
+
+The default output is the first 50 raw lines of the resolved `SKILL.md`, including frontmatter, with no heading, Markdown rendering, ANSI decoration, or synthetic truncation marker. `--lines N` requires a positive value. `--json` returns the repository, requested skill, resolved repository-relative skill path, commit, exact returned content, returned line count, requested limit, and `truncated`. Resolution errors produce no partial successful document.
+
+## Other JSON support
+
+Mutation commands retain their existing human or per-item JSON behavior; use each command's `--help` for supported output flags.
 
 See also the [TUI guide](tui.md), [remote skills guide](remote-skills.md), and [domain vocabulary](../CONTEXT.md).

@@ -68,6 +68,8 @@ func TestValidateErrorsPrintCompleteHumanReportBeforeFailure(t *testing.T) {
 	if err == nil || err.Error() != "validation failed" {
 		t.Fatalf("err = %v, want validation failed", err)
 	}
+	report := validation.ValidatePaths([]string{skill}, validation.Options{})
+	heading := report.Diagnostics[0].Path + "\n"
 	output := out.String()
 	for _, code := range []string{
 		validation.CodeNameInvalid,
@@ -77,7 +79,7 @@ func TestValidateErrorsPrintCompleteHumanReportBeforeFailure(t *testing.T) {
 			t.Errorf("stdout missing %s:\n%s", code, output)
 		}
 	}
-	if count := strings.Count(output, skill+"\n"); count != 1 {
+	if count := strings.Count(output, heading); count != 1 {
 		t.Errorf("path heading count = %d, want 1:\n%s", count, output)
 	}
 	if !strings.HasSuffix(output, "1 skills, 2 errors, 0 warnings\n") {

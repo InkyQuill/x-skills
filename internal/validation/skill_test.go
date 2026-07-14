@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/InkyQuill/x-skills/internal/pathidentity"
 )
 
 func TestValidatePathsPortableSkillDocument(t *testing.T) {
@@ -146,9 +148,7 @@ func TestValidatePathsPortableSkillDocument(t *testing.T) {
 				return
 			}
 			diagnostic := assertDiagnostic(t, report, test.wantLevel, test.wantCode, "")
-			if diagnostic.Path != skill {
-				t.Fatalf("diagnostic path = %q, want skill directory %q", diagnostic.Path, skill)
-			}
+			assertEquivalentPath(t, diagnostic.Path, skill)
 			if test.wantLevel == LevelError && report.Valid {
 				t.Fatal("Valid = true, want false")
 			}
@@ -156,6 +156,17 @@ func TestValidatePathsPortableSkillDocument(t *testing.T) {
 				t.Fatal("Valid = false for warning-only report")
 			}
 		})
+	}
+}
+
+func assertEquivalentPath(t *testing.T, got, want string) {
+	t.Helper()
+	equivalent, err := pathidentity.EquivalentE(got, want)
+	if err != nil {
+		t.Fatalf("compare diagnostic path %q with skill directory %q: %v", got, want, err)
+	}
+	if !equivalent {
+		t.Fatalf("diagnostic path = %q, want equivalent skill directory %q", got, want)
 	}
 }
 

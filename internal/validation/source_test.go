@@ -158,9 +158,7 @@ func TestValidatePathsTranslatesMetadataErrors(t *testing.T) {
 			writeFile(t, filepath.Join(skill, ".x-skills.json"), test.metadata)
 			report := ValidatePaths([]string{skill}, Options{})
 			diagnostic := assertDiagnostic(t, report, LevelError, test.wantCode, test.wantField)
-			if diagnostic.Path != skill {
-				t.Fatalf("diagnostic path = %q, want skill directory %q", diagnostic.Path, skill)
-			}
+			assertEquivalentPath(t, diagnostic.Path, skill)
 		})
 	}
 }

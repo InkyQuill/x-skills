@@ -15,6 +15,9 @@ func TestResolvePreviewReturnsOriginalDocumentAndIdentity(t *testing.T) {
 	writePreviewSkill(t, repo, "skills/exact-name", content)
 	gitCommit(t, repo, "initial")
 	commit := gitOutput(t, repo, "rev-parse", "HEAD")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "true")
 	cacheRoot := filepath.Join(t.TempDir(), "cache")
 	cache := NewCheckoutCache(cacheRoot)
 	source := GitSource{

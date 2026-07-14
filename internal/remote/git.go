@@ -140,7 +140,7 @@ func (c *CheckoutCache) checkout(ctx context.Context, source GitSource) (Checkou
 	if err != nil {
 		return Checkout{}, fmt.Errorf("create checkout dir: %w", err)
 	}
-	args := []string{"clone", "--depth", "1"}
+	args := []string{"-c", "core.autocrlf=false", "clone", "--depth", "1"}
 	if source.Ref != "" {
 		args = append(args, "--branch", source.Ref)
 	}
